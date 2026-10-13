@@ -1,0 +1,992 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wiretrace — UI mockups</title>
+<style>
+  :root {
+    --bg: #ececef;
+    --win: #ffffff;
+    --side: #f5f5f7;
+    --line: #e2e2e6;
+    --line-strong: #d1d1d6;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --faint: #a1a1a6;
+    --blue: #0a66d8;
+    --blue-soft: #e6f0fd;
+    --red: #d70015;
+    --red-soft: #fde8ea;
+    --orange: #c45a00;
+    --orange-soft: #fff1e0;
+    --green: #1a7f37;
+    --green-soft: #e3f5e8;
+    --purple: #7b2fbf;
+    --purple-soft: #f3e8fd;
+    --yellow-soft: #fff8d6;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 40px; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .page-intro { color: var(--muted); margin: 0 0 32px; max-width: 900px; }
+  .screen { margin: 0 0 56px; }
+  .screen > h2 { font-size: 16px; font-weight: 600; margin: 0 0 4px; }
+  .screen > p { color: var(--muted); margin: 0 0 14px; max-width: 1000px; }
+
+  /* ---------- window chrome ---------- */
+  .window {
+    background: var(--win); border-radius: 12px; overflow: hidden;
+    border: 1px solid #c8c8cc;
+    box-shadow: 0 20px 50px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.08);
+  }
+  .titlebar {
+    height: 52px; display: flex; align-items: center; gap: 12px; padding: 0 14px;
+    background: #f6f6f8; border-bottom: 1px solid var(--line);
+  }
+  .lights { display: flex; gap: 8px; margin-right: 6px; }
+  .lights span { width: 12px; height: 12px; border-radius: 50%; display: block; }
+  .lights span:nth-child(1) { background: #ff5f57; }
+  .lights span:nth-child(2) { background: #febc2e; }
+  .lights span:nth-child(3) { background: #28c840; }
+  .title { font-weight: 600; font-size: 13px; }
+  .spacer { flex: 1; }
+
+  .btn {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;
+    border-radius: 7px; border: 1px solid var(--line-strong); background: #fff;
+    font: inherit; font-size: 12.5px; color: var(--text); white-space: nowrap;
+  }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 500; }
+  .btn.danger { color: var(--red); }
+  .btn.ghost { border-color: transparent; background: transparent; color: var(--muted); }
+  .btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+  .btn .count {
+    background: var(--orange-soft); color: var(--orange); border-radius: 8px; padding: 0 6px;
+    font-size: 11px; font-weight: 600;
+  }
+  .select {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap;
+    border-radius: 7px; border: 1px solid var(--line-strong); background: #fff; font-size: 12.5px;
+  }
+  .select::after { content: "⌄"; color: var(--muted); margin-left: 2px; position: relative; top: -3px; }
+  .rec {
+    display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px;
+    border-radius: 14px; background: var(--red-soft); color: var(--red); font-weight: 500; font-size: 12.5px;
+  }
+  .rec::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px; height: 24px; padding: 0 10px; border-radius: 12px;
+    font-size: 12px; font-weight: 500;
+  }
+  .pill.ok { background: var(--green-soft); color: var(--green); }
+  .pill.ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+  .pill.wait { background: var(--orange-soft); color: var(--orange); }
+
+  /* ---------- badges ---------- */
+  .m { font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+  .m.get { color: var(--blue); }
+  .m.post { color: var(--green); }
+  .m.put { color: var(--orange); }
+  .m.del { color: var(--red); }
+  .st { font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; }
+  .st.s2 { color: var(--green); background: var(--green-soft); }
+  .st.s3 { color: var(--muted); background: #f0f0f2; }
+  .st.s4 { color: var(--orange); background: var(--orange-soft); }
+  .st.s5 { color: var(--red); background: var(--red-soft); }
+  .st.ws { color: var(--purple); background: var(--purple-soft); }
+  .tag { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; text-transform: uppercase; letter-spacing: .02em; }
+  .tag.mock { color: var(--purple); background: var(--purple-soft); }
+  .tag.fault { color: var(--red); background: var(--red-soft); }
+  .tag.slow { color: var(--orange); background: var(--orange-soft); }
+  .lv { font-family: var(--mono); font-size: 11px; font-weight: 700; width: 18px; text-align: center; border-radius: 4px; display: inline-block; }
+  .lv.E { color: #fff; background: var(--red); }
+  .lv.W { color: #fff; background: #e08600; }
+  .lv.I { color: var(--blue); background: var(--blue-soft); }
+  .lv.D { color: var(--muted); background: #eeeef0; }
+
+  /* ---------- main window ---------- */
+  .main-body { display: grid; grid-template-columns: 220px 1fr 470px; height: 560px; }
+  .sidebar { background: var(--side); border-right: 1px solid var(--line); padding: 12px 8px; overflow: hidden; }
+  .side-h { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 10px 8px 4px; }
+  .side-i { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; color: var(--text); white-space: nowrap; }
+  .side-i .h { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+  .side-i .n { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+  .side-i.active { background: #dcdce1; font-weight: 500; }
+  .side-i .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+  .side-i .n.red { color: var(--red); font-weight: 600; }
+
+  .traffic { display: flex; flex-direction: column; min-width: 0; border-right: 1px solid var(--line); }
+  .filterbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .search {
+    flex: 1; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+    border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--faint); min-width: 0;
+  }
+  .chip {
+    display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px;
+    background: var(--blue-soft); color: var(--blue); font-size: 12px; font-weight: 500; white-space: nowrap;
+  }
+  .chip::after { content: "×"; opacity: .6; }
+  table.flows { width: 100%; border-collapse: collapse; table-layout: fixed; }
+  table.flows th {
+    text-align: left; font-weight: 500; color: var(--muted); font-size: 11.5px; padding: 6px 8px;
+    border-bottom: 1px solid var(--line); background: #fafafa;
+  }
+  table.flows td { padding: 5px 8px; border-bottom: 1px solid #f0f0f2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 12.5px; }
+  table.flows td.num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+  table.flows td.time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+  table.flows td.path { font-family: var(--mono); font-size: 12px; }
+  table.flows tr.sel td { background: var(--blue); color: #fff; }
+  table.flows tr.sel td * { color: #fff !important; background: transparent !important; }
+  table.flows tr.err td.path { color: var(--red); }
+  table.flows tr.sel.err td.path { color: #fff; }
+  .flows-wrap { flex: 1; overflow: hidden; }
+
+  .detail { display: flex; flex-direction: column; min-width: 0; }
+  .detail-head { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+  .detail-head .line1 { display: flex; align-items: center; gap: 8px; }
+  .detail-head .url { font-family: var(--mono); font-size: 13px; font-weight: 600; }
+  .detail-head .meta { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; gap: 14px; flex-wrap: wrap; }
+  .detail-head .meta b { color: var(--text); font-weight: 500; }
+  .actions { display: flex; gap: 6px; margin-top: 10px; }
+  .tabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); }
+  .tab { padding: 8px 10px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; font-size: 12.5px; }
+  .tab.on { color: var(--blue); border-bottom-color: var(--blue); }
+  .tab .c { background: var(--orange-soft); color: var(--orange); border-radius: 8px; padding: 0 5px; font-size: 11px; margin-left: 3px; }
+  .code {
+    flex: 1; margin: 0; padding: 12px 14px; font: 12px/1.6 var(--mono); background: #fbfbfc; overflow: hidden; white-space: pre;
+  }
+  .code .k { color: #9b2393; }
+  .code .s { color: #c41a16; }
+  .code .n { color: #1c00cf; }
+  .code .p { color: var(--muted); }
+  .code .fold { color: var(--faint); }
+
+  .logs { border-top: 1px solid var(--line-strong); height: 210px; display: flex; flex-direction: column; }
+  .logs-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #fafafa; border-bottom: 1px solid var(--line); }
+  .logs-bar .tab { padding: 4px 8px; border-bottom: none; border-radius: 6px; }
+  .logs-bar .tab.on { background: #fff; border: 1px solid var(--line-strong); color: var(--text); }
+  .loglist { flex: 1; overflow: hidden; font: 12px/1.65 var(--mono); }
+  .logrow { display: grid; grid-template-columns: 104px 24px 150px 1fr 150px; gap: 8px; padding: 0 12px; align-items: center; border-bottom: 1px solid #f4f4f6; }
+  .logrow .t { color: var(--muted); }
+  .logrow .tg { color: var(--purple); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logrow .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .logrow .link { font-family: -apple-system, sans-serif; font-size: 11px; color: var(--blue); text-align: right; }
+  .logrow.linked { background: var(--yellow-soft); }
+  .logrow.err .msg { color: var(--red); }
+
+  /* ---------- wizard ---------- */
+  .wizard-body { display: grid; grid-template-columns: 230px 1fr; height: 600px; }
+  .steps { background: var(--side); border-right: 1px solid var(--line); padding: 22px 16px; }
+  .step { display: flex; gap: 10px; align-items: flex-start; padding: 10px 6px; }
+  .step .num {
+    width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center;
+    font-size: 12px; font-weight: 600; border: 1.5px solid var(--line-strong); color: var(--muted); background: #fff;
+  }
+  .step.done .num { background: var(--green); border-color: var(--green); color: #fff; }
+  .step.cur .num { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .step .lbl { font-weight: 500; }
+  .step .sub { color: var(--muted); font-size: 12px; }
+  .step.todo .lbl { color: var(--muted); }
+  .wiz-main { padding: 26px 32px; display: flex; flex-direction: column; }
+  .wiz-main h3 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+  .wiz-main .lead { color: var(--muted); margin: 0 0 20px; }
+  .targets { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 22px; }
+  .target { border: 1.5px solid var(--line-strong); border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 10px; }
+  .target.on { border-color: var(--blue); background: var(--blue-soft); }
+  .target .ic { font-size: 20px; }
+  .target .nm { font-weight: 500; font-size: 12.5px; }
+  .target .ds { color: var(--muted); font-size: 11.5px; }
+  .connect { display: grid; grid-template-columns: 230px 1fr; gap: 28px; align-items: start; }
+  .qr { width: 230px; height: 230px; border: 1px solid var(--line); border-radius: 12px; padding: 14px; background: #fff; }
+  ol.instr { margin: 0; padding-left: 20px; }
+  ol.instr li { margin-bottom: 10px; }
+  ol.instr li b { font-weight: 600; }
+  .kbd { font-family: var(--mono); font-size: 11.5px; background: #f0f0f2; border-radius: 4px; padding: 1px 5px; }
+  .waiting {
+    margin-top: 16px; display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px;
+    background: var(--orange-soft); color: #7a3a00;
+  }
+  .spinner { width: 16px; height: 16px; border-radius: 50%; border: 2px solid #f0c48f; border-top-color: var(--orange); flex: none; }
+  .tip { margin-top: 12px; color: var(--muted); font-size: 12px; }
+  .wiz-foot { margin-top: auto; display: flex; gap: 8px; justify-content: flex-end; padding-top: 18px; border-top: 1px solid var(--line); }
+
+  /* ---------- rules ---------- */
+  .rules-body { display: grid; grid-template-columns: 430px 1fr; height: 600px; }
+  .rule-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; }
+  .rule-list .hdr { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+  .rule { display: grid; grid-template-columns: 1fr auto; gap: 4px 10px; padding: 11px 14px; border-bottom: 1px solid #f0f0f2; }
+  .rule.sel { background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }
+  .rule.off { opacity: .55; }
+  .rule .rt { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; min-width: 0; white-space: nowrap; overflow: hidden; }
+  .rule .ra { color: var(--muted); font-size: 12px; grid-column: 1; }
+  .toggle { width: 34px; height: 20px; border-radius: 10px; background: #d1d1d6; position: relative; grid-row: span 2; align-self: center; }
+  .toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+  .toggle.on { background: #34c759; }
+  .toggle.on::after { left: 16px; }
+  .editor { padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+  .field label { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .03em; }
+  .input { height: 30px; border: 1px solid var(--line-strong); border-radius: 7px; padding: 0 10px; display: flex; align-items: center; background: #fff; }
+  .input.mono { font-family: var(--mono); font-size: 12px; }
+  .row { display: flex; gap: 10px; }
+  .seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; }
+  .seg span { white-space: nowrap; padding: 5px 12px; font-size: 12.5px; border-right: 1px solid var(--line-strong); }
+  .seg span:last-child { border-right: none; }
+  .seg span.on { background: var(--blue); color: #fff; font-weight: 500; }
+  .bodyedit { border: 1px solid var(--line-strong); border-radius: 8px; font: 12px/1.6 var(--mono); padding: 10px 12px; background: #fbfbfc; white-space: pre; height: 150px; overflow: hidden; }
+  .bodyedit .k { color: #9b2393; } .bodyedit .s { color: #c41a16; } .bodyedit .n { color: #1c00cf; }
+  .stat { display: flex; gap: 18px; color: var(--muted); font-size: 12px; padding: 10px 12px; background: var(--side); border-radius: 8px; }
+  .stat b { color: var(--text); font-weight: 600; }
+
+  /* ---------- report ---------- */
+  .stage { position: relative; height: 680px; border-radius: 12px; overflow: hidden; border: 1px solid #c8c8cc; background: #8e8e93; }
+  .stage .ghost-win { position: absolute; inset: 0; background: repeating-linear-gradient(0deg, #fafafa 0 26px, #f2f2f4 26px 27px); opacity: .9; }
+  .stage .dim { position: absolute; inset: 0; background: rgba(30,30,35,.35); }
+  .sheet {
+    position: absolute; top: 0; left: 50%; transform: translateX(-50%); width: 720px; background: #fff;
+    border-radius: 0 0 12px 12px; box-shadow: 0 18px 50px rgba(0,0,0,.3); padding: 22px 26px;
+  }
+  .sheet h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+  .sheet .lead { color: var(--muted); margin: 0 0 16px; font-size: 12.5px; }
+  .sec { margin-top: 14px; }
+  .sec-h { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
+  .check { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+  .cb { width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line-strong); flex: none; display: grid; place-items: center; font-size: 11px; color: #fff; }
+  .cb.on { background: var(--blue); border-color: var(--blue); }
+  .cb.on::after { content: "✓"; }
+  .check .d { color: var(--muted); font-size: 12px; margin-left: auto; }
+  .redact { display: flex; flex-wrap: wrap; gap: 6px; }
+  .redact span { font-family: var(--mono); font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--green-soft); color: var(--green); }
+  .redact span::before { content: "●●● "; letter-spacing: -1px; opacity: .7; }
+  .radio { display: flex; align-items: center; gap: 10px; padding: 5px 0; }
+  .rd { width: 16px; height: 16px; border-radius: 50%; border: 1.5px solid var(--line-strong); flex: none; }
+  .rd.on { border: 5px solid var(--blue); }
+  .grid2 { display: grid; grid-template-columns: 1fr 150px; gap: 20px; }
+  .shot { border: 1px solid var(--line); border-radius: 10px; height: 250px; background: #f5f5f7; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); font-size: 11.5px; }
+  .phone { width: 92px; height: 180px; border-radius: 16px; border: 3px solid #1d1d1f; background: #fff; padding: 14px 8px; display: flex; flex-direction: column; gap: 6px; }
+  .phone i { display: block; height: 8px; border-radius: 3px; background: #e5e5ea; }
+  .phone i.e { background: var(--red-soft); height: 26px; border: 1px solid #f7b9bf; }
+  .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+
+  /* ---------- menu bar ---------- */
+  .menubar-stage { position: relative; height: 430px; width: 720px; border-radius: 12px; overflow: hidden; border: 1px solid #c8c8cc; background: linear-gradient(135deg, #5b7fa8, #8aa6c4); }
+  .menubar { height: 26px; background: rgba(240,240,245,.85); display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 14px; font-size: 13px; }
+  .menubar .qa { display: inline-flex; align-items: center; gap: 5px; background: rgba(0,0,0,.12); padding: 1px 8px; border-radius: 5px; font-weight: 500; }
+  .menubar .qa::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--red); }
+  .popover {
+    position: absolute; top: 32px; right: 90px; width: 320px; background: rgba(250,250,252,.97); border-radius: 12px;
+    border: 1px solid #c8c8cc; box-shadow: 0 14px 40px rgba(0,0,0,.25); padding: 14px;
+  }
+  .popover .ph { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .kv { display: grid; grid-template-columns: 90px 1fr; gap: 4px 8px; font-size: 12.5px; margin-bottom: 12px; }
+  .kv span:nth-child(odd) { color: var(--muted); }
+  .stats3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .stats3 div { background: #fff; border: 1px solid var(--line); border-radius: 8px; padding: 8px; text-align: center; }
+  .stats3 b { display: block; font-size: 18px; font-weight: 600; }
+  .stats3 small { color: var(--muted); font-size: 11px; }
+  .stats3 .bad b { color: var(--red); }
+  .menu-item { padding: 6px 8px; border-radius: 6px; display: flex; justify-content: space-between; font-size: 13px; }
+  .menu-item:hover, .menu-item.hl { background: var(--blue); color: #fff; }
+  .menu-item .sc { color: var(--faint); }
+  .menu-item.hl .sc { color: #dce9fb; }
+  .sep { height: 1px; background: var(--line); margin: 6px 0; }
+
+  /* ---------- view switcher ---------- */
+  .seg.sm span { padding: 3px 12px; font-size: 12px; }
+  .seg.sm span .c { background: var(--red-soft); color: var(--red); border-radius: 8px; padding: 0 5px; font-size: 10.5px; font-weight: 600; margin-left: 4px; }
+  .seg.sm span.on .c { background: rgba(255,255,255,.25); color: #fff; }
+
+  /* ---------- logs screen ---------- */
+  .lg-wrap { position: relative; }
+  .lg-bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  .lg-src { display: inline-flex; gap: 2px; background: #eeeef1; border-radius: 8px; padding: 2px; }
+  .lg-src span { padding: 4px 12px; border-radius: 6px; font-size: 12.5px; font-weight: 500; color: var(--muted); }
+  .lg-src span.on { background: #fff; color: var(--text); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+  .lg-src span b { font-weight: 500; color: var(--faint); margin-left: 4px; font-variant-numeric: tabular-nums; }
+  .lg-src span.crash b { color: var(--red); font-weight: 600; }
+  .select.open { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(10,102,216,.18); }
+  .lvchips { display: inline-flex; gap: 4px; }
+  .lvchip { display: inline-flex; align-items: center; gap: 5px; height: 24px; padding: 0 8px; border-radius: 12px; border: 1px solid var(--line-strong); font-size: 12px; color: var(--muted); background: #fff; }
+  .lvchip b { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .lvchip.on { border-color: transparent; color: var(--text); }
+  .lvchip.on.D { background: #eeeef0; }
+  .lvchip.on.I { background: var(--blue-soft); color: var(--blue); }
+  .lvchip.on.W { background: var(--orange-soft); color: var(--orange); }
+  .lvchip.on.E { background: var(--red-soft); color: var(--red); }
+  .lvchip.on.F { background: #5c0011; color: #fff; }
+  .switch { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+  .switch .toggle { width: 28px; height: 16px; grid-row: auto; }
+  .switch .toggle::after { width: 12px; height: 12px; }
+  .switch .toggle.on::after { left: 14px; }
+
+  .tl { padding: 8px 12px 6px; border-bottom: 1px solid var(--line); background: #fbfbfc; }
+  .tl-row { position: relative; height: 18px; margin-left: 74px; }
+  .tl-lbl { position: absolute; left: -74px; top: 1px; font-size: 11px; color: var(--muted); }
+  .tl-track { position: absolute; inset: 8px 0 auto 0; height: 1px; background: var(--line); }
+  .tl-dot { position: absolute; top: 4px; width: 9px; height: 9px; border-radius: 50%; margin-left: -4px; background: var(--green); }
+  .tl-dot.o { background: #e08600; } .tl-dot.r { background: var(--red); } .tl-dot.p { background: var(--purple); }
+  .tl-tick { position: absolute; top: 3px; width: 2px; height: 11px; margin-left: -1px; background: #c7c7cc; border-radius: 1px; }
+  .tl-tick.w { background: #e08600; } .tl-tick.e { background: var(--red); height: 13px; top: 2px; }
+  .tl-crash { position: absolute; top: -1px; margin-left: -9px; font-size: 10px; font-weight: 700; color: #fff; background: #5c0011; border-radius: 4px; padding: 1px 4px; }
+  .tl-win { position: absolute; top: -4px; bottom: -40px; background: rgba(10,102,216,.07); border-left: 1px solid rgba(10,102,216,.35); border-right: 1px solid rgba(10,102,216,.35); }
+  .tl-cursor { position: absolute; top: -4px; bottom: -40px; width: 0; border-left: 2px solid var(--blue); }
+  .tl-axis { position: relative; height: 14px; margin-left: 74px; font-size: 10.5px; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .tl-axis span { position: absolute; transform: translateX(-50%); }
+
+  .lg-body { display: grid; grid-template-columns: 1fr 430px; height: 560px; }
+  .lg-list { overflow: hidden; border-right: 1px solid var(--line); font: 12px/1.6 var(--mono); }
+  .lg-head, .lg-row { display: grid; grid-template-columns: 96px 24px 92px 150px 1fr 22px; gap: 8px; padding: 0 12px; align-items: center; }
+  .lg-head { font: 500 11.5px/1 -apple-system, sans-serif; color: var(--muted); padding-top: 7px; padding-bottom: 7px; background: #fafafa; border-bottom: 1px solid var(--line); }
+  .lg-row { border-bottom: 1px solid #f4f4f6; min-height: 21px; }
+  .lg-row .t, .lg-row .pid { color: var(--muted); }
+  .lg-row .pid { font-size: 11px; }
+  .lg-row .tg { color: var(--purple); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg-row .msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .lg-row .ln { color: var(--blue); font-family: -apple-system, sans-serif; text-align: center; }
+  .lg-row.linked { background: var(--yellow-soft); }
+  .lg-row.err .msg { color: var(--red); }
+  .lg-row.sel { background: var(--blue); }
+  .lg-row.sel * { color: #fff !important; }
+  .lg-row.sel .lv { background: rgba(255,255,255,.25) !important; }
+  .lg-row.fatal { background: #fff0f1; }
+  .lg-row.fatal .msg { color: #8a0014; font-weight: 600; }
+  .lv.F { color: #fff; background: #5c0011; }
+  .lg-row.trace { min-height: 18px; background: #fff0f1; border-bottom-color: #fde3e6; }
+  .lg-row.trace .msg { color: #8a3a46; padding-left: 18px; font-size: 11.5px; }
+  .lg-row.trace .msg.more { color: var(--blue); font-family: -apple-system, sans-serif; }
+  .lg-row.sys { background: #f3f6fb; }
+  .lg-row.sys .msg { color: #33507a; font-family: -apple-system, sans-serif; font-style: italic; }
+
+  .lg-detail { padding: 14px 16px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+  .lg-detail .hd { display: flex; align-items: center; gap: 8px; }
+  .lg-detail .hd .tgname { font-family: var(--mono); font-weight: 600; color: var(--purple); }
+  .kv2 { display: grid; grid-template-columns: 78px 1fr; gap: 3px 10px; font-size: 12px; }
+  .kv2 span:nth-child(odd) { color: var(--muted); }
+  .kv2 span:nth-child(even) { font-family: var(--mono); font-size: 11.5px; }
+  .fullmsg { font: 12px/1.55 var(--mono); background: #fbfbfc; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; color: var(--red); white-space: pre-wrap; }
+  .card { border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .card .l1 { display: flex; align-items: center; gap: 8px; }
+  .card .path { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .card .l2 { color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .ctx { font-size: 12px; }
+  .ctx div { display: grid; grid-template-columns: 92px 42px 40px 1fr; gap: 6px; padding: 3px 0; border-bottom: 1px solid #f2f2f4; align-items: center; }
+  .ctx .t { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .ctx .p { font-family: var(--mono); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ctx .cur { background: var(--blue-soft); border-radius: 4px; }
+
+  .dd { position: absolute; top: calc(100% + 8px); left: 0; width: 400px; background: #fff; border-radius: 10px; border: 1px solid var(--line-strong); box-shadow: 0 14px 36px rgba(0,0,0,.2); padding: 6px; z-index: 5; }
+  .dd-h { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 6px 10px 4px; }
+  .dd-i { display: grid; grid-template-columns: 22px 1fr auto; gap: 8px; align-items: center; padding: 7px 10px; border-radius: 7px; }
+  .dd-i.on { background: var(--blue-soft); }
+  .dd-i .ic { font-size: 16px; }
+  .dd-i .nm { font-weight: 500; }
+  .dd-i .ds { color: var(--muted); font-size: 11.5px; }
+  .dd-i .st2 { font-size: 11px; font-weight: 500; }
+  .dd-i .st2.ok { color: var(--green); }
+  .dd-i .st2.off { color: var(--faint); }
+  .dd-foot { padding: 7px 10px 4px; font-size: 12px; color: var(--blue); border-top: 1px solid var(--line); margin-top: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Wiretrace — UI mockups</h1>
+<p class="page-intro">Phase 2 desktop app (Tauri + React). All data shown is illustrative. See <code>PLAN.md</code> section 8 for the feature list (IDs U1–U10).</p>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-main">
+  <h2>1. Main window — traffic, details, and logs (U3–U7)</h2>
+  <p>Traffic list in the middle, details of the selected request on the right, and device/app logs at the bottom. Logs linked to the selected request (same <code>X-Request-ID</code>) are highlighted.</p>
+
+  <div class="window" style="width: 1360px;">
+    <div class="titlebar">
+      <div class="lights"><span></span><span></span><span></span></div>
+      <span class="title">Wiretrace</span>
+      <div class="seg sm"><span class="on">Traffic</span><span>Logs <span class="c">1 crash</span></span></div>
+      <span class="rec">Recording · 00:12:41</span>
+      <button class="btn small">⏸ Pause</button>
+      <button class="btn small">⌫ Clear</button>
+      <span class="spacer"></span>
+      <span class="select">Preset: staging</span>
+      <span class="pill ok">Pixel 8 · WireGuard + USB</span>
+      <button class="btn">⚙︎ Rules <span class="count">2 active</span></button>
+      <button class="btn">📱 Setup</button>
+      <button class="btn primary">🐞 Report bug</button>
+    </div>
+
+    <div class="main-body">
+      <aside class="sidebar">
+        <div class="side-h">Session</div>
+        <div class="side-i active">● Current session</div>
+        <div class="side-i">🕘 Previous sessions <span class="n">14</span></div>
+
+        <div class="side-h">Quick filters</div>
+        <div class="side-i">All requests <span class="n">248</span></div>
+        <div class="side-i">⚠️ Errors 4xx / 5xx <span class="n red">6</span></div>
+        <div class="side-i">🐢 Slow &gt; 1 s <span class="n">3</span></div>
+        <div class="side-i">🧪 Mocked <span class="n">2</span></div>
+        <div class="side-i">💥 Faulted <span class="n">1</span></div>
+        <div class="side-i">⇄ WebSocket <span class="n">1</span></div>
+
+        <div class="side-h">Hosts</div>
+        <div class="side-i" title="api-staging.mycompany.com"><span class="dot" style="background:#0a66d8"></span><span class="h">api-staging</span> <span class="n">231</span></div>
+        <div class="side-i" title="auth-staging.mycompany.com"><span class="dot" style="background:#7b2fbf"></span><span class="h">auth-staging</span> <span class="n">17</span></div>
+
+        <div class="side-h">Saved filters</div>
+        <div class="side-i">⭐ Checkout flow</div>
+        <div class="side-i">⭐ Login &amp; tokens</div>
+        <div class="side-i">⭐ Promo codes</div>
+      </aside>
+
+      <section class="traffic">
+        <div class="filterbar">
+          <div class="search">🔍 <span>Search URL, headers, bodies…  or filter: ~m POST &amp; ~c 500</span></div>
+          <span class="chip">host: api-staging</span>
+          <span class="chip">hide images</span>
+        </div>
+        <div class="flows-wrap">
+          <table class="flows">
+            <colgroup><col style="width:100px"><col style="width:56px"><col style="width:58px"><col><col style="width:72px"><col style="width:64px"><col style="width:66px"></colgroup>
+            <thead><tr><th>Time</th><th>Method</th><th>Status</th><th>Path</th><th style="text-align:right">Duration</th><th style="text-align:right">Size</th><th></th></tr></thead>
+            <tbody>
+              <tr><td class="time">19:41:02.118</td><td><span class="m post">POST</span></td><td><span class="st s2">200</span></td><td class="path">/auth/v2/token/refresh</td><td class="num">96 ms</td><td class="num">1.2 KB</td><td></td></tr>
+              <tr><td class="time">19:41:02.404</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/profile</td><td class="num">4 ms</td><td class="num">2.8 KB</td><td><span class="tag mock">mock</span></td></tr>
+              <tr><td class="time">19:41:02.410</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/home/feed?page=1</td><td class="num">212 ms</td><td class="num">18.4 KB</td><td></td></tr>
+              <tr><td class="time">19:41:03.007</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/promotions?region=VN</td><td class="num">143 ms</td><td class="num">6.1 KB</td><td></td></tr>
+              <tr><td class="time">19:41:05.661</td><td><span class="m get">GET</span></td><td><span class="st ws">101</span></td><td class="path">/ws/notifications</td><td class="num">—</td><td class="num">live</td><td></td></tr>
+              <tr><td class="time">19:41:09.233</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/products/88213</td><td class="num">121 ms</td><td class="num">9.7 KB</td><td></td></tr>
+              <tr><td class="time">19:41:11.870</td><td><span class="m post">POST</span></td><td><span class="st s2">201</span></td><td class="path">/api/v1/cart/items</td><td class="num">188 ms</td><td class="num">1.9 KB</td><td></td></tr>
+              <tr><td class="time">19:41:12.051</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/cart</td><td class="num">1,420 ms</td><td class="num">4.4 KB</td><td><span class="tag slow">slow</span></td></tr>
+              <tr class="err"><td class="time">19:41:15.318</td><td><span class="m post">POST</span></td><td><span class="st s4">422</span></td><td class="path">/api/v1/promo/validate</td><td class="num">77 ms</td><td class="num">312 B</td><td></td></tr>
+              <tr class="err sel"><td class="time">19:41:18.902</td><td><span class="m post">POST</span></td><td><span class="st s5">500</span></td><td class="path">/api/v1/orders</td><td class="num">842 ms</td><td class="num">418 B</td><td></td></tr>
+              <tr><td class="time">19:41:19.120</td><td><span class="m post">POST</span></td><td><span class="st s2">202</span></td><td class="path">/api/v1/analytics/events</td><td class="num">61 ms</td><td class="num">88 B</td><td></td></tr>
+              <tr><td class="time">19:41:22.540</td><td><span class="m get">GET</span></td><td><span class="st s3">304</span></td><td class="path">/api/v1/config/app</td><td class="num">38 ms</td><td class="num">0 B</td><td></td></tr>
+              <tr class="err"><td class="time">19:41:24.007</td><td><span class="m get">GET</span></td><td><span class="st s5">500</span></td><td class="path">/api/v1/orders/history</td><td class="num">3 ms</td><td class="num">41 B</td><td><span class="tag fault">fault</span></td></tr>
+              <tr><td class="time">19:41:26.731</td><td><span class="m put">PUT</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/profile/address</td><td class="num">164 ms</td><td class="num">1.1 KB</td><td></td></tr>
+              <tr><td class="time">19:41:27.004</td><td><span class="m del">DEL</span></td><td><span class="st s2">204</span></td><td class="path">/api/v1/cart/items/5521</td><td class="num">92 ms</td><td class="num">0 B</td><td></td></tr>
+              <tr><td class="time">19:41:29.882</td><td><span class="m get">GET</span></td><td><span class="st s2">200</span></td><td class="path">/api/v1/notifications?unread=true</td><td class="num">109 ms</td><td class="num">3.3 KB</td><td></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="detail">
+        <div class="detail-head">
+          <div class="line1"><span class="m post">POST</span><span class="url">/api/v1/orders</span><span class="st s5">500</span></div>
+          <div class="meta">
+            <span>Host <b>api-staging.mycompany.com</b></span>
+            <span>Duration <b>842 ms</b></span>
+            <span>Request ID <b>7f3a9c2e</b></span>
+          </div>
+          <div class="actions">
+            <button class="btn small">Copy cURL</button>
+            <button class="btn small">Copy as mock</button>
+            <button class="btn small">↻ Replay</button>
+            <button class="btn small">Compare…</button>
+            <button class="btn small primary">🐞 Report</button>
+          </div>
+        </div>
+        <div class="tabs">
+          <span class="tab">Request</span>
+          <span class="tab on">Response</span>
+          <span class="tab">Headers</span>
+          <span class="tab">Timing</span>
+          <span class="tab">Logs <span class="c">3</span></span>
+        </div>
+<pre class="code"><span class="p">HTTP/2 500 · application/json · 418 B</span>
+
+{
+  <span class="k">"error"</span>: {
+    <span class="k">"code"</span>: <span class="s">"ORDER_CREATE_FAILED"</span>,
+    <span class="k">"message"</span>: <span class="s">"Promotion SUMMER25 could not be applied"</span>,
+    <span class="k">"traceId"</span>: <span class="s">"b81f0c7d44e2a913"</span>,
+    <span class="k">"details"</span>: [
+      {
+        <span class="k">"field"</span>: <span class="s">"promoCode"</span>,
+        <span class="k">"reason"</span>: <span class="s">"NullPointerException in DiscountService"</span>
+      }
+    ]
+  },
+  <span class="k">"requestId"</span>: <span class="s">"7f3a9c2e-51d0-4b8e-9a77-0c3e1f6d2b44"</span>,
+  <span class="k">"timestamp"</span>: <span class="n">1791900078902</span>
+}
+
+<span class="fold">▸ Request body (412 B)  ·  ▸ Response headers (11)</span></pre>
+      </section>
+    </div>
+
+    <div class="logs">
+      <div class="logs-bar">
+        <span class="tab on">Device logs</span>
+        <span class="tab">App logs</span>
+        <span class="tab">Crashes</span>
+        <span class="spacer"></span>
+        <span class="select">Level: Info and above</span>
+        <div class="search" style="flex: 0 0 240px; height: 26px;">🔍 Filter logs…</div>
+        <button class="btn small">⤓ Auto-scroll</button>
+      </div>
+      <div class="loglist">
+        <div class="logrow"><span class="t">19:41:15.322</span><span class="lv W">W</span><span class="tg">PromoViewModel</span><span class="msg">validate promo=SUMMER25 → 422 PROMO_NOT_ELIGIBLE, retrying with cart refresh</span><span></span></div>
+        <div class="logrow"><span class="t">19:41:18.101</span><span class="lv I">I</span><span class="tg">CheckoutScreen</span><span class="msg">User tapped "Place order" (items=3, total=1,249,000 VND)</span><span></span></div>
+        <div class="logrow linked"><span class="t">19:41:18.903</span><span class="lv D">D</span><span class="tg">OkHttp</span><span class="msg">--> POST /api/v1/orders req=7f3a9c2e (412-byte body)</span><span class="link">🔗 selected request</span></div>
+        <div class="logrow linked err"><span class="t">19:41:19.745</span><span class="lv E">E</span><span class="tg">OrderRepository</span><span class="msg">createOrder failed req=7f3a9c2e: HTTP 500 ORDER_CREATE_FAILED</span><span class="link">🔗 selected request</span></div>
+        <div class="logrow linked"><span class="t">19:41:19.751</span><span class="lv W">W</span><span class="tg">CheckoutViewModel</span><span class="msg">Showing generic error dialog, no retry offered req=7f3a9c2e</span><span class="link">🔗 selected request</span></div>
+        <div class="logrow"><span class="t">19:41:19.802</span><span class="lv I">I</span><span class="tg">Analytics</span><span class="msg">event=checkout_error code=500 screen=checkout</span><span></span></div>
+        <div class="logrow"><span class="t">19:41:24.010</span><span class="lv E">E</span><span class="tg">OrderHistoryRepo</span><span class="msg">load failed: HTTP 500 (injected by Wiretrace)</span><span></span></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-logs">
+  <h2>2. Device &amp; app logs (U6, U7)</h2>
+  <p>Full-screen log view, opened with the <b>Logs</b> switch in the title bar. Logs come from the device over USB (Android <code>adb logcat</code>, iOS <code>pymobiledevice3</code>, or the Simulator) and from the app itself over the network. The timeline at the top shows requests and log lines on the same time axis. The device picker is shown open.</p>
+
+  <div class="window lg-wrap" style="width: 1360px;">
+    <div class="titlebar">
+      <div class="lights"><span></span><span></span><span></span></div>
+      <span class="title">Wiretrace</span>
+      <div class="seg sm"><span>Traffic</span><span class="on">Logs <span class="c">1 crash</span></span></div>
+      <span class="rec">Recording · 00:12:41</span>
+      <button class="btn small">⏸ Pause</button>
+      <button class="btn small">⌫ Clear</button>
+      <span class="spacer"></span>
+      <span class="select">Preset: staging</span>
+      <span class="pill ok">Pixel 8 · WireGuard + USB</span>
+      <button class="btn">⚙︎ Rules <span class="count">2 active</span></button>
+      <button class="btn">📱 Setup</button>
+      <button class="btn primary">🐞 Report bug</button>
+    </div>
+
+    <div class="lg-bar">
+      <div class="lg-src">
+        <span class="on">Device logs <b>1,284</b></span>
+        <span>App logs <b>96</b></span>
+        <span class="crash">Crashes <b>1</b></span>
+      </div>
+      <span style="position: relative;">
+        <span class="select open">🤖 Pixel 8 · Android 15 · USB</span>
+        <div class="dd" role="listbox" aria-label="Log source">
+          <div class="dd-h">Devices (USB)</div>
+          <div class="dd-i on"><span class="ic">🤖</span><div><div class="nm">Pixel 8</div><div class="ds">Android 15 · adb logcat</div></div><span class="st2 ok">● Streaming</span></div>
+          <div class="dd-i"><span class="ic">📱</span><div><div class="nm">iPhone 15 Pro</div><div class="ds">iOS 18.6 · pymobiledevice3 syslog</div></div><span class="st2 ok">● Connected</span></div>
+          <div class="dd-i"><span class="ic">🖥️</span><div><div class="nm">iOS Simulator — iPhone 16</div><div class="ds">simctl log stream</div></div><span class="st2 off">Not booted</span></div>
+          <div class="dd-h">Over the network</div>
+          <div class="dd-i"><span class="ic">📡</span><div><div class="nm">App logs from QA build</div><div class="ds">POST qa-logs.internal · no cable needed</div></div><span class="st2 ok">96 lines</span></div>
+          <div class="dd-foot">Device not listed? Check USB cable, "Trust This Computer" / USB debugging →</div>
+        </div>
+      </span>
+      <span class="select">App: com.mycompany.myapp</span>
+      <span class="switch"><span class="toggle on"></span>Only this app</span>
+      <span class="spacer"></span>
+      <button class="btn small">⏸ Pause logs</button>
+      <button class="btn small">⌫ Clear</button>
+      <button class="btn small">⤓ Export .txt</button>
+      <button class="btn small">⤓ Auto-scroll</button>
+    </div>
+
+    <div class="lg-bar">
+      <div class="lvchips">
+        <span class="lvchip">Verbose <b>0</b></span>
+        <span class="lvchip on D">Debug <b>412</b></span>
+        <span class="lvchip on I">Info <b>731</b></span>
+        <span class="lvchip on W">Warning <b>118</b></span>
+        <span class="lvchip on E">Error <b>22</b></span>
+        <span class="lvchip on F">Fatal <b>1</b></span>
+      </div>
+      <div class="search" style="height: 28px;">🔍 Search messages (text or /regex/)…</div>
+      <span class="select">Tag: any</span>
+      <span class="switch"><span class="toggle"></span>Only lines linked to requests</span>
+    </div>
+
+    <div class="tl" aria-label="Timeline of requests and log lines, 19:41:00 to 19:41:30">
+      <div class="tl-row">
+        <span class="tl-lbl">Requests</span>
+        <span class="tl-track"></span>
+        <span class="tl-win" style="left: 50%; width: 49.6%;"></span>
+        <span class="tl-cursor" style="left: 65.8%;"></span>
+        <span class="tl-dot" style="left: 7%"></span>
+        <span class="tl-dot" style="left: 8%"></span>
+        <span class="tl-dot" style="left: 10%"></span>
+        <span class="tl-dot p" style="left: 19%"></span>
+        <span class="tl-dot" style="left: 30.7%"></span>
+        <span class="tl-dot" style="left: 39.6%"></span>
+        <span class="tl-dot o" style="left: 40.3%"></span>
+        <span class="tl-dot o" style="left: 51%"></span>
+        <span class="tl-dot r" style="left: 63%"></span>
+        <span class="tl-dot" style="left: 63.7%"></span>
+        <span class="tl-dot" style="left: 75%"></span>
+        <span class="tl-dot r" style="left: 80%"></span>
+        <span class="tl-dot" style="left: 89%"></span>
+        <span class="tl-dot" style="left: 90%"></span>
+        <span class="tl-dot" style="left: 99.6%"></span>
+      </div>
+      <div class="tl-row" style="margin-top: 4px;">
+        <span class="tl-lbl">Logs</span>
+        <span class="tl-track"></span>
+        <span class="tl-tick" style="left: 3%"></span><span class="tl-tick" style="left: 6%"></span>
+        <span class="tl-tick" style="left: 7.5%"></span><span class="tl-tick" style="left: 12%"></span>
+        <span class="tl-tick" style="left: 18%"></span><span class="tl-tick" style="left: 22%"></span>
+        <span class="tl-tick" style="left: 30%"></span><span class="tl-tick" style="left: 33%"></span>
+        <span class="tl-tick" style="left: 39%"></span><span class="tl-tick" style="left: 41%"></span>
+        <span class="tl-tick w" style="left: 51.1%"></span><span class="tl-tick" style="left: 53.3%"></span>
+        <span class="tl-tick" style="left: 60.3%"></span><span class="tl-tick" style="left: 63%"></span>
+        <span class="tl-tick e" style="left: 65.8%"></span><span class="tl-tick w" style="left: 66%"></span>
+        <span class="tl-tick" style="left: 66.3%"></span><span class="tl-tick" style="left: 71%"></span>
+        <span class="tl-tick" style="left: 79.9%"></span><span class="tl-tick e" style="left: 80%"></span>
+        <span class="tl-crash" style="left: 80.6%">CRASH</span>
+        <span class="tl-tick" style="left: 88.4%"></span><span class="tl-tick" style="left: 89.8%"></span>
+        <span class="tl-tick" style="left: 94%"></span><span class="tl-tick" style="left: 98%"></span>
+      </div>
+      <div class="tl-axis">
+        <span style="left: 0%; transform: none;">19:41:00</span>
+        <span style="left: 16.67%">:05</span><span style="left: 33.33%">:10</span>
+        <span style="left: 50%">:15</span><span style="left: 66.67%">:20</span>
+        <span style="left: 83.33%">:25</span>
+        <span style="left: 100%; transform: translateX(-100%);">:30</span>
+      </div>
+    </div>
+
+    <div class="lg-body">
+      <div class="lg-list">
+        <div class="lg-head"><span>Time</span><span></span><span>PID / TID</span><span>Tag</span><span>Message</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:15.318</span><span class="lv D">D</span><span class="pid">18342/18402</span><span class="tg">OkHttp</span><span class="msg">--&gt; POST /api/v1/promo/validate req=51c0e7aa</span><span class="ln">🔗</span></div>
+        <div class="lg-row"><span class="t">19:41:15.322</span><span class="lv W">W</span><span class="pid">18342/18342</span><span class="tg">PromoViewModel</span><span class="msg">validate promo=SUMMER25 → 422 PROMO_NOT_ELIGIBLE, retrying with cart refresh</span><span class="ln">🔗</span></div>
+        <div class="lg-row"><span class="t">19:41:16.004</span><span class="lv I">I</span><span class="pid">18342/18402</span><span class="tg">CartRepository</span><span class="msg">cart refreshed items=3 total=1,249,000 VND</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:18.101</span><span class="lv I">I</span><span class="pid">18342/18342</span><span class="tg">CheckoutScreen</span><span class="msg">User tapped "Place order" (items=3)</span><span></span></div>
+        <div class="lg-row linked"><span class="t">19:41:18.903</span><span class="lv D">D</span><span class="pid">18342/18402</span><span class="tg">OkHttp</span><span class="msg">--&gt; POST /api/v1/orders req=7f3a9c2e (412-byte body)</span><span class="ln">🔗</span></div>
+        <div class="lg-row sel"><span class="t">19:41:19.745</span><span class="lv E">E</span><span class="pid">18342/18402</span><span class="tg">OrderRepository</span><span class="msg">createOrder failed req=7f3a9c2e: HTTP 500 ORDER_CREATE_FAILED</span><span class="ln">🔗</span></div>
+        <div class="lg-row linked"><span class="t">19:41:19.751</span><span class="lv W">W</span><span class="pid">18342/18342</span><span class="tg">CheckoutViewModel</span><span class="msg">Showing generic error dialog, no retry offered req=7f3a9c2e</span><span class="ln">🔗</span></div>
+        <div class="lg-row"><span class="t">19:41:19.802</span><span class="lv I">I</span><span class="pid">18342/18418</span><span class="tg">Analytics</span><span class="msg">event=checkout_error code=500 screen=checkout</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:21.330</span><span class="lv I">I</span><span class="pid">18342/18342</span><span class="tg">Choreographer</span><span class="msg">Skipped 34 frames! The application may be doing too much work on its main thread.</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:23.990</span><span class="lv I">I</span><span class="pid">18342/18342</span><span class="tg">OrderHistoryFragment</span><span class="msg">onResume, loading order history</span><span></span></div>
+        <div class="lg-row err"><span class="t">19:41:24.010</span><span class="lv E">E</span><span class="pid">18342/18402</span><span class="tg">OrderHistoryRepo</span><span class="msg">load failed req=c09d4e11: HTTP 500 (injected by Wiretrace rule)</span><span class="ln">🔗</span></div>
+        <div class="lg-row fatal"><span class="t">19:41:24.016</span><span class="lv F">F</span><span class="pid">18342/18342</span><span class="tg">AndroidRuntime</span><span class="msg">FATAL EXCEPTION: main · Process: com.mycompany.myapp, PID: 18342</span><span></span></div>
+        <div class="lg-row trace"><span></span><span></span><span></span><span></span><span class="msg">java.lang.NullPointerException: Attempt to invoke virtual method 'List HistoryResponse.getItems()' on a null object</span><span></span></div>
+        <div class="lg-row trace"><span></span><span></span><span></span><span></span><span class="msg">at com.mycompany.orders.OrderHistoryViewModel.onLoaded(OrderHistoryViewModel.kt:87)</span><span></span></div>
+        <div class="lg-row trace"><span></span><span></span><span></span><span></span><span class="msg">at com.mycompany.orders.OrderHistoryRepo$load$1.invokeSuspend(OrderHistoryRepo.kt:42)</span><span></span></div>
+        <div class="lg-row trace"><span></span><span></span><span></span><span></span><span class="msg">at kotlinx.coroutines.DispatchedTask.run(DispatchedTask.kt:108)</span><span></span></div>
+        <div class="lg-row trace"><span></span><span></span><span></span><span></span><span class="msg more">▸ Show 14 more lines</span><span></span></div>
+        <div class="lg-row sys"><span class="t">19:41:26.512</span><span class="lv I">i</span><span class="pid">18517</span><span class="tg">Wiretrace</span><span class="msg">App restarted · new PID 18517 · log collector re-attached automatically</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:26.940</span><span class="lv I">I</span><span class="pid">18517/18517</span><span class="tg">MainActivity</span><span class="msg">onCreate · cold start 1,182 ms</span><span></span></div>
+        <div class="lg-row"><span class="t">19:41:27.355</span><span class="lv D">D</span><span class="pid">18517/18560</span><span class="tg">OkHttp</span><span class="msg">--&gt; GET /api/v1/config/app req=0b7e21d9</span><span class="ln">🔗</span></div>
+        <div class="lg-row"><span class="t">19:41:29.882</span><span class="lv D">D</span><span class="pid">18517/18560</span><span class="tg">OkHttp</span><span class="msg">--&gt; GET /api/v1/notifications?unread=true req=4a19f0c3</span><span class="ln">🔗</span></div>
+      </div>
+
+      <aside class="lg-detail">
+        <div class="hd"><span class="lv E">E</span><span class="tgname">OrderRepository</span><span class="spacer"></span><button class="btn small">Copy line</button><button class="btn small">Copy ±50 lines</button></div>
+        <div class="kv2">
+          <span>Time</span><span>2026-10-13 19:41:19.745</span>
+          <span>Process</span><span>com.mycompany.myapp</span>
+          <span>PID / TID</span><span>18342 / 18402 (OkHttp Dispatcher)</span>
+          <span>Source</span><span>adb logcat · Pixel 8 · USB</span>
+        </div>
+        <div class="fullmsg">createOrder failed req=7f3a9c2e: HTTP 500 ORDER_CREATE_FAILED
+message="Promotion SUMMER25 could not be applied"
+traceId=b81f0c7d44e2a913</div>
+
+        <div>
+          <div class="sec-h">Linked request (same X-Request-ID)</div>
+          <div class="card">
+            <div class="l1"><span class="m post">POST</span><span class="path">/api/v1/orders</span><span class="st s5">500</span><span class="spacer"></span><button class="btn small">Open in Traffic →</button></div>
+            <div class="l2">19:41:18.902 · 842 ms · api-staging.mycompany.com · req 7f3a9c2e</div>
+          </div>
+        </div>
+
+        <div>
+          <div class="sec-h">Requests around this line (±5 s)</div>
+          <div class="ctx">
+            <div><span class="t">19:41:15.318</span><span class="m post">POST</span><span class="st s4">422</span><span class="p">/api/v1/promo/validate</span></div>
+            <div class="cur"><span class="t">19:41:18.902</span><span class="m post">POST</span><span class="st s5">500</span><span class="p">/api/v1/orders</span></div>
+            <div><span class="t">19:41:19.120</span><span class="m post">POST</span><span class="st s2">202</span><span class="p">/api/v1/analytics/events</span></div>
+            <div><span class="t">19:41:22.540</span><span class="m get">GET</span><span class="st s3">304</span><span class="p">/api/v1/config/app</span></div>
+            <div><span class="t">19:41:24.007</span><span class="m get">GET</span><span class="st s5">500</span><span class="p">/api/v1/orders/history</span></div>
+          </div>
+        </div>
+
+        <div class="row" style="margin-top: auto;">
+          <button class="btn">Show only this tag</button>
+          <span class="spacer"></span>
+          <button class="btn primary">🐞 Add to bug report</button>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-wizard">
+  <h2>3. Device setup wizard (U2)</h2>
+  <p>Guides QA through connecting a device: choose the target, scan the WireGuard QR code, install the certificate, and confirm that traffic arrives.</p>
+
+  <div class="window" style="width: 1060px;">
+    <div class="titlebar">
+      <div class="lights"><span></span><span></span><span></span></div>
+      <span class="title">Connect a test device</span>
+    </div>
+    <div class="wizard-body">
+      <aside class="steps">
+        <div class="step done"><span class="num">1</span><div><div class="lbl">Choose device</div><div class="sub">iPhone (physical)</div></div></div>
+        <div class="step cur"><span class="num">2</span><div><div class="lbl">Connect tunnel</div><div class="sub">WireGuard</div></div></div>
+        <div class="step todo"><span class="num">3</span><div><div class="lbl">Install certificate</div><div class="sub">Once per device</div></div></div>
+        <div class="step todo"><span class="num">4</span><div><div class="lbl">Verify traffic</div><div class="sub">Open the app</div></div></div>
+        <div class="step todo"><span class="num">5</span><div><div class="lbl">Device logs</div><div class="sub">Optional, USB</div></div></div>
+      </aside>
+      <div class="wiz-main">
+        <h3>Connect your iPhone through WireGuard</h3>
+        <p class="lead">Works on any Wi-Fi network and also captures apps that ignore the phone's proxy setting.</p>
+
+        <div class="targets">
+          <div class="target on"><span class="ic">📱</span><div><div class="nm">iPhone</div><div class="ds">Physical device</div></div></div>
+          <div class="target"><span class="ic">🤖</span><div><div class="nm">Android</div><div class="ds">Physical device</div></div></div>
+          <div class="target"><span class="ic">🖥️</span><div><div class="nm">iOS Simulator</div><div class="ds">Needs Mac proxy</div></div></div>
+          <div class="target"><span class="ic">🧩</span><div><div class="nm">Android emulator</div><div class="ds">WireGuard / 10.0.2.2</div></div></div>
+        </div>
+
+        <div class="connect">
+          <div>
+            <svg class="qr" id="qr" viewBox="0 0 29 29" role="img" aria-label="WireGuard configuration QR code (illustrative)"></svg>
+            <div style="text-align:center; color: var(--muted); font-size: 11.5px; margin-top: 6px;">Mac address 192.168.1.24 · UDP 51820</div>
+          </div>
+          <div>
+            <ol class="instr">
+              <li>Install <b>WireGuard</b> from the App Store.</li>
+              <li>Open WireGuard → <b>Add a tunnel</b> → <b>Create from QR code</b>, and scan this code.</li>
+              <li>Name the tunnel <span class="kbd">Wiretrace</span> and allow adding the VPN configuration.</li>
+              <li>Switch the tunnel <b>on</b>.</li>
+            </ol>
+            <div class="waiting"><span class="spinner"></span><div><b>Waiting for the device…</b><br><span style="font-size:12px">This changes to "Connected" as soon as the first packet arrives.</span></div></div>
+            <div class="tip">No connection after 30 seconds? Phone and Mac may be on a guest Wi-Fi that blocks device-to-device traffic. Try the QA Wi-Fi or a hotspot. <a href="#" style="color: var(--blue);">Troubleshooting guide</a></div>
+          </div>
+        </div>
+
+        <div class="wiz-foot">
+          <button class="btn ghost">Use Wi-Fi proxy instead</button>
+          <span class="spacer"></span>
+          <button class="btn">Back</button>
+          <button class="btn primary">Next: Install certificate</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-rules">
+  <h2>4. Mock &amp; fault rules (U8)</h2>
+  <p>QA creates rules without editing files: return a mock response, force a status code, add delay, or drop the connection. Rules are saved per preset and can be shared through git.</p>
+
+  <div class="window" style="width: 1180px;">
+    <div class="titlebar">
+      <div class="lights"><span></span><span></span><span></span></div>
+      <span class="title">Rules — preset: staging</span>
+      <span class="spacer"></span>
+      <button class="btn small">Import…</button>
+      <button class="btn small">Export…</button>
+      <button class="btn small primary">＋ New rule</button>
+    </div>
+    <div class="rules-body">
+      <div class="rule-list">
+        <div class="hdr"><div class="search">🔍 Filter rules…</div><span class="select">All types</span></div>
+        <div class="rule sel">
+          <div class="rt"><span class="m post">POST</span> /api/v1/orders</div><span class="toggle on"></span>
+          <div class="ra"><span class="tag fault">status</span>&nbsp; Return 500 · once per app launch</div>
+        </div>
+        <div class="rule">
+          <div class="rt"><span class="m get">GET</span> /api/v1/profile</div><span class="toggle on"></span>
+          <div class="ra"><span class="tag mock">mock</span>&nbsp; profile_vip_member.json</div>
+        </div>
+        <div class="rule">
+          <div class="rt"><span class="m get">GET</span> /api/v1/orders/history</div><span class="toggle on"></span>
+          <div class="ra"><span class="tag fault">status</span>&nbsp; Return 500 · always</div>
+        </div>
+        <div class="rule off">
+          <div class="rt"><span class="m post">POST</span> /api/v1/payments</div><span class="toggle"></span>
+          <div class="ra"><span class="tag slow">delay</span>&nbsp; 8,000 ms then forward</div>
+        </div>
+        <div class="rule off">
+          <div class="rt"><span class="m get">GET</span> /api/v1/promotions*</div><span class="toggle"></span>
+          <div class="ra"><span class="tag mock">mock</span>&nbsp; promotions_empty.json</div>
+        </div>
+        <div class="rule off">
+          <div class="rt"><span class="m get">ANY</span> /api/v1/cart*</div><span class="toggle"></span>
+          <div class="ra"><span class="tag fault">drop</span>&nbsp; Close connection (simulate network loss)</div>
+        </div>
+        <div class="rule off">
+          <div class="rt"><span class="m post">POST</span> /auth/v2/token/refresh</div><span class="toggle"></span>
+          <div class="ra"><span class="tag fault">status</span>&nbsp; Return 401 · every 3rd call</div>
+        </div>
+      </div>
+
+      <div class="editor">
+        <div class="row">
+          <div class="field" style="flex:1"><label>Rule name</label><div class="input">Order creation fails with server error</div></div>
+          <div class="field"><label>Enabled</label><div style="height:30px; display:flex; align-items:center"><span class="toggle on"></span></div></div>
+        </div>
+
+        <div class="field">
+          <label>When request matches</label>
+          <div class="row">
+            <div class="input" style="width:100px">POST ⌄</div>
+            <div class="input" style="width:250px">api-staging.mycompany.com ⌄</div>
+            <div class="input mono" style="flex:1">/api/v1/orders</div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div class="input mono" style="flex:1; color: var(--muted)">＋ Body contains:  "promoCode":"SUMMER25"</div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Then</label>
+          <div class="seg"><span>Mock response</span><span class="on">Status code</span><span>Delay</span><span>Drop connection</span></div>
+        </div>
+
+        <div class="row">
+          <div class="field" style="width:220px"><label>Status</label><div class="input" style="white-space:nowrap">500 Internal Server Error ⌄</div></div>
+          <div class="field" style="width:150px"><label>Extra delay</label><div class="input">800 ms</div></div>
+          <div class="field" style="flex:1"><label>Apply</label><div class="seg"><span>Always</span><span class="on">Once per launch</span><span>Every Nth</span></div></div>
+        </div>
+
+        <div class="field">
+          <label>Response body</label>
+<div class="bodyedit">{
+  <span class="k">"error"</span>: {
+    <span class="k">"code"</span>: <span class="s">"ORDER_CREATE_FAILED"</span>,
+    <span class="k">"message"</span>: <span class="s">"Injected by Wiretrace"</span>
+  },
+  <span class="k">"timestamp"</span>: <span class="n">1791900078902</span>
+}</div>
+        </div>
+
+        <div class="stat"><span>Matched <b>3 times</b> this session</span><span>Last match <b>19:41:18</b></span><span>Created by <b>linh.qa</b></span></div>
+
+        <div class="row" style="justify-content:flex-end">
+          <button class="btn danger">Delete</button>
+          <span class="spacer"></span>
+          <button class="btn">Test against last request</button>
+          <button class="btn primary">Save rule</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-report">
+  <h2>5. Bug report (U10)</h2>
+  <p>One click from a failed request. Sensitive data is masked before anything leaves the Mac.</p>
+
+  <div class="stage" style="width: 1060px;">
+    <div class="ghost-win"></div>
+    <div class="dim"></div>
+    <div class="sheet">
+      <h3>Report bug</h3>
+      <p class="lead">From request <span class="kbd">POST /api/v1/orders → 500</span> at 19:41:18 · Pixel 8 · Android 15 · app 4.12.0 (QA build 812)</p>
+
+      <div class="field"><label>Title</label><div class="input">Placing an order with promo code SUMMER25 returns 500 and shows a generic error</div></div>
+
+      <div class="grid2">
+        <div>
+          <div class="sec">
+            <div class="sec-h">Include</div>
+            <div class="check"><span class="cb on"></span>Selected request<span class="d">1 request</span></div>
+            <div class="check"><span class="cb on"></span>Other requests from ±30 s before/after<span class="d">14 requests</span></div>
+            <div class="check"><span class="cb on"></span>Device logs (same time window)<span class="d">42 lines</span></div>
+            <div class="check"><span class="cb on"></span>App logs<span class="d">8 lines</span></div>
+            <div class="check"><span class="cb"></span>Crash reports<span class="d">none found</span></div>
+            <div class="check"><span class="cb on"></span>Device screenshot<span class="d">taken now via adb</span></div>
+          </div>
+
+          <div class="sec">
+            <div class="sec-h">Masked before export</div>
+            <div class="redact"><span>Authorization</span><span>Cookie</span><span>Set-Cookie</span><span>accessToken</span><span>refreshToken</span><span>password</span><span>otp</span></div>
+          </div>
+
+        </div>
+        <div class="sec">
+          <div class="sec-h">Screenshot</div>
+          <div class="shot">
+            <div class="phone"><i style="width:60%"></i><i></i><i style="width:80%"></i><i class="e"></i><i style="width:70%"></i><i></i><i style="width:50%"></i></div>
+            Pixel 8 · 19:41:20
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="sec-h">Destination</div>
+        <div class="radio" style="white-space: nowrap;"><span class="rd on"></span><span>Create <b>YouTrack</b> issue in</span><span class="select" style="height:24px">MOB — Mobile App</span><span style="margin-left: 6px;">Type</span><span class="select" style="height:24px">Bug</span><span style="margin-left: 6px;">Priority</span><span class="select" style="height:24px">Major</span></div>
+        <div style="color: var(--muted); font-size: 11.5px; margin: -2px 0 4px 26px;">Signed in to mycompany.youtrack.cloud as linh.qa · token stored in macOS Keychain · tag <span class="kbd">wiretrace</span> added</div>
+        <div class="radio"><span class="rd"></span>Create Jira issue</div>
+        <div class="radio"><span class="rd"></span>Save .zip to Desktop</div>
+      </div>
+
+      <div class="sheet-foot">
+        <button class="btn ghost">Preview contents…</button>
+        <span class="spacer"></span>
+        <button class="btn">Cancel</button>
+        <button class="btn primary">Create YouTrack issue</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-menubar">
+  <h2>6. Menu-bar status (U1)</h2>
+  <p>Shows that recording is on and how many errors happened, without switching windows.</p>
+
+  <div class="menubar-stage">
+    <div class="menubar"><span>🔋</span><span>📶</span><span class="qa">Wiretrace · 6</span><span>Tue 19:42</span></div>
+    <div class="popover">
+      <div class="ph"><b>Wiretrace</b><span class="pill ok">Recording</span></div>
+      <div class="kv">
+        <span>Preset</span><span>staging</span>
+        <span>Device</span><span>Pixel 8 · WireGuard + USB</span>
+        <span>Duration</span><span>00:12:41</span>
+      </div>
+      <div class="stats3">
+        <div><b>248</b><small>requests</small></div>
+        <div class="bad"><b>6</b><small>errors</small></div>
+        <div><b>2</b><small>rules on</small></div>
+      </div>
+      <div class="menu-item hl">Open Wiretrace <span class="sc">⌘O</span></div>
+      <div class="menu-item">Pause recording <span class="sc">⌘P</span></div>
+      <div class="menu-item">Report last error… <span class="sc">⌘R</span></div>
+      <div class="sep"></div>
+      <div class="menu-item">Stop session</div>
+      <div class="menu-item">Quit</div>
+    </div>
+  </div>
+</section>
+
+<script>
+  // Illustrative QR-like pattern for the wizard (not a real WireGuard config).
+  (function () {
+    const svg = document.getElementById('qr');
+    const N = 29;
+    let seed = 7;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const cells = [];
+    const finder = (x, y) => {
+      cells.push(`<rect x="${x}" y="${y}" width="7" height="7" fill="#1d1d1f"/>`);
+      cells.push(`<rect x="${x + 1}" y="${y + 1}" width="5" height="5" fill="#fff"/>`);
+      cells.push(`<rect x="${x + 2}" y="${y + 2}" width="3" height="3" fill="#1d1d1f"/>`);
+    };
+    const inFinder = (x, y) =>
+      (x < 8 && y < 8) || (x > N - 9 && y < 8) || (x < 8 && y > N - 9);
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!inFinder(x, y) && rnd() > 0.52) {
+          cells.push(`<rect x="${x}" y="${y}" width="1" height="1" fill="#1d1d1f"/>`);
+        }
+      }
+    }
+    finder(0, 0); finder(N - 7, 0); finder(0, N - 7);
+    svg.innerHTML = cells.join('');
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,7 @@
+.venv/
+sessions/
+dist/
+.download.*/
+__pycache__/
+.pytest_cache/
+.DS_Store

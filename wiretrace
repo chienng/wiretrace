@@ -1,0 +1,14 @@
+#!/bin/sh
+# Runs the Wiretrace CLI with the project venv. Never fall back to /usr/bin/python3:
+# without the Xcode Command Line Tools it is a stub that opens an install dialog.
+set -e
+
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PY="$DIR/.venv/bin/python"
+
+if [ ! -x "$PY" ]; then
+    echo "wiretrace: no .venv found. Run scripts/setup-mac.sh first." >&2
+    exit 1
+fi
+
+PYTHONPATH="$DIR${PYTHONPATH:+:$PYTHONPATH}" exec "$PY" -m cli "$@"
