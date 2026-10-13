@@ -1,0 +1,26 @@
+# Wiretrace preset: one file per project and environment.
+# Copy this file to presets/<name>.yaml, set `name` to <name>, and list your API hosts.
+# Start with: ./wiretrace start --preset <name>
+#
+# Keys Wiretrace does not know yet are ignored, so a preset can already carry
+# settings for later features.
+
+# Required. Must equal the file name without .yaml.
+name: example
+
+# Required. Host names only: no https://, no port, no path, no wildcard.
+# Each host and all of its subdomains are decrypted, on any port; traffic to
+# every other host passes through undecrypted.
+api_hosts:
+  - api-staging.example.com
+  - auth-staging.example.com
+
+# Optional. mitmproxy filter expression shown at start: the view filter in mitmweb,
+# the print filter with --no-ui. It never limits what is saved.
+# Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image".
+default_filter: "!~t image"
+
+# Optional. The app under test; used by the log collectors (a later version).
+app:
+  android_package: com.example.myapp
+  ios_process: MyApp

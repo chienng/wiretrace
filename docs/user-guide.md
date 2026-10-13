@@ -1,12 +1,12 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.1.0**.
+For QA engineers. Covers Wiretrace **0.2.0**.
 
-What 0.1.0 gives you: a one-command install that needs no admin rights, a setup
-check (`./wiretrace doctor`), and mitmproxy, adb, and pymobiledevice3 ready to use. You
-capture traffic with mitmproxy's own commands (Part 3). The single
-`./wiretrace start --preset …` command, presets, mocks, redaction, and bug-report export are
-planned ([`PLAN.md`](../PLAN.md) Phase 1) and not in this version yet.
+What 0.2.0 gives you: a one-command install that needs no admin rights, a setup
+check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
+captures only your project's API traffic and saves each session in its own folder with a
+HAR file (Part 3). Mocks, redaction, log collection, and bug-report export are planned
+([`PLAN.md`](../PLAN.md) Phase 1) and not in this version yet.
 
 ---
 
@@ -18,7 +18,7 @@ planned ([`PLAN.md`](../PLAN.md) Phase 1) and not in this version yet.
   for a password.
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
-- The two release files: `wiretrace-0.1.0-macos.tar.gz` and `wiretrace-0.1.0-macos.tar.gz.sha256`.
+- The two release files: `wiretrace-0.2.0-macos.tar.gz` and `wiretrace-0.2.0-macos.tar.gz.sha256`.
 
 ### Step 1 — Check the download
 
@@ -26,16 +26,16 @@ Open **Terminal**, go to the folder with both files (usually Downloads), and run
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.1.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.2.0-macos.tar.gz.sha256
 ```
 
-It must print `wiretrace-0.1.0-macos.tar.gz: OK`. If it prints `FAILED`, download the file
+It must print `wiretrace-0.2.0-macos.tar.gz: OK`. If it prints `FAILED`, download the file
 again and do not continue.
 
 ### Step 2 — Extract into your home folder
 
 ```bash
-tar -xzf wiretrace-0.1.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.2.0-macos.tar.gz -C ~
 ```
 
 This creates `~/wiretrace`. Use this command rather than double-clicking the file in Finder,
@@ -91,6 +91,22 @@ continue.
 | `WARN Android devices: … unauthorized` | Unlock the phone and accept **Allow USB debugging**. |
 | `INFO CA certificate: not created yet` | Normal before the first start. |
 | `WARN CA private key: readable by other users` | Run the `chmod 600 …` command shown. |
+
+### Step 6 — Create a preset for your project
+
+A preset tells Wiretrace which API hosts to decrypt. It is one file per project and
+environment in `~/wiretrace/presets/`. Start from the example:
+
+```bash
+cd ~/wiretrace
+cp presets/example.yaml presets/staging.yaml
+open -e presets/staging.yaml
+```
+
+Set `name: staging` (it must match the file name) and list your API hosts under
+`api_hosts`: host names only, such as `api-staging.mycompany.com`, without `https://`,
+port, or path. Each host's subdomains are included. The comments in the file explain the
+other fields. If the file has a mistake, `./wiretrace start` names the file and the problem.
 
 ---
 
@@ -167,50 +183,37 @@ errors, see [Troubleshooting](#part-5--troubleshooting).
 
 ## Part 3 — Test with Wiretrace (every session)
 
-Replace `api-staging.mycompany.com` below with your project's API host(s).
+The examples use a preset named `staging` (Part 1, Step 6).
 
 ### Step 1 — Start capturing
 
-Make a folder for the session, then start mitmproxy in one of two ways.
-
 ```bash
-cd ~/wiretrace && source .venv/bin/activate
-mkdir -p sessions/2026-10-13_staging_android && cd sessions/2026-10-13_staging_android
+cd ~/wiretrace
+./wiretrace start --preset staging --target android
 ```
 
-**With the web UI** (easiest for browsing requests):
+mitmweb opens in a browser tab, in WireGuard mode. Wiretrace prints where the session is
+saved, for example `sessions/2026-10-13_143005_staging_android/`.
 
-```bash
-mitmweb --mode wireguard \
-  --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
-  -w session.mitm
-```
-
-**Without a UI**, in the Terminal only:
-
-```bash
-mitmdump --mode wireguard \
-  --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
-  -w session.mitm \
-  "~d api-staging.mycompany.com"
-```
-
-- `--allow-hosts` decrypts **only** your API. Other apps and third-party traffic pass
-  through untouched. Repeat it for each host. mitmproxy matches the pattern against
-  `host:port` (e.g. `api-staging.mycompany.com:443`), so keep the `(:\d+)?` before the `$`;
-  without it nothing is decrypted.
-- `-w session.mitm` saves every request and response, so nothing is lost if you close
-  the window.
-- The quoted filter at the end of `mitmdump` limits what is printed. Common filters:
+- Only the preset's `api_hosts` and their subdomains are decrypted. Other apps and
+  third-party traffic pass through untouched.
+- Every request and response is saved to `flows.mitm` in the session folder as it
+  happens, so nothing is lost if you close the window.
+- `--target` is `android`, `ios`, `android-emu`, `ios-sim`, or `device` (the default). It
+  names the session folder and picks the setup reminders printed at start.
+- `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
+- `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
+  Wi-Fi proxy to `<Mac IP>:8080`.
+- The preset's `default_filter` is the starting filter: in mitmweb's search box, or what
+  is printed with `--no-ui`. It never limits what is saved. Common filters:
   `~c 500` (status 500), `~m POST`, `~u /api/v1/orders`, `~bs "SOME_TEXT"` (response body).
   More in [`PLAN.md` Appendix B](../PLAN.md#appendix-b--mitmweb-filter-expressions-for-qa).
-  In mitmweb, type the same filters into the search box.
-- Add `--flow-detail 3` to `mitmdump` to also print headers and bodies.
+- If a port is in use, Wiretrace says which one and does not start. Usually another Wiretrace or mitmproxy window is still open: quit it.
 
 ### Step 2 — Collect app logs (second Terminal window)
 
-Connect the phone by USB, and `cd` into the same session folder, so the log file ends
-up next to `session.mitm`.
+Connect the phone by USB, and `cd` into the session folder printed at start, so the
+log file ends up next to `flows.mitm`.
 
 Android (replace `com.mycompany.myapp` with your app's package name):
 
@@ -235,33 +238,57 @@ the request and the log lines.
 
 ### Step 4 — Stop
 
-Press **Ctrl+C** in both Terminal windows.
+Press **Ctrl+C** once in the Wiretrace window. It stops mitmproxy, writes `flows.har` next to
+`flows.mitm`, and prints the session folder. If it says *still stopping*, press Ctrl+C
+again to force it. If nothing was captured, the session folder is removed.
 
-For an iOS crash, also pull the crash reports:
+Press **Ctrl+C** in the log window too.
+
+For an iOS crash, also pull the crash reports into the session folder:
 
 ```bash
+source ~/wiretrace/.venv/bin/activate
 pymobiledevice3 crash pull ./crashes
 ```
 
 ### Step 5 — Export for the bug ticket
 
-Turn the saved session into a HAR file (opens in Chrome DevTools, Charles, Proxyman, …):
+Attach `flows.har` from the session folder. It opens in Chrome DevTools, Charles,
+Proxyman, …
 
-```bash
-mitmdump -n -r session.mitm --set hardump=session.har
-```
-
-To look at the session again later: `mitmweb -r session.mitm`. In mitmweb you can also
+To look at the session again later: `mitmweb -r flows.mitm`. In mitmweb you can also
 copy a single request as cURL.
 
-> **Important: exports are not redacted yet.** `session.mitm`, `session.har` and the log
+> **Important: exports are not redacted yet.** `flows.mitm`, `flows.har` and the log
 > files contain access tokens, cookies, and whatever the test account sent. Attach them only
 > to internal tickets, never to public places or chats. Automatic redaction is planned
 > (feature F5). Use test accounts only.
 
+### Without the launcher
+
+`./wiretrace start` runs mitmproxy for you. To run it yourself, for example to add options
+the launcher does not pass on yet:
+
+```bash
+cd ~/wiretrace && source .venv/bin/activate
+mkdir -p sessions/my-session && cd sessions/my-session
+mitmweb --mode wireguard \
+  --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
+  -w flows.mitm
+```
+
+- Repeat `--allow-hosts` for each host. mitmproxy matches the pattern against `host:port`
+  (e.g. `api-staging.mycompany.com:443`), so keep the `(:\d+)?` before the `$`; without it
+  nothing is decrypted.
+- Use `mitmdump` instead of `mitmweb` for the Terminal only; add `--flow-detail 3` to also
+  print headers and bodies.
+- After stopping, make the HAR file yourself:
+  `mitmdump -n -r flows.mitm --set hardump=flows.har`
+
 ### Optional — Fake responses and slow networks
 
-mitmproxy can already do this with built-in options; add them to the start command.
+mitmproxy can already do this with built-in options. The launcher does not pass them on
+yet, so add them to the mitmproxy command in [Without the launcher](#without-the-launcher).
 
 Return a local JSON file instead of the real response:
 
@@ -297,7 +324,7 @@ More in [`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
 | No requests appear at all | Tunnel off, or the phone cannot reach the Mac. Check WireGuard shows a recent handshake. Corporate or guest Wi-Fi often blocks device-to-device traffic: try a QA Wi-Fi or the Mac's hotspot. Check the firewall line in `./wiretrace doctor`. |
 | `mitm.it` says traffic is not going through mitmproxy | The tunnel is off or not connected. |
 | App shows "network error" or HTTPS requests fail, other apps work | The certificate is not trusted (iPhone: full trust step), the app pins certificates, or the Android build does not trust user CAs. Ask for a QA build (R1, R2). |
-| Requests show up but are not decrypted | The host is not in `--allow-hosts`. Check the spelling and the regex. |
+| Requests show up but are not decrypted | The host is not in the preset's `api_hosts` (or, without the launcher, in `--allow-hosts`). Check the spelling. |
 | Some app's traffic is missing | That app ignores the phone's proxy settings: WireGuard mode normally catches it; if not, ask the mobile team (R7). |
 | `mitmweb: command not found` | Run `cd ~/wiretrace && source .venv/bin/activate` in this window. |
 | `adb: command not found` | Open a new Terminal window, or run setup without `--skip-android`. |
