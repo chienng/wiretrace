@@ -1,8 +1,8 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.2.0**.
+For QA engineers. Covers Wiretrace **0.2.1**.
 
-What 0.2.0 gives you: a one-command install that needs no admin rights, a setup
+What 0.2.1 gives you: a one-command install that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (Part 3). Mocks, redaction, log collection, and bug-report export are planned
@@ -18,9 +18,9 @@ HAR file (Part 3). Mocks, redaction, log collection, and bug-report export are p
   for a password.
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
-- The release file and its checksum: either `wiretrace-0.2.0-macos.tar.gz` and
-  `wiretrace-0.2.0-macos.tar.gz.sha256`, or `wiretrace-0.2.0-macos.dmg` and
-  `wiretrace-0.2.0-macos.dmg.sha256`. Both contain the same files.
+- The release file and its checksum: either `wiretrace-0.2.1-macos.tar.gz` and
+  `wiretrace-0.2.1-macos.tar.gz.sha256`, or `wiretrace-0.2.1-macos.dmg` and
+  `wiretrace-0.2.1-macos.dmg.sha256`. Both contain the same files.
 
 ### Step 1 — Check the download
 
@@ -29,8 +29,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.2.0-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.2.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.2.1-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.2.1-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -40,14 +40,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.2.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.2.1-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.2.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.2.1**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
