@@ -123,6 +123,9 @@ cd ~/wiretrace && source .venv/bin/activate
 mitmweb --mode wireguard
 ```
 
+Use this plain command here, not `./wiretrace start`: the launcher decrypts only your
+preset's hosts, so the `mitm.it` page in Step 3 would not load through the tunnel.
+
 A browser tab opens with mitmweb. The first time, macOS may ask whether to allow
 incoming connections: click **Allow**.
 
@@ -178,6 +181,9 @@ tunnel is off or not connected.
 
 Open the app on the phone. Its requests appear in mitmweb. If HTTPS requests show
 errors, see [Troubleshooting](#part-5--troubleshooting).
+
+Then press **Ctrl+C** in the mitmweb window. `./wiretrace start` needs the same ports and
+does not start while this mitmweb is still running.
 
 ---
 
@@ -322,7 +328,7 @@ More in [`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
 | Symptom | Likely cause and fix |
 |---|---|
 | No requests appear at all | Tunnel off, or the phone cannot reach the Mac. Check WireGuard shows a recent handshake. Corporate or guest Wi-Fi often blocks device-to-device traffic: try a QA Wi-Fi or the Mac's hotspot. Check the firewall line in `./wiretrace doctor`. |
-| `mitm.it` says traffic is not going through mitmproxy | The tunnel is off or not connected. |
+| `mitm.it` says traffic is not going through mitmproxy | The tunnel is off or not connected, or Wiretrace was started with `./wiretrace start`, which does not serve `mitm.it` through the tunnel. Use the plain `mitmweb` command from Part 2, Step 1. |
 | App shows "network error" or HTTPS requests fail, other apps work | The certificate is not trusted (iPhone: full trust step), the app pins certificates, or the Android build does not trust user CAs. Ask for a QA build (R1, R2). |
 | Requests show up but are not decrypted | The host is not in the preset's `api_hosts` (or, without the launcher, in `--allow-hosts`). Check the spelling. |
 | Some app's traffic is missing | That app ignores the phone's proxy settings: WireGuard mode normally catches it; if not, ask the mobile team (R7). |
@@ -330,7 +336,11 @@ More in [`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
 | `adb: command not found` | Open a new Terminal window, or run setup without `--skip-android`. |
 | `adb logcat --pid=…` prints an error | The app is not running. Start it, then rerun the command. |
 | iOS logs are empty or show `<private>` | The app logs with `print()` or private values. Ask the mobile team (R4). |
-| Port in use when starting | Another mitmproxy is still running. Quit it (Ctrl+C in its window). |
+| `Port … in use by another program` when starting | Another Wiretrace or mitmproxy is still running, often the `mitmweb` from Part 2. Quit it (Ctrl+C in its window). |
+| `Unknown preset '…'. Available presets: …` | Check the spelling; the name is the file name in `presets/` without `.yaml`. To add one, see Part 1, Step 6. |
+| `presets/<name>.yaml: …` | The preset file has a mistake; the message says which field. Fix the file and start again. |
+| `Nothing was captured; the session folder was removed.` | No request reached Wiretrace before you stopped. See *No requests appear at all*. |
+| `flows.har was not written (…)` | `flows.mitm` is kept. Make the HAR yourself: `cd` into the session folder, `source ~/wiretrace/.venv/bin/activate`, then `mitmdump -n -r flows.mitm --set hardump=flows.har`. |
 | Endpoint security quarantines mitmproxy | Ask IT to allowlist Wiretrace ([`install-without-admin.md`](install-without-admin.md#company-managed-macs-what-to-ask-it-for)). |
 
 ---
@@ -346,7 +356,8 @@ tar -xzf wiretrace-<version>-macos.tar.gz -C ~
 cd ~/wiretrace && scripts/setup-mac.sh
 ```
 
-Copy any sessions you want to keep from `~/wiretrace-old/sessions/`, then delete `~/wiretrace-old`.
+Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, and any
+sessions you want to keep from `~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
 
 **Remove Wiretrace completely:**
 
