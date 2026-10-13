@@ -182,7 +182,7 @@ mkdir -p sessions/2026-10-13_staging_android && cd sessions/2026-10-13_staging_a
 
 ```bash
 mitmweb --mode wireguard \
-  --allow-hosts '(^|\.)api-staging\.mycompany\.com$' \
+  --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
   -w session.mitm
 ```
 
@@ -190,13 +190,15 @@ mitmweb --mode wireguard \
 
 ```bash
 mitmdump --mode wireguard \
-  --allow-hosts '(^|\.)api-staging\.mycompany\.com$' \
+  --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
   -w session.mitm \
   "~d api-staging.mycompany.com"
 ```
 
 - `--allow-hosts` decrypts **only** your API. Other apps and third-party traffic pass
-  through untouched. Repeat it for each host.
+  through untouched. Repeat it for each host. mitmproxy matches the pattern against
+  `host:port` (e.g. `api-staging.mycompany.com:443`), so keep the `(:\d+)?` before the `$`;
+  without it nothing is decrypted.
 - `-w session.mitm` saves every request and response, so nothing is lost if you close
   the window.
 - The quoted filter at the end of `mitmdump` limits what is printed. Common filters:

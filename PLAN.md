@@ -200,7 +200,7 @@ Example for R1 (`res/xml/network_security_config.xml`):
 |---|---|
 | Intercept traffic | `uv tool install mitmproxy` (no admin needed), `mitmweb --mode wireguard` |
 | Filter traffic | mitmweb filter expressions (Appendix B) |
-| Decrypt only our APIs | `--allow-hosts '(^|\.)myapp\.com$'` |
+| Decrypt only our APIs | `--allow-hosts '(^|\.)myapp\.com(:\d+)?$'` |
 | Export | mitmweb: export flow as cURL / HAR; save session `.mitm` file |
 | Logs | Run `adb logcat` / `pymobiledevice3 syslog live` manually in Terminal |
 
@@ -546,9 +546,9 @@ Because the response is created inside the proxy, the fake host is never contact
 
    ```bash
    mitmweb --mode wireguard \
-     --allow-hosts '(^|\.)api-staging\.mycompany\.com$' \
-     --allow-hosts '(^|\.)auth-staging\.mycompany\.com$' \
-     --allow-hosts '^qa-logs\.internal$' \
+     --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
+     --allow-hosts '(^|\.)auth-staging\.mycompany\.com(:\d+)?$' \
+     --allow-hosts '^qa-logs\.internal(:\d+)?$' \
      --set qa_preset=staging \
      --set qa_session_dir=sessions/2026-10-13_staging_android \
      --set view_filter='~s & !~t image' \
@@ -754,7 +754,7 @@ All options install into the user's home folder (`~/wiretrace`, `~/Applications`
 | Install mitmproxy (Phase 0, no admin) | `uv tool install mitmproxy` |
 | Start with WireGuard | `mitmweb --mode wireguard` |
 | Start as regular proxy | `mitmweb --listen-port 8080` |
-| Decrypt only our APIs | `--allow-hosts '(^|\.)mycompany\.com$'` |
+| Decrypt only our APIs | `--allow-hosts '(^|\.)mycompany\.com(:\d+)?$'` |
 | Map local (built-in) | `--map-local '|api.mycompany.com/v1/profile|./mocks/profile.json'` |
 | Rewrite a header (built-in) | `--modify-headers '/~d api.mycompany.com/X-Debug/1'` |
 | Save a session | `--save-stream-file session.mitm` |
