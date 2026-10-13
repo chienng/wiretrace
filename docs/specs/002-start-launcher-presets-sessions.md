@@ -3,7 +3,7 @@
 - **Date**: 2026-10-13
 - **Tier**: M
 - **Repo**: wiretrace
-- **Status**: approved
+- **Status**: implemented
 - **Branch**: `feature/start-launcher`
 - **Related**: [`PLAN.md`](../../PLAN.md) §8 Phase 1 (F1, F2, F10, F12), §9.1, §9.2, §9.7;
   spec 001 (doctor, whose port check is reused)
@@ -197,3 +197,12 @@ name, unknown keys accepted, and the allow-hosts regex accepting `host:443` and
 
 Which API hosts should the first real presets cover (app, environment)? The preset
 files can be added later without a spec change.
+
+## Errata
+
+- 2026-10-13, Gate R finding, approved at Gate P: `doctor.check_port` also binds `::`
+  (IPv6 only) for TCP ports on `0.0.0.0`, because mitmproxy's TCP servers listen on both
+  families and fail to start if either is taken. Without it, a port held only on IPv6
+  passed the pre-check and mitmproxy then exited with "address already in use". UDP is
+  unchanged: mitmproxy falls back to IPv4 when `::` is taken. This is the one change to
+  `doctor` this spec makes; doctor reports `FAIL` in that case where it reported `OK`.

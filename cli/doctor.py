@@ -7,6 +7,7 @@ serial numbers or UDIDs.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -115,17 +116,34 @@ def check_adb(adb: str | None) -> list[Result]:
 
 # 5. Ports
 
+def _bind_error(family: int, kind: int, host: str, port: int) -> OSError | None:
+    with socket.socket(family, kind) as sock:
+        if kind == socket.SOCK_STREAM:
+            # mitmproxy sets SO_REUSEADDR too, so TIME_WAIT leftovers are not a conflict.
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        if family == socket.AF_INET6:
+            sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        try:
+            sock.bind((host, port))
+        except OSError as e:
+            return e
+    return None
+
+
 def check_port(proto: str, host: str, port: int, label: str) -> Result:
     name = f"Port {proto.upper()} {port} ({label})"
     kind = socket.SOCK_DGRAM if proto == "udp" else socket.SOCK_STREAM
-    with socket.socket(socket.AF_INET, kind) as sock:
-        if proto == "tcp":
-            # mitmproxy sets SO_REUSEADDR too, so TIME_WAIT leftovers are not a conflict.
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    busy = _bind_error(socket.AF_INET, kind, host, port) is not None
+    if not busy and proto == "tcp" and host == "0.0.0.0":
+        # mitmproxy's TCP servers listen on "::" too and fail if it is taken. (Its UDP
+        # servers fall back to IPv4 only, so UDP needs no IPv6 check.)
         try:
-            sock.bind((host, port))
-        except OSError:
-            return Result(FAIL, name, "in use by another program; stop it or quit the other proxy")
+            error = _bind_error(socket.AF_INET6, kind, "::", port)
+        except OSError:  # no IPv6 on this Mac
+            error = None
+        busy = error is not None and error.errno == errno.EADDRINUSE
+    if busy:
+        return Result(FAIL, name, "in use by another program; stop it or quit the other proxy")
     return Result(OK, name, "free")
 
 

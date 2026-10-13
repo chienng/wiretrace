@@ -117,6 +117,28 @@ def test_port_in_use():
         assert doctor.check_port("tcp", "127.0.0.1", port, "test").status == FAIL
 
 
+def ipv6_only(kind):
+    sock = socket.socket(socket.AF_INET6, kind)
+    sock.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+    sock.bind(("::", 0))
+    return sock
+
+
+def test_tcp_port_in_use_on_ipv6_only():
+    # mitmproxy listens on "::" as well, so this would make it fail to start.
+    with ipv6_only(socket.SOCK_STREAM) as holder:
+        holder.listen()
+        port = holder.getsockname()[1]
+        assert doctor.check_port("tcp", "0.0.0.0", port, "test").status == FAIL
+
+
+def test_udp_port_in_use_on_ipv6_only_is_not_a_conflict():
+    # mitmproxy's UDP servers fall back to IPv4 when "::" is taken.
+    with ipv6_only(socket.SOCK_DGRAM) as holder:
+        port = holder.getsockname()[1]
+        assert doctor.check_port("udp", "0.0.0.0", port, "test").status == OK
+
+
 def test_udp_port_in_use():
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as holder:
         holder.bind(("127.0.0.1", 0))

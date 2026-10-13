@@ -211,11 +211,14 @@ def test_nothing_captured_removes_the_session_folder(launch):
     assert "Nothing was captured" in run.output
 
 
-def test_port_in_use_starts_nothing(tmp_path, capsys):
+@pytest.mark.parametrize("family", [socket.AF_INET, socket.AF_INET6])
+def test_port_in_use_starts_nothing(tmp_path, capsys, family):
     (tmp_path / "presets").mkdir()
     (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
-    with socket.socket() as holder:
-        holder.bind(("0.0.0.0", 0))
+    with socket.socket(family) as holder:
+        if family == socket.AF_INET6:
+            holder.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 1)
+        holder.bind(("0.0.0.0" if family == socket.AF_INET else "::", 0))
         holder.listen()
         port = holder.getsockname()[1]
         code = start.run("staging", "android", "proxy", ui=False, presets_dir=tmp_path / "presets",
