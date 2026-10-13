@@ -18,28 +18,39 @@ HAR file (Part 3). Mocks, redaction, log collection, and bug-report export are p
   for a password.
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
-- The two release files: `wiretrace-0.2.0-macos.tar.gz` and `wiretrace-0.2.0-macos.tar.gz.sha256`.
+- The release file and its checksum: either `wiretrace-0.2.0-macos.tar.gz` and
+  `wiretrace-0.2.0-macos.tar.gz.sha256`, or `wiretrace-0.2.0-macos.dmg` and
+  `wiretrace-0.2.0-macos.dmg.sha256`. Both contain the same files.
 
 ### Step 1 — Check the download
 
-Open **Terminal**, go to the folder with both files (usually Downloads), and run:
+Open **Terminal**, go to the folder with both files (usually Downloads), and run the line
+for the file you have:
 
 ```bash
 cd ~/Downloads
 shasum -a 256 -c wiretrace-0.2.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.2.0-macos.dmg.sha256
 ```
 
-It must print `wiretrace-0.2.0-macos.tar.gz: OK`. If it prints `FAILED`, download the file
-again and do not continue.
+It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
 
-### Step 2 — Extract into your home folder
+### Step 2 — Put the wiretrace folder in your home folder
+
+**From the `.tar.gz`:**
 
 ```bash
 tar -xzf wiretrace-0.2.0-macos.tar.gz -C ~
 ```
 
-This creates `~/wiretrace`. Use this command rather than double-clicking the file in Finder,
-so the folder ends up in the right place.
+Use this command rather than double-clicking the file in Finder, so the folder ends up in
+the right place.
+
+**From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
+Finder: **Go → Home**), then eject **Wiretrace 0.2.0**. Wiretrace cannot run from the disk
+image itself, because the image is read-only.
+
+Either way you now have `~/wiretrace`.
 
 ### Step 3 — Run the setup
 

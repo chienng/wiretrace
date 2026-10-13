@@ -34,3 +34,6 @@ Details, and what needs IT's help: [`docs/install-without-admin.md`](docs/instal
 uv pip install --python .venv/bin/python -r requirements-dev.txt
 .venv/bin/python -m pytest
 ```
+
+Release files (`.tar.gz` and `.dmg`, with checksums) are built from a commit into `dist/`:
+`scripts/build-release.sh [<commit>]`.
