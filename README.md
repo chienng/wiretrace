@@ -15,7 +15,10 @@ Add `--skip-android` if you only test iOS. Re-check the setup at any time with
 `./wiretrace doctor`.
 
 Capture a session: `./wiretrace start --preset staging --target android` (presets live in
-`presets/`; copy `presets/example.yaml` to start one). Ctrl+C stops it and writes `flows.har`.
+`presets/`; copy `presets/example.yaml` to start one). Ctrl+C stops it and writes `flows.har`
+(secrets masked).
+
+For a bug ticket: `./wiretrace report` writes a zip of the latest session (summary, masked HAR, masked logs).
 
 Step-by-step installation and usage: [`docs/user-guide.md`](docs/user-guide.md).
 Details, and what needs IT's help: [`docs/install-without-admin.md`](docs/install-without-admin.md).

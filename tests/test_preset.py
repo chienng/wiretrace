@@ -209,3 +209,67 @@ def test_unknown_app_keys_are_still_ignored(tmp_path):
 def test_app_without_keys_or_missing_still_loads(tmp_path):
     assert load(tmp_path, GOOD).app == {}
     assert load(tmp_path, GOOD + "app: {}\n").app == {}
+
+
+# redact: names added to the default masking rules
+
+def test_redact_defaults_to_nothing_added(tmp_path):
+    p = load(tmp_path, GOOD)
+    assert p.redact_headers == () and p.redact_fields == ()
+
+
+def test_good_redact_block(tmp_path):
+    p = load(tmp_path, GOOD + "redact:\n  headers: [X-Api-Key, X-Session]\n  json_fields: [otp, login_token, user.pin]\n")
+    assert p.redact_headers == ("X-Api-Key", "X-Session")
+    assert p.redact_fields == ("otp", "login_token", "user.pin")
+
+
+def test_redact_with_only_one_list(tmp_path):
+    assert load(tmp_path, GOOD + "redact:\n  headers: [X-Api-Key]\n").redact_fields == ()
+    assert load(tmp_path, GOOD + "redact:\n  json_fields: [otp]\n").redact_headers == ()
+
+
+def test_redact_empty_lists_are_allowed(tmp_path):
+    p = load(tmp_path, GOOD + "redact:\n  headers: []\n  json_fields: []\n")
+    assert p.redact_headers == () and p.redact_fields == ()
+    assert load(tmp_path, GOOD + "redact:\n  headers:\n  json_fields:\n").redact_headers == ()
+    assert load(tmp_path, GOOD + "redact: {}\n").redact_fields == ()
+
+
+@pytest.mark.parametrize("value", ["secret", "[a]", "5", "true"])
+def test_redact_must_be_a_mapping(tmp_path, value):
+    message = error(tmp_path, GOOD + f"redact: {value}\n")
+    assert "staging.yaml" in message and "'redact'" in message
+
+
+def test_redact_unknown_key_is_named(tmp_path):
+    message = error(tmp_path, GOOD + "redact:\n  header: [X-Api-Key]\n")
+    assert "staging.yaml" in message and "redact.header" in message
+
+
+@pytest.mark.parametrize("key", ["headers", "json_fields"])
+@pytest.mark.parametrize("value", ["X-Api-Key", "5", "{a: b}"])
+def test_redact_lists_must_be_lists(tmp_path, key, value):
+    message = error(tmp_path, GOOD + f"redact:\n  {key}: {value}\n")
+    assert f"redact.{key}" in message and "list" in message
+
+
+@pytest.mark.parametrize("name", ["X Api", "X-Api:", "''", "5", "[a]", "X-Api\\n"])
+def test_redact_bad_header(tmp_path, name):
+    message = error(tmp_path, GOOD + f"redact:\n  headers: [{name}]\n")
+    assert "staging.yaml" in message and "redact.headers" in message
+
+
+@pytest.mark.parametrize("name", ["''", "-otp", ".otp", "my field", "a" * 65, "a;b", "5", "[a]", "otp\\n"])
+def test_redact_bad_field(tmp_path, name):
+    message = error(tmp_path, GOOD + f"redact:\n  json_fields: [{name}]\n")
+    assert "staging.yaml" in message and "redact.json_fields" in message
+
+
+def test_redact_field_of_64_characters_is_good(tmp_path):
+    assert load(tmp_path, GOOD + f"redact:\n  json_fields: [{'a' * 64}]\n").redact_fields == ("a" * 64,)
+
+
+def test_unknown_top_level_keys_stay_ignored_next_to_redact(tmp_path):
+    p = load(tmp_path, GOOD + "reddact:\n  anything: 1\nredact:\n  headers: [X-Id]\n")
+    assert p.redact_headers == ("X-Id",)

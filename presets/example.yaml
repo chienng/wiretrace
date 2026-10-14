@@ -39,3 +39,12 @@ app:
   # --target ios or ios-sim: the app's process name, as shown in Xcode or Console.
   # Letters, digits, spaces, '.', '_' and '-' only, up to 64 characters.
   ios_process: MyApp
+
+# Optional. Names to hide in addition to the built-in ones, in flows.har and in the bug report
+# zip (`./wiretrace report`). Built in: the headers Authorization, Proxy-Authorization, Cookie and
+# Set-Cookie, and the fields password, access_token, refresh_token, id_token, client_secret,
+# token, api_key and secret. You cannot remove those. Capital letters, "_" and "-" do not matter: login_token also hides
+# loginToken. Only these two keys are allowed; a typo stops the start.
+# redact:
+#   headers: [X-Api-Key]           # header names: letters, digits and "-"
+#   json_fields: [otp, login_token]   # JSON, form and URL field names

@@ -1,7 +1,8 @@
 import argparse
 import sys
 
-from . import __version__, doctor, start
+from . import __version__, doctor, report, session, start
+from .preset import PRESETS_DIR
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -22,11 +23,18 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--no-ui", action="store_true",
                            help="run mitmdump in this Terminal instead of mitmweb")
 
+    report_cmd = commands.add_parser(
+        "report", help="write a bug report zip of a session (secrets masked) into its folder")
+    report_cmd.add_argument("session", nargs="?",
+                            help="session folder name or path (default: the most recent session)")
+
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return doctor.main()
     if args.command == "start":
         return start.run(args.preset, args.target, args.mode, ui=not args.no_ui)
+    if args.command == "report":
+        return report.run(args.session, session.SESSIONS_DIR, PRESETS_DIR)
     return 2
 
 

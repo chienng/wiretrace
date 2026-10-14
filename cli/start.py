@@ -14,6 +14,7 @@ PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> AB
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import signal
@@ -21,10 +22,11 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
+from datetime import datetime
 from importlib import metadata
 from pathlib import Path
 
-from . import __version__, doctor, session
+from . import __version__, doctor, redact, session
 from .preset import PRESETS_DIR, Preset, PresetError, allow_hosts_regexes, load_preset
 
 TARGETS = ("android", "ios", "android-emu", "ios-sim", "device")
@@ -198,7 +200,12 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         say("Not started.", err=True)
         return 1
 
+    removed = session.remove_old(sessions_dir, datetime.now())
+    if removed:
+        say(f"Deleted {removed} old session(s) (older than {session.KEEP_DAYS} days).")
+
     bin_dir = bin_dir or Path(sys.prefix) / "bin"
+    rules = redact.rules_for(preset)
     meta = {
         "wiretrace_version": __version__,
         "mitmproxy_version": _mitmproxy_version(),
@@ -209,6 +216,8 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         "ui": "mitmweb" if ui else "mitmdump",
         "device_logs": None,
         "status": "running",
+        # So `wiretrace report` still masks these names if the preset is later changed or deleted.
+        "redact": {"headers": list(rules.headers), "json_fields": list(rules.fields)},
     }
 
     # Installed before the folder exists, so no stop signal can leave a folder without a child.
@@ -232,10 +241,11 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         say(banner(preset, target, mode, ui, folder, proxy_port, mock_count, device_logs))
         return supervise(
             build_command(preset, mode, ui, flows, bin_dir, proxy_port, wiretrace_dir),
-            har_command(bin_dir, flows, folder / session.HAR),
+            har_command(bin_dir, flows, folder / session.HAR_TMP),
             folder,
             stops,
             collector_cmd,
+            rules,
         )
     finally:
         for sig, handler in previous.items():
@@ -310,7 +320,7 @@ class _Collector:
 
 
 def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: list[int],
-              collector_cmd: list[str] | None = None) -> int:
+              collector_cmd: list[str] | None = None, rules: redact.Rules | None = None) -> int:
     """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`."""
     tool = Path(child_cmd[0]).name
     try:
@@ -341,7 +351,7 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
         if collector:
             collector.close()
 
-    return _finalize(folder, har_cmd, STATUS[state], ended_at, stops)
+    return _finalize(folder, har_cmd, STATUS[state], ended_at, stops, rules or redact.rules_for(None))
 
 
 def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | None = None) -> str:
@@ -381,7 +391,8 @@ def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | Non
 
 # FINALIZING
 
-def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stops: list[int]) -> int:
+def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stops: list[int],
+              rules: redact.Rules) -> int:
     flows = session.has_flows(folder)
     if not flows and not session.has_logs(folder):
         session.remove(folder)
@@ -394,14 +405,40 @@ def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stop
     har_error = None
     if flows:
         say("Writing flows.har…")
-        har_error = convert_har(har_cmd, folder / session.HAR, stops)
+        har_error = write_masked_har(har_cmd, folder, rules, stops)
     else:
         say("No traffic was captured; flows.har was not written.")
     session.update_meta(folder, ended_at=ended_at, status=status, **counts)
     say(f"Session saved: {folder}")
+    say(f"For a bug ticket: ./wiretrace report {folder.name}")
     if har_error:
         say(f"flows.har was not written ({har_error}); flows.mitm is kept.", err=True)
     return 0 if status == "stopped" and not har_error else 1
+
+
+def write_masked_har(har_cmd: list[str], folder: Path, rules: redact.Rules, stops: list[int]) -> str | None:
+    """flows.har, masked. The unmasked HAR is `.flows.har.tmp`, removed on every path. Return why it failed."""
+    tmp, masked = folder / session.HAR_TMP, folder / session.HAR_MASKED
+    try:
+        error = convert_har(har_cmd, tmp, stops)
+        if error:
+            return error
+        try:
+            har = json.loads(tmp.read_text(encoding="utf-8"))
+            if not isinstance(har, dict):
+                return "could not mask it"
+            masked.write_text(json.dumps(redact.redact_har(har, rules)[0], indent=4), encoding="utf-8")
+            os.replace(masked, folder / session.HAR)
+        except Exception:
+            # Whatever went wrong, flows.har must not exist unmasked.
+            return "could not mask it"
+        return None
+    finally:
+        for leftover in (tmp, masked):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError:
+                pass
 
 
 def convert_har(har_cmd: list[str], har: Path, stops: list[int]) -> str | None:

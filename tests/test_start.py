@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from cli import session, start
+from cli import redact, session, start
 from cli.preset import Preset
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -74,7 +74,7 @@ if "-r" in args:
             log("har collector-gone")
     har = value("--set").split("=", 1)[1]
     with open(har, "w") as f:
-        json.dump({"log": {"entries": [{}]}}, f)
+        f.write(os.environ.get("FAKE_HAR") or json.dumps({"log": {"entries": [{}]}}))
     sys.exit(0)
 
 stopping = False
@@ -182,7 +182,8 @@ def wait_for(condition, timeout: float = 15) -> None:
 class Launch:
     def __init__(self, tmp_path: Path, fake_mode: str | None, host: str = "api.example.com",
                  bin_dir: Path | None = None, collector: str | list[str] | None = None,
-                 collector_lines: int = 1, app_lines: int = 0):
+                 collector_lines: int = 1, app_lines: int = 0, har: str = "", old_session: str = "", preset_extra: str = "",
+                 port: int | None = None):
         self.presets = tmp_path / "presets"
         self.sessions = tmp_path / "sessions"
         # Mocks are read from here, never from the real repo's mocks/ folder.
@@ -190,14 +191,19 @@ class Launch:
         self.events_file = tmp_path / "events.log"
         self.collector_events_file = tmp_path / "collector-events.log"
         self.presets.mkdir()
-        (self.presets / "staging.yaml").write_text(PRESET.format(host=host))
+        (self.presets / "staging.yaml").write_text(PRESET.format(host=host) + preset_extra)
         if bin_dir is None:
             bin_dir = tmp_path / "bin"
             bin_dir.mkdir()
             fake = bin_dir / "mitmdump"
             fake.write_text(f"#!{sys.executable}\n{FAKE_MITMDUMP}")
             fake.chmod(0o755)
-        self.port = free_port()
+        self.port = port or free_port()
+        if old_session:
+            old = self.sessions / old_session
+            old.mkdir(parents=True)
+            (old / session.META).write_text("{}")
+        self.old_session = old_session
         # A mode name runs the fake collector in that mode; a list is used as the command as is.
         command = collector
         if isinstance(collector, str) and collector != "real":
@@ -214,7 +220,8 @@ class Launch:
                "FAKE_EVENTS": str(self.events_file), "FAKE_MODE": fake_mode or "",
                "FAKE_COLLECTOR_EVENTS": str(self.collector_events_file),
                "FAKE_COLLECTOR_MODE": collector if isinstance(collector, str) else "",
-               "FAKE_COLLECTOR_LINES": str(collector_lines), "FAKE_APP_LINES": str(app_lines)}
+               "FAKE_COLLECTOR_LINES": str(collector_lines), "FAKE_APP_LINES": str(app_lines),
+               "FAKE_HAR": har}
         self.proc = subprocess.Popen(
             [sys.executable, "-c", DRIVER, json.dumps(args)], cwd=ROOT, env=env,
             start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -383,9 +390,12 @@ def test_meta_has_no_identifiers(launch):
     assert set(json.loads(text)) == {
         "wiretrace_version", "mitmproxy_version", "preset", "api_hosts", "target", "mode", "ui",
         "device_logs", "device_log_lines", "app_log_lines", "status", "started_at", "ended_at",
+        "redact",
     }
     meta = json.loads(text)
     assert (meta["device_logs"], meta["device_log_lines"], meta["app_log_lines"]) == (None, 0, 0)
+    # Only the rule names in use, so a report still masks them if the preset changes later.
+    assert meta["redact"] == {"headers": list(redact.DEFAULT_HEADERS), "json_fields": list(redact.DEFAULT_FIELDS)}
 
 
 # Command line
@@ -540,6 +550,118 @@ def test_real_mitmdump_two_sigints(launch):
     har = json.loads((folder / session.HAR).read_text())
     assert len(har["log"]["entries"]) == 2
     assert session.read_meta(folder)["status"] == "stopped"
+
+
+# Masking, report hint and old-session cleanup
+
+HAR_WITH_SECRETS = json.dumps({"log": {"entries": [{
+    "request": {"url": "https://api.example.com/login?access_token=fake-q",
+                "headers": [{"name": "Authorization", "value": "Bearer fake-token"},
+                            {"name": "Accept", "value": "*/*"}],
+                "postData": {"mimeType": "application/json", "text": '{"password": "fake-pw", "user": "ann"}'}},
+    "response": {"headers": [{"name": "Set-Cookie", "value": "sid=fake-sid"}],
+                 "content": {"text": '{"refresh_token": "fake-rt"}'}},
+}]}})
+TEMP_FILES = (session.HAR_TMP, session.HAR_MASKED)
+
+
+def test_har_is_masked_and_no_temporary_file_is_left(launch):
+    run = launch("normal", har=HAR_WITH_SECRETS)
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    [folder] = run.folders()
+    text = (folder / session.HAR).read_text()
+    for secret in ("fake-token", "fake-pw", "fake-sid", "fake-rt", "fake-q"):
+        assert secret not in text
+    entry = json.loads(text)["log"]["entries"][0]
+    assert entry["request"]["headers"] == [{"name": "Authorization", "value": "***"},
+                                           {"name": "Accept", "value": "*/*"}]
+    assert json.loads(entry["request"]["postData"]["text"]) == {"password": "***", "user": "ann"}
+    assert entry["request"]["url"].endswith("?access_token=***")
+    assert not any((folder / name).exists() for name in TEMP_FILES)
+    assert not [p.name for p in folder.iterdir() if p.name.startswith(".")]
+
+
+def test_preset_additions_are_applied_to_the_har(launch):
+    har = json.dumps({"log": {"entries": [{"request": {"headers": [{"name": "X-Api-Key", "value": "fake-key"}]}}]}})
+    run = launch("normal", har=har, preset_extra="redact:\n  headers: [X-Api-Key]\n")
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    [folder] = run.folders()
+    assert "fake-key" not in (folder / session.HAR).read_text()
+
+
+def test_flows_mitm_keeps_the_original_values(launch):
+    run = launch("normal", har=HAR_WITH_SECRETS)
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+    assert run.finish() == 0, run.output
+    [folder] = run.folders()
+    assert (folder / session.FLOWS).read_bytes() == b"flows"
+
+
+@pytest.mark.parametrize("har", ["not json at all", "[1, 2]", '{"log": '])
+def test_a_har_that_cannot_be_masked_is_a_har_failure(launch, har):
+    run = launch("normal", har=har)
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 1, run.output
+    [folder] = run.folders()
+    assert not (folder / session.HAR).exists()
+    assert not any((folder / name).exists() for name in TEMP_FILES)
+    assert (folder / session.FLOWS).is_file()
+    assert "flows.har was not written (could not mask it); flows.mitm is kept." in run.output
+    assert session.read_meta(folder)["status"] == "stopped"
+
+
+def test_the_report_command_is_printed_after_the_session_is_saved(launch):
+    run = launch("normal")
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    [folder] = run.folders()
+    lines = run.output.splitlines()
+    saved = lines.index(f"Session saved: {folder}")
+    assert lines[saved + 1] == f"For a bug ticket: ./wiretrace report {folder.name}"
+
+
+def test_old_sessions_are_deleted_before_the_new_one_and_counted(launch):
+    run = launch("normal", old_session="2020-01-01_000000_staging_android")
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert "Deleted 1 old session(s) (older than 14 days)." in run.output
+    assert run.output.index("Deleted 1 old session") < run.output.index("Saving to")
+    assert not (run.sessions / "2020-01-01_000000_staging_android").exists()
+    assert len(run.folders()) == 1
+
+
+def test_nothing_is_said_when_no_session_is_old(launch):
+    run = launch("normal")
+    run.wait_started()
+    os.kill(run.proc.pid, signal.SIGINT)
+    assert run.finish() == 0, run.output
+    assert "Deleted" not in run.output
+
+
+def test_old_sessions_are_kept_when_the_start_is_refused(launch):
+    busy = socket.socket(socket.AF_INET6)
+    busy.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+    busy.bind(("::", 0))
+    busy.listen()
+    try:
+        run = launch("normal", old_session="2020-01-01_000000_staging_android", port=busy.getsockname()[1])
+        assert run.finish() == 1, run.output
+    finally:
+        busy.close()
+    assert (run.sessions / "2020-01-01_000000_staging_android").is_dir()
 
 
 # Collector supervision, with a fake collector command

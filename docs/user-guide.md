@@ -120,6 +120,22 @@ Set `name: staging` (it must match the file name) and list your API hosts under
 port, or path. Each host's subdomains are included. The comments in the file explain the
 other fields. If the file has a mistake, `./wiretrace start` names the file and the problem.
 
+Wiretrace always hides passwords, tokens and cookies in the files you attach to a ticket
+(see Part 3, Step 5). If your app sends other secrets, name them in an optional `redact:`
+section of the preset. The names you add are hidden in addition to the built-in ones; you
+cannot switch the built-in ones off:
+
+```yaml
+redact:
+  headers: [X-Api-Key]          # extra header names
+  json_fields: [otp, login_token]   # extra field names in JSON bodies, forms and URLs
+```
+
+A header name has letters, digits and `-` only. A field name starts with a letter or digit
+and may also contain `_`, `.` and `-`. Capital letters, `_` and `-` do not matter, so
+`login_token` also hides `loginToken` and `Login-Token`. If `redact:` has a key other than
+`headers` or `json_fields`, or a name that is not valid, `./wiretrace start` stops and names it.
+
 ---
 
 ## Part 2 — Prepare a test device (once per device)
@@ -310,7 +326,8 @@ the request and the log lines.
 ### Step 4 — Stop
 
 Press **Ctrl+C** once in the Wiretrace window. It stops mitmproxy and the device log, writes
-`flows.har` next to `flows.mitm`, and prints the session folder. If it says *still
+`flows.har` (with passwords, tokens and cookies hidden) next to `flows.mitm`, and prints
+the session folder and the command for the bug report. If it says *still
 stopping*, press Ctrl+C again to force it. If nothing was captured (no requests and no log
 lines), the session folder is removed. If only log lines were captured, the folder is kept
 and Wiretrace says that `flows.har` was not written.
@@ -323,19 +340,72 @@ not do this for you yet; see *Without the launcher*).
 
 ### Step 5 — Export for the bug ticket
 
-Attach `flows.har` from the session folder. It opens in Chrome DevTools, Charles,
-Proxyman, … For the app's side of the problem, also attach `device.log.jsonl` and
-`app.log.jsonl` if they are there; the time in each line (`ts`) helps match it to the
-request.
+Run this in the Wiretrace folder:
+
+```bash
+cd ~/wiretrace
+./wiretrace report
+```
+
+It uses the most recent session. For an older one, add its folder name, for example
+`./wiretrace report 2026-10-13_143005_staging_android` (the launcher prints this command
+when it saves a session). You can run it while a session is still running, or after
+a crash.
+
+The command writes `<session folder name>-report.zip` inside the session folder and prints
+its path. **Attach that zip to the bug ticket.** It holds one folder with:
+
+- `summary.md`: the session (preset, target, start and end, Wiretrace version), counts of
+  requests, failed requests, requests Wiretrace mocked or made fail, and log lines, the
+  names that were hidden, and a table of the failed requests (status 400 or higher, or no
+  answer). The table shows time, method, host, path, status, duration, request ID, and a
+  note when Wiretrace itself caused the failure. A line such as `Wiretrace fault: status 500`
+  means *you* injected that error with `qa_fault_*`; it is not a backend bug. The table
+  has at most 100 rows.
+- `flows.har`: all requests, built again from `flows.mitm`. It opens in Chrome
+  DevTools, Charles, Proxyman, …
+- `device.log.jsonl` and `app.log.jsonl`, when they have lines; the time in each line
+  (`ts`) helps match it to the request.
+- `meta.json`: how the session ran.
+
+The zip never contains `flows.mitm`. If `flows.mitm` was cut off because the session was
+killed, the report uses the requests that could be read and says so.
 
 To look at the session again later: `mitmweb -r flows.mitm`. In mitmweb you can also
 copy a single request as cURL.
 
-> **Important: exports are not redacted yet.** `flows.mitm`, `flows.har`,
-> `device.log.jsonl` and `app.log.jsonl` contain access tokens, cookies, request IDs, and
-> whatever the test account sent or the app logged. Attach them only
-> to internal tickets, never to public places or chats. Automatic redaction is planned
-> (feature F5). Use test accounts only.
+**What is hidden (replaced by `***`).** In `flows.har` and in the zip's `flows.har`:
+
+- the headers `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`, and every
+  cookie value;
+- the fields `password`, `access_token`, `refresh_token`, `id_token`, `client_secret`,
+  `token`, `api_key` and `secret`, and any names you added with `redact:`, wherever they
+  appear in JSON request and response bodies (at any depth), in forms, in URLs (query and
+  `#` part), in the `Location` header, and in WebSocket text messages;
+- Capital letters, `_` and `-` do not matter: `accessToken` and `access-token` are hidden too.
+  A field name must match as a whole: `token` does not hide `login_token`; add that name
+  with `redact:` if you need it.
+- A body that looks like JSON but is cut off or broken is searched like a log line (below).
+
+In the log files of the zip, every text in each line is searched for the same header
+names, for `Bearer <token>`, and for `"field": "value"`, `field=value` and `field: value`.
+
+**What is not hidden. Read this before you share anything.**
+
+- Files in the session folder itself: `flows.mitm` and the log files there keep every
+  value. Only the zip's log files are changed.
+- The **File menu and export in mitmweb** save the original, unmasked data. For a ticket,
+  use `./wiretrace report`, not mitmweb's export.
+- A body that is not JSON or a URL-encoded form (for example XML, multipart uploads,
+  GraphQL text, binary data) is left as it is, even if it holds a password. So are
+  parts of the URL path, and binary WebSocket messages.
+- Logs are hidden by pattern only. A secret that does not look like one of the
+  patterns above stays in the log. The command says this every time; open the zip's log files
+  and check them before you share.
+- A secret under a name nobody listed stays visible. Add the name to `redact:` in the preset.
+
+Use test accounts only, and attach the zip only to internal tickets, never to public places
+or chats.
 
 ### Mock a response
 
@@ -503,7 +573,12 @@ Rules for the app:
 - Turn the WireGuard tunnel off when you are not testing.
 - When a device leaves testing: delete the tunnel, and remove the **mitmproxy** profile /
   certificate (iPhone: VPN & Device Management; Android: Security → Trusted credentials → User).
-- Delete old session folders in `~/wiretrace/sessions/`; they contain tokens and log lines.
+- Wiretrace deletes a session folder in `~/wiretrace/sessions/` by itself when you start a new
+  session and the folder is more than 14 days old (counted from the date in its name). It
+  tells you how many it deleted. **To keep a session, move its folder out of `sessions/`**
+  (for example to `~/Documents/bugs/`) before then. Only folders that Wiretrace created are
+  deleted; other files and folders in `sessions/` stay. Delete sessions you no longer need
+  earlier by hand: `flows.mitm` and the log files contain tokens and log lines.
 - Never copy or share `~/.mitmproxy/mitmproxy-ca.pem`. It is the private key that lets
   your Mac decrypt traffic from every device that trusts it.
 
@@ -538,7 +613,15 @@ Rules for the app:
 | `presets/<name>.yaml: …` | The preset file has a mistake; the message says which field. Fix the file and start again. |
 | `Nothing was captured; the session folder was removed.` | No request and no log line reached Wiretrace before you stopped. See *No requests appear at all*. |
 | `No traffic was captured; flows.har was not written.` | The session has log lines but no requests, so there is no HAR file. The session folder is kept. See *No requests appear at all*. |
-| `flows.har was not written (…)` | `flows.mitm` is kept. Make the HAR yourself: `cd` into the session folder, `source ~/wiretrace/.venv/bin/activate`, then `mitmdump -n -r flows.mitm --set hardump=flows.har`. |
+| `flows.har was not written (could not mask it); flows.mitm is kept.` | Wiretrace could not hide the secrets in the HAR, so it did not write it. `flows.mitm` is kept. Run `./wiretrace report` to get the masked HAR in the zip, and report the problem to the Wiretrace maintainers. |
+| `flows.har was not written (…)` (another reason) | `flows.mitm` is kept. Run `./wiretrace report` to get the HAR, masked, in the zip. Do not make a HAR with `mitmdump` yourself for a ticket: it has no masking. |
+| `Unknown session '…'` (from `./wiretrace report`) | The name is not a folder in `sessions/`. Check the spelling, or run `./wiretrace report` without a name for the latest one. You can also give the path of a session folder. |
+| `No sessions to report` or `… is not a Wiretrace session: it has no meta.json` | `sessions/` has no session yet, or the folder you named is not one Wiretrace saved. |
+| `Nothing to report: the session has no traffic and no log lines.` | The session captured nothing, so there is nothing to put in a zip. See *No requests appear at all*. |
+| `Warning: the preset of this session cannot be loaded (…)` (from `./wiretrace report`) | The preset was renamed, deleted or has a mistake. The report still hides the built-in names and the names the preset had when the session was captured, but not names added to the preset since. Fix or restore the preset file and run the report again. |
+| `Could not write the report: …` | The zip could not be saved, for example because the disk is full. No partial zip is left. Free some space and run the command again. |
+| `Deleted … old session(s) (older than 14 days).` | Normal, when you start Wiretrace. It removed old session folders. To keep a session, move its folder out of `sessions/` before then (Part 4). |
+| `redact.… is not a known key`, or `'redact.headers' entry …` (in `presets/<name>.yaml: …`) | The `redact:` section of the preset has an unknown key or an invalid name. Use only `headers` and `json_fields`, each a list (Part 1, Step 6). |
 | Endpoint security quarantines mitmproxy | Ask IT to allowlist Wiretrace ([`install-without-admin.md`](install-without-admin.md#company-managed-macs-what-to-ask-it-for)). |
 
 ---

@@ -1,8 +1,8 @@
 """Presets: one YAML file per project and environment, in presets/.
 
 A preset names the API hosts Wiretrace decrypts; traffic to every other host passes
-through undecrypted. Unknown keys are ignored, so presets written for later
-features still load.
+through undecrypted. Unknown top-level keys are ignored, so presets written for later
+features still load; inside `redact` they are an error, because a typo would turn masking off.
 """
 
 from __future__ import annotations
@@ -23,6 +23,8 @@ _IOS_PROCESS = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
 # An HTTP header field name is an RFC 9110 token.
 _HEADER = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 DEFAULT_REQUEST_ID_HEADER = "X-Request-ID"
+_FIELD = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}")
+REDACT_KEYS = ("headers", "json_fields")
 
 
 class PresetError(Exception):
@@ -38,6 +40,9 @@ class Preset:
     # Relative to the wiretrace folder; empty means mocks/<name>.
     mocks_dir: str = ""
     request_id_header: str = DEFAULT_REQUEST_ID_HEADER
+    # Added to the default masking rules in cli/redact.py; they can never remove one.
+    redact_headers: tuple[str, ...] = ()
+    redact_fields: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.mocks_dir:
@@ -110,8 +115,38 @@ def parse_preset(text: str, path: Path) -> Preset:
         if problem:
             raise PresetError(f"{where}: 'request_id_header' {problem}")
 
+    redact = data.get("redact")
+    if redact is not None:
+        problem = redact_problem(redact)
+        if problem:
+            raise PresetError(f"{where}: {problem}")
+    redact = redact or {}
+
     return Preset(name=name, api_hosts=tuple(hosts), default_filter=default_filter or None, app=app,
-                  mocks_dir=mocks_dir or "", request_id_header=header or DEFAULT_REQUEST_ID_HEADER)
+                  mocks_dir=mocks_dir or "", request_id_header=header or DEFAULT_REQUEST_ID_HEADER,
+                  redact_headers=tuple(redact.get("headers") or ()),
+                  redact_fields=tuple(redact.get("json_fields") or ()))
+
+
+def redact_problem(redact: object) -> str | None:
+    """Why a `redact` block cannot be used, or None. A list left empty counts as an empty list."""
+    if not isinstance(redact, dict):
+        return "'redact' must be a block with 'headers' and 'json_fields' lists"
+    for key in redact:
+        if key not in REDACT_KEYS:
+            return f"'redact.{key}' is not a known key; use 'headers' or 'json_fields'"
+    for key, pattern, example in (("headers", _HEADER, "X-Api-Key"), ("json_fields", _FIELD, "login_token")):
+        names = redact.get(key)
+        if names is None:
+            continue
+        if not isinstance(names, list):
+            return f"'redact.{key}' must be a list such as [{example}]"
+        for name in names:
+            if not (isinstance(name, str) and pattern.fullmatch(name)):
+                what = "a header name (letters, digits and '-' only)" if key == "headers" else (
+                    "a field name: up to 64 letters, digits, '_', '.' or '-', starting with a letter or digit")
+                return f"'redact.{key}' entry {name!r} must be {what}"
+    return None
 
 
 def app_problem(app: dict) -> str | None:

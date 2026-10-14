@@ -5,7 +5,7 @@
   (always-L: "anything that logs user data", "anything leaving the device"). Gates A, B,
   C, R, P. Gate D does not apply: one repo, no shared library.
 - **Repo**: wiretrace
-- **Status**: approved
+- **Status**: implemented
 - **Branch**: `main` (as specs 003 and 004)
 - **Related**: [`PLAN.md`](../../PLAN.md) §8 Phase 1 (F5, F11), §9.2 (`redact` preset key),
   §9.4, §11 ("exports are redacted by default, and sessions older than N days are deleted
@@ -248,3 +248,24 @@ the wrong folder.
 ## Automated tests
 
 `.venv/bin/python -m pytest` — the lists above, plus the existing 359.
+
+## Errata
+
+Changed after the security review (Gate B), before the first commit:
+
+- Default fields also include `token`, `api_key` and `secret`.
+- `meta.json` records the rules used at capture (`redact: {headers, json_fields}`); the report
+  adds them to the preset's current rules, so a deleted or edited preset no longer drops names.
+- `./wiretrace report <name>`: a bare name is looked up only in `sessions/`; only an argument with
+  a path separator is taken as a path.
+- `;` separates query and form pairs as well as `&`.
+- A fragment with a client-side route (`#/callback?access_token=…`) has the parameters after
+  its `?` masked (found by Gate A).
+- A body that starts like JSON (`{` or `[`) but does not parse is masked with the log-text
+  patterns instead of being left as it was.
+- JSON log lines: matching keys are masked, and every text value goes through the log-text
+  patterns, not only `message`.
+- The zip has no `flows.har` when the session has no readable HTTP flow.
+- Accepted as is: base64 response content is not masked (mitmproxy uses base64 only for mostly
+  binary bodies), and a `.flows.har.tmp` left by a launcher killed while finalizing is not removed
+  (`flows.mitm` in the same folder holds the same data, and the report never packs either file).

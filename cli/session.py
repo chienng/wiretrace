@@ -9,8 +9,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
@@ -19,6 +20,11 @@ HAR = "flows.har"
 DEVICE_LOG = "device.log.jsonl"
 APP_LOG = "app.log.jsonl"
 META = "meta.json"
+# The unmasked HAR exists only under this name, and is removed on every exit path.
+HAR_TMP = ".flows.har.tmp"
+HAR_MASKED = ".flows.har.masked"
+KEEP_DAYS = 14
+NAME = re.compile(r"(\d{4}-\d{2}-\d{2}_\d{6})_[A-Za-z0-9][A-Za-z0-9_-]*_(?:android|ios|android-emu|ios-sim|device)")
 
 
 def timestamp(now: datetime | None = None) -> str:
@@ -70,3 +76,44 @@ def has_logs(folder: Path) -> bool:
 
 def remove(folder: Path) -> None:
     shutil.rmtree(folder, ignore_errors=True)
+
+
+def started(name: str) -> datetime | None:
+    """When a session folder name says it started (naive local time, as written), or None."""
+    match = NAME.fullmatch(name)
+    if not match:
+        return None
+    try:
+        return datetime.strptime(match.group(1), "%Y-%m-%d_%H%M%S")
+    except ValueError:
+        return None
+
+
+def _is_session_dir(path: Path) -> bool:
+    return path.is_dir() and not path.is_symlink() and started(path.name) is not None
+
+
+def list_sessions(sessions_dir: Path = SESSIONS_DIR) -> list[Path]:
+    """Session folders by name, oldest first. Symlinks and anything else are left out."""
+    try:
+        found = [p for p in sessions_dir.iterdir() if _is_session_dir(p)]
+    except OSError:
+        return []
+    return sorted(found, key=lambda p: (started(p.name), p.name))
+
+
+def remove_old(sessions_dir: Path, now: datetime, keep_days: int = KEEP_DAYS) -> int:
+    """Delete session folders that started more than `keep_days` days before `now`. Returns how many."""
+    if now.tzinfo is not None:
+        now = now.astimezone().replace(tzinfo=None)
+    cutoff = now - timedelta(days=keep_days)
+    removed = 0
+    for folder in list_sessions(sessions_dir):
+        if started(folder.name) >= cutoff or not (folder / META).is_file():
+            continue
+        try:
+            shutil.rmtree(folder)
+        except OSError:
+            continue
+        removed += 1
+    return removed
