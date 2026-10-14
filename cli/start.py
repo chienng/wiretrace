@@ -40,6 +40,9 @@ WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 # Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
 APP_LOGS_ADDON = WIRETRACE_DIR / "addons" / "app_logs.py"
+UI_ADDON = WIRETRACE_DIR / "addons" / "wiretrace_ui.py"
+UI_PORT = 8081
+MITMWEB, WIRETRACE, NO_UI = "mitmweb", "wiretrace", "none"
 RECEIVER_HOST = "qa-logs.internal"
 RECEIVER_ALLOW_HOSTS = r"^qa-logs\.internal(:\d+)?$"
 RECEIVER_SAVE_FILTER = r"!~d ^qa-logs\.internal$"
@@ -73,12 +76,22 @@ def say(message: str, err: bool = False) -> None:
 
 # PREPARE
 
-def needed_ports(mode: str, ui: bool, proxy_port: int = PROXY_PORT) -> list[tuple[str, str, int, str]]:
+def ui_kind(ui: bool | str) -> str:
+    """The UI as one of MITMWEB, WIRETRACE, NO_UI; a bool is the older way to say mitmweb or none."""
+    if isinstance(ui, str):
+        return ui
+    return MITMWEB if ui else NO_UI
+
+
+def needed_ports(mode: str, ui: bool | str, proxy_port: int = PROXY_PORT,
+                 ui_port: int = UI_PORT) -> list[tuple[str, str, int, str]]:
+    kind = ui_kind(ui)
     labels = {"WireGuard"} if mode == "wireguard" else {"proxy"}
-    if ui:
+    if kind != NO_UI:
         labels.add("mitmweb UI")
+    ports = {"proxy": proxy_port, "mitmweb UI": ui_port if kind == WIRETRACE else UI_PORT}
     return [
-        (proto, host, proxy_port if label == "proxy" else port, label)
+        (proto, host, ports.get(label, port), "Wiretrace UI" if kind == WIRETRACE and label == "mitmweb UI" else label)
         for proto, host, port, label in doctor.PORTS
         if label in labels
     ]
@@ -88,9 +101,11 @@ def busy_ports(ports: list[tuple[str, str, int, str]]) -> list[doctor.Result]:
     return [r for r in (doctor.check_port(*p) for p in ports) if r.status == doctor.FAIL]
 
 
-def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Path,
-                  proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR) -> list[str]:
-    cmd = [str(bin_dir / ("mitmweb" if ui else "mitmdump"))]
+def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
+                  proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
+                  ui_port: int = UI_PORT) -> list[str]:
+    kind = ui_kind(ui)
+    cmd = [str(bin_dir / ("mitmweb" if kind == MITMWEB else "mitmdump"))]
     if mode == "wireguard":
         cmd += ["--mode", "wireguard"]
     else:
@@ -101,6 +116,8 @@ def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Pat
     cmd += ["--allow-hosts", RECEIVER_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
     cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
+    if kind == WIRETRACE:
+        cmd += ["-s", str(UI_ADDON)]
     for host in preset.api_hosts:
         cmd += ["--set", f"qa_api_hosts={host}"]
     cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
@@ -108,9 +125,15 @@ def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Pat
     cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
     # Receiver flows stay visible in mitmweb but are not saved: they would duplicate app.log.jsonl.
     cmd += ["--set", f"save_stream_filter={RECEIVER_SAVE_FILTER}"]
-    if preset.default_filter:
+    if kind == WIRETRACE:
+        # The window is the only output; the token is made by the addon and never goes on a command line.
+        cmd += ["--set", "flow_detail=0", "--set", f"qa_ui_port={ui_port}",
+                "--set", f"qa_ui_session_dir={flows.parent}",
+                "--set", f"qa_ui_default_filter={preset.default_filter or ''}",
+                "--set", "qa_ui_open_browser=true"]
+    elif preset.default_filter:
         # An option, not mitmdump's positional filter argument, which would also limit saving.
-        option = "view_filter" if ui else "dumper_filter"
+        option = "view_filter" if kind == MITMWEB else "dumper_filter"
         cmd += ["--set", f"{option}={preset.default_filter}"]
     return cmd
 
@@ -147,26 +170,32 @@ def count_mocks(mocks_dir: Path) -> int:
     return sum(1 for p in mocks_dir.rglob("*.json") if p.is_file()) if mocks_dir.is_dir() else 0
 
 
-def banner(preset: Preset, target: str, mode: str, ui: bool, folder: Path,
+def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
            proxy_port: int = PROXY_PORT, mock_count: int = 0, device_logs: str = "off") -> str:
+    kind = ui_kind(ui)
     lines = [
         f"Wiretrace {__version__}: preset {preset.name}, target {target}",
         f"Decrypting {', '.join(preset.api_hosts)} and their subdomains; other traffic passes through.",
     ]
+    if kind == WIRETRACE:
+        lines.append("UI: Wiretrace (link below)")
     if preset.default_filter:
-        shown = "View filter" if ui else "Print filter"
+        shown = {MITMWEB: "View filter", WIRETRACE: "Search", NO_UI: "Print filter"}[kind]
         lines.append(f"{shown}: {preset.default_filter} (every flow is still saved)")
     shown_dir = preset.mocks_dir.strip("/\\") + "/"
     if mock_count:
         lines.append(f"Mocks: {mock_count} {'file' if mock_count == 1 else 'files'} in {shown_dir}")
     else:
         lines.append(f"Mocks: none (add files under {shown_dir}<METHOD>/…)")
-    if ui:
+    if kind == MITMWEB:
         lines.append("Faults: mitmweb > Options > qa_fault_*")
+    elif kind == WIRETRACE:
+        lines.append("Faults: Wiretrace > Faults")
     lines.append(f"Device logs: {device_logs}")
     lines.append(f"App logs: POST https://{RECEIVER_HOST}/log → {session.APP_LOG}")
     if mode == "wireguard":
-        first_time = "scan the QR code in mitmweb" if ui else "enter the configuration printed below"
+        first_time = {MITMWEB: "scan the QR code in mitmweb", WIRETRACE: "scan the QR code in Wiretrace > Setup",
+                      NO_UI: "enter the configuration printed below"}[kind]
         lines.append(f"Phone: turn the WireGuard tunnel on (first time: {first_time}).")
     else:
         lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
@@ -183,17 +212,18 @@ def _mitmproxy_version() -> str | None:
         return None
 
 
-def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool = True, *,
+def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool | str = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
         bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-        collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
+        ui_port: int = UI_PORT, collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
     try:
         preset = load_preset(preset_name, presets_dir)
     except PresetError as e:
         say(str(e), err=True)
         return 1
 
-    busy = busy_ports(needed_ports(mode, ui, proxy_port))
+    kind = ui_kind(ui)
+    busy = busy_ports(needed_ports(mode, kind, proxy_port, ui_port))
     if busy:
         for result in busy:
             say(f"{result.name}: {result.detail}", err=True)
@@ -213,7 +243,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         "api_hosts": list(preset.api_hosts),
         "target": target,
         "mode": mode,
-        "ui": "mitmweb" if ui else "mitmdump",
+        "ui": "mitmdump" if kind == NO_UI else kind,
         "device_logs": None,
         "status": "running",
         # So `wiretrace report` still masks these names if the preset is later changed or deleted.
@@ -238,9 +268,9 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             device_logs = f"{DEVICE_LOG_NAMES[source]}, {preset.app[APP_KEYS[source]]} → {session.DEVICE_LOG}"
         else:
             device_logs = f"off ({problem})"
-        say(banner(preset, target, mode, ui, folder, proxy_port, mock_count, device_logs))
+        say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs))
         return supervise(
-            build_command(preset, mode, ui, flows, bin_dir, proxy_port, wiretrace_dir),
+            build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port),
             har_command(bin_dir, flows, folder / session.HAR_TMP),
             folder,
             stops,

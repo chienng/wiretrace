@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from cli import __main__ as cli_main
 from cli import redact, session, start
 from cli.preset import Preset
 
@@ -967,3 +968,175 @@ def test_count_lines_and_has_logs(tmp_path):
     assert not session.has_logs(tmp_path)
     (tmp_path / session.APP_LOG).write_text('{"a": 1}\n')
     assert session.has_logs(tmp_path)
+
+
+# Wiretrace window (--ui wiretrace)
+
+def wiretrace_command(preset=PRESET_WITH_FILTER, mode="wireguard", **kwargs):
+    return start.build_command(preset, mode, "wiretrace", Path("/s/flows.mitm"), Path("/v/bin"), **kwargs)
+
+
+def test_wiretrace_command_is_mitmdump_with_the_ui_addon_after_the_other_two():
+    cmd = wiretrace_command(wiretrace_dir=Path("/d"))
+    assert cmd[:3] == ["/v/bin/mitmdump", "--mode", "wireguard"]
+    scripts = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-s"]
+    assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON), str(start.UI_ADDON)]
+    assert start.UI_ADDON.is_file() and start.UI_ADDON.name == "wiretrace_ui.py"
+    assert cmd[cmd.index("--save-stream-file") + 1] == "/s/flows.mitm"
+
+
+def test_wiretrace_command_sets_the_four_ui_options_and_no_view_or_print_filter():
+    cmd = wiretrace_command()
+    options = {arg.split("=", 1)[0]: arg.split("=", 1)[1] for arg in cmd if arg.startswith("qa_ui_")}
+    assert options == {"qa_ui_port": "8081", "qa_ui_session_dir": "/s", "qa_ui_default_filter": "!~t image",
+                       "qa_ui_open_browser": "true"}
+    assert "flow_detail=0" in cmd
+    assert all(cmd[i - 1] == "--set" for i, a in enumerate(cmd) if a.startswith(("qa_ui_", "flow_detail")))
+    assert not any(arg.startswith(("view_filter", "dumper_filter")) for arg in cmd)
+    # The launcher's other options are the same as for the other windows.
+    assert "qa_app_log_file=/s/app.log.jsonl" in cmd and "qa_request_id_header=X-Request-ID" in cmd
+
+
+def test_wiretrace_command_in_proxy_mode_with_a_custom_ui_port_and_no_filter():
+    plain = Preset(name="staging", api_hosts=("a.example.com",))
+    cmd = wiretrace_command(plain, "proxy", proxy_port=9999, ui_port=9001)
+    assert cmd[1:5] == ["--mode", "regular", "--listen-port", "9999"]
+    assert "qa_ui_port=9001" in cmd and "qa_ui_default_filter=" in cmd
+
+
+def test_the_token_is_never_on_the_command_line():
+    assert not any("token" in arg.lower() for arg in wiretrace_command())
+
+
+def test_the_other_windows_do_not_load_the_ui_addon():
+    for ui in (True, False, "mitmweb", "none"):
+        cmd = start.build_command(PRESET_WITH_FILTER, "wireguard", ui, Path("/s/flows.mitm"), Path("/v/bin"))
+        assert str(start.UI_ADDON) not in cmd
+        assert not any(arg.startswith(("qa_ui_", "flow_detail")) for arg in cmd)
+    web = start.build_command(PRESET_WITH_FILTER, "wireguard", "mitmweb", Path("/s/flows.mitm"), Path("/v/bin"))
+    assert web == start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"))
+    assert web[0] == "/v/bin/mitmweb" and "view_filter=!~t image" in web
+
+
+def test_wiretrace_port_check_is_labelled_wiretrace_ui():
+    def checks(mode, ui, **kwargs):
+        return [(p[2], p[3]) for p in start.needed_ports(mode, ui, **kwargs)]
+
+    assert checks("wireguard", "wiretrace") == [(51820, "WireGuard"), (8081, "Wiretrace UI")]
+    assert checks("proxy", "wiretrace", proxy_port=9999, ui_port=9001) == [(9999, "proxy"), (9001, "Wiretrace UI")]
+    assert start.needed_ports("proxy", "wiretrace")[1] == ("tcp", "127.0.0.1", 8081, "Wiretrace UI")
+    assert checks("wireguard", "mitmweb") == [(51820, "WireGuard"), (8081, "mitmweb UI")]
+    assert checks("wireguard", "none") == [(51820, "WireGuard")]
+
+
+def test_wiretrace_banner_points_to_the_link_and_the_faults_dialog():
+    text = start.banner(PRESET_WITH_FILTER, "android", "wireguard", "wiretrace", Path("/s"), mock_count=2)
+    assert "UI: Wiretrace (link below)" in text
+    assert "Faults: Wiretrace > Faults" in text
+    assert "mitmweb" not in text
+    assert "scan the QR code in Wiretrace > Setup" in text
+    assert "Search: !~t image (every flow is still saved)" in text
+    for ui in ("mitmweb", "none"):
+        assert "UI: Wiretrace" not in start.banner(PRESET_WITH_FILTER, "android", "proxy", ui, Path("/s"))
+    assert "Faults: Wiretrace" not in start.banner(PRESET_WITH_FILTER, "android", "proxy", "mitmweb", Path("/s"))
+
+
+def run_wiretrace(tmp_path, monkeypatch, **kwargs):
+    """start.run with --ui wiretrace, stopping before the child would start."""
+    (tmp_path / "presets").mkdir(exist_ok=True)
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    seen = {}
+
+    def supervise(cmd, har_cmd, folder, *args, **kw):
+        seen.update(cmd=cmd, folder=folder)
+        return 0
+
+    monkeypatch.setattr(start, "supervise", supervise)
+    code = start.run("staging", "android", "proxy", "wiretrace", presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"), **kwargs)
+    return code, seen
+
+
+def test_run_with_wiretrace_records_the_ui_and_points_the_addon_at_the_session(tmp_path, monkeypatch, capsys):
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=free_port())
+    assert code == 0
+    meta = session.read_meta(seen["folder"])
+    assert meta["ui"] == "wiretrace"
+    assert f"qa_ui_session_dir={seen['folder']}" in seen["cmd"]
+    assert seen["cmd"][0] == str(tmp_path / "bin" / "mitmdump")
+    assert "UI: Wiretrace (link below)" in capsys.readouterr().out
+
+
+def test_run_records_the_other_uis_as_before(tmp_path, monkeypatch):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    metas = {}
+    # mitmweb's fixed port 8081 may be in use on this Mac; nothing here may touch it.
+    monkeypatch.setattr(start, "busy_ports", lambda ports: [])
+    for ui in (True, False, "mitmweb", "none"):
+        monkeypatch.setattr(start, "supervise", lambda cmd, har_cmd, folder, *a, **k: metas.update({ui: folder}) or 0)
+        start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
+                  sessions_dir=tmp_path / f"sessions-{ui}", bin_dir=tmp_path / "bin", proxy_port=free_port(),
+                  wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                  ui_port=free_port())
+    assert {ui: session.read_meta(folder)["ui"] for ui, folder in metas.items()} == {
+        True: "mitmweb", False: "mitmdump", "mitmweb": "mitmweb", "none": "mitmdump"}
+
+
+def test_a_busy_ui_port_starts_nothing_and_names_wiretrace_ui(tmp_path, monkeypatch, capsys):
+    with socket.socket() as holder:
+        holder.bind(("127.0.0.1", 0))
+        holder.listen()
+        port = holder.getsockname()[1]
+        code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=port)
+    assert code == 1 and seen == {}
+    err = capsys.readouterr().err
+    assert f"Port TCP {port} (Wiretrace UI): in use" in err and "Not started." in err
+    assert not (tmp_path / "sessions").exists()
+
+
+# Command line
+
+def parse_start(monkeypatch, *argv):
+    calls = []
+    monkeypatch.setattr(start, "run", lambda *args, **kwargs: calls.append((args, kwargs)) or 0)
+    assert cli_main.main(["start", "--preset", "staging", *argv]) == 0
+    return calls[0]
+
+
+def test_ui_defaults_to_mitmweb(monkeypatch):
+    args, kwargs = parse_start(monkeypatch)
+    assert kwargs["ui"] == "mitmweb" and args == ("staging", "device", "wireguard")
+
+
+def test_ui_wiretrace_and_mitmweb_are_accepted(monkeypatch):
+    assert parse_start(monkeypatch, "--ui", "wiretrace")[1]["ui"] == "wiretrace"
+    assert parse_start(monkeypatch, "--ui", "mitmweb")[1]["ui"] == "mitmweb"
+
+
+def test_no_ui_is_unchanged(monkeypatch):
+    assert parse_start(monkeypatch, "--no-ui")[1]["ui"] == "none"
+
+
+@pytest.mark.parametrize("argv", [["--ui", "wiretrace", "--no-ui"], ["--no-ui", "--ui", "wiretrace"],
+                                  ["--ui", "mitmweb", "--no-ui"]])
+def test_ui_and_no_ui_conflict(monkeypatch, capsys, argv):
+    monkeypatch.setattr(start, "run", lambda *a, **k: pytest.fail("must not start"))
+    with pytest.raises(SystemExit) as e:
+        cli_main.main(["start", "--preset", "staging", *argv])
+    assert e.value.code == 2
+    assert "not allowed with argument" in capsys.readouterr().err
+
+
+def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
+    monkeypatch.setattr(start, "run", lambda *a, **k: pytest.fail("must not start"))
+    with pytest.raises(SystemExit) as e:
+        cli_main.main(["start", "--preset", "staging", "--ui", "tauri"])
+    assert e.value.code == 2
+
+
+def test_the_version_is_0_6_0():
+    from cli import __version__
+
+    assert __version__ == "0.6.0"

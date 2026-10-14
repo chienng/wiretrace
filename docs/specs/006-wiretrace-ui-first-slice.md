@@ -5,7 +5,7 @@
   phone's WireGuard private key, and can change faults (always-L: auth and tokens,
   "anything that logs user data"). Gates E, A, B, C, R, P. Gate D does not apply: one repo.
 - **Repo**: wiretrace
-- **Status**: approved
+- **Status**: implemented
 - **Branch**: `main` (as specs 003 to 005)
 - **Related**: [`PLAN.md`](../../PLAN.md) §8 Phase 2 (U2–U5, U7, U8 and U10 in part),
   §5 (React + TypeScript; "Local WebSocket + REST (FastAPI or mitmproxy's own server)");
@@ -240,3 +240,29 @@ apply buffered socket messages whose items are newer (flows by `id`, replace; lo
 
 `.venv/bin/python -m pytest` and `npm --prefix ui test`, plus `npm --prefix ui run build`
 (must reproduce the committed `ui/dist/`).
+
+## Errata
+
+Decided while building the backend:
+
+- The report endpoint calls a new `cli.report.create(folder, presets_dir, now)`, which returns
+  the zip and counts or raises `Failure`; `run` prints from it. A failed report is a 200 with
+  `ok: false` and the message.
+- `start.run`, `build_command`, `banner` and `needed_ports` take `ui` as `bool | str`
+  (`True` = mitmweb, `False` = none, `"wiretrace"`) and a `ui_port`, so tests avoid 8081.
+- A wrong `?token=` is refused even with a valid cookie. A WebSocket without `Origin` is refused.
+- `websocket_start` is tracked too, so the WebSocket badge appears early.
+- If the UI port cannot be bound, the addon logs the error and shuts mitmproxy down.
+- JSON log lines also carry `raw` (the original line) for Copy.
+
+Changed after review, before the first commit:
+
+- Gate B: the detail body is decoded at most 2 MiB + 1 byte for gzip, deflate (zlib or raw),
+  br and zstd; the rest is counted in 1 MiB steps up to 64 MiB and not kept, so a compression
+  bomb cannot exhaust memory. Past 64 MiB the size shown is a lower bound. A body that does not
+  decode is shown as it travelled.
+- Gate A: the size of a truncated raw-deflate body is counted with the same raw fallback.
+
+Known limits (Gate R): masking works on field names, so a URL with secrets inside another
+string value of a JSON body is not masked in the report. The Terminal still prints mitmproxy's
+connection lines (`client connect`, `server connect <host>`) in this mode.

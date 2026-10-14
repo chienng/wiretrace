@@ -20,7 +20,10 @@ def main(argv: list[str] | None = None) -> int:
                            help="device under test (default: %(default)s)")
     start_cmd.add_argument("--mode", choices=start.MODES, default="wireguard",
                            help="wireguard (UDP 51820) or proxy (Wi-Fi proxy, TCP 8080); default: %(default)s")
-    start_cmd.add_argument("--no-ui", action="store_true",
+    ui_choice = start_cmd.add_mutually_exclusive_group()
+    ui_choice.add_argument("--ui", choices=(start.MITMWEB, start.WIRETRACE), default=start.MITMWEB,
+                           help="window to open: mitmweb, or wiretrace (preview); default: %(default)s")
+    ui_choice.add_argument("--no-ui", action="store_true",
                            help="run mitmdump in this Terminal instead of mitmweb")
 
     report_cmd = commands.add_parser(
@@ -32,7 +35,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "doctor":
         return doctor.main()
     if args.command == "start":
-        return start.run(args.preset, args.target, args.mode, ui=not args.no_ui)
+        return start.run(args.preset, args.target, args.mode, ui=start.NO_UI if args.no_ui else args.ui)
     if args.command == "report":
         return report.run(args.session, session.SESSIONS_DIR, PRESETS_DIR)
     return 2

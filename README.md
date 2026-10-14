@@ -18,6 +18,8 @@ Capture a session: `./wiretrace start --preset staging --target android` (preset
 `presets/`; copy `presets/example.yaml` to start one). Ctrl+C stops it and writes `flows.har`
 (secrets masked).
 
+Add `--ui wiretrace` to open Wiretrace's own window (preview) instead of mitmweb.
+
 For a bug ticket: `./wiretrace report` writes a zip of the latest session (summary, masked HAR, masked logs).
 
 Step-by-step installation and usage: [`docs/user-guide.md`](docs/user-guide.md).

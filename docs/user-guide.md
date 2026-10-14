@@ -237,6 +237,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   names the session folder, picks the setup reminders printed at start, and picks which
   device log is collected (Step 2).
 - `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
+- `--ui wiretrace` opens Wiretrace's own window instead of mitmweb (a preview; see *Wiretrace
+  window (preview)* below). It cannot be combined with `--no-ui`.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
   Wi-Fi proxy to `<Mac IP>:8080`.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
@@ -465,6 +467,76 @@ When the request or the answer has an `X-Request-ID` header, mitmweb shows it as
 comment (`request-id: …`), and it is saved in `flows.mitm`. A preset can use another header
 name with `request_id_header`.
 
+### Wiretrace window (preview)
+
+Wiretrace has its own window, which shows the traffic and the app's logs on one screen. It is a
+preview. mitmweb stays the default, so nothing changes unless you ask for the new window.
+
+To open it, start Wiretrace with `--ui wiretrace`:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset staging --target android --ui wiretrace
+```
+
+`--ui mitmweb` does the same as leaving `--ui` out. You cannot use `--ui` together with
+`--no-ui`. The window needs port 8081 to be free, like mitmweb does; Wiretrace says so and does
+not start if it is not.
+
+**The link and the token.** Wiretrace prints one line in the Terminal, for example
+`Wiretrace UI: http://127.0.0.1:8081/?token=…`, and opens that link in your default browser.
+The token in the link is new every time you start Wiretrace. It lives only in that Terminal line,
+in your browser's cookie and in the running Wiretrace; it is never saved to a file. Open the
+link once and the browser remembers it, so you can reload the page. A page opened without the
+token is refused: this includes a private window, another browser, and another computer. The
+window only answers on this Mac and cannot be reached from the network. If you closed the tab,
+copy the link from the Terminal again. Do not paste the link into a chat or a ticket: the
+window shows requests with their tokens, and the phone's WireGuard configuration.
+
+**What each area does.**
+
+- **Title bar.** *Traffic* and *Logs* switch between the two views. It shows how long the
+  session has been recording. *Pause* freezes the list while you read it and counts the new
+  requests. *Clear* hides what is in the list now; everything is still saved to the session
+  folder. It also shows the preset, whether device logs are on, and buttons for *Faults*
+  (with the number of active faults), *Setup* and *Report bug*.
+- **Sidebar.** Quick filters with live counts: *All*, *Errors* (status 400 or higher, or no
+  answer), *Slow* (over one second), *Mocked*, *Faulted* and *WebSocket*. Below them are the
+  preset's hosts with their counts.
+- **Search box.** Plain text matches the method, the URL and the status. Text that starts with
+  `~` or `!` is a mitmweb filter expression, such as `~u /orders` or `!~t image`, checked by
+  Wiretrace; if it is not valid, the window shows the message. The preset's `default_filter`
+  is typed in for you at the start. It never limits what is saved.
+- **Traffic list.** One row per request to the preset's hosts, as it happens: time, method,
+  status (coloured by class, errors in red), path, duration and size. A row can carry the
+  badges *MOCK*, *FAULT* and *SLOW*. The log receiver `qa-logs.internal` is not listed. The
+  window keeps the newest 10,000 requests; older ones are only in `flows.mitm`.
+- **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
+  easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
+  that carry this request's ID). *Copy cURL* copies the request as a `curl` command. *Copy as
+  mock* copies the response body and shows the file to create under `mocks/<preset>/` (see
+  *Mock a response*). Wiretrace does not write that file for you.
+- **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
+  *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter
+  and auto-scroll. Lines that carry the selected request's ID are highlighted. Click a line to
+  see it in full and the request it belongs to. The window keeps the newest 50,000 lines of each
+  log; the files in the session folder keep all of them.
+- **Setup.** In WireGuard mode, the QR code and the configuration text to import into the
+  WireGuard app on the phone. In proxy mode, the address `<Mac IP>:<port>` for the phone's Wi-Fi
+  proxy. It also lists the certificate steps, and *Traffic received* turns green when the first
+  request arrives. The WireGuard configuration holds the phone's private key; do not share it.
+- **Faults.** The four `qa_fault_*` settings from *Make requests fail or slow*, in a form. If a
+  value is not valid, the window shows mitmproxy's message and keeps the previous settings. It
+  also lists your mock files, read only.
+- **Report bug.** Runs the same report as `./wiretrace report` for the session running now, using
+  the requests saved so far. The window shows the zip's name, the counts and the note to check
+  the log lines before you share, and *Show in Finder* opens the folder with the zip selected.
+
+Reloading the page, or a short break in the connection, loses nothing: the window shows
+*Reconnecting…* and loads everything again. The preview does not have a device picker, the
+log timeline, or earlier sessions yet. mitmweb's own Options panel is not part of this window;
+use *Faults* instead.
+
 ### Without the launcher
 
 `./wiretrace start` runs mitmproxy for you. To run it yourself, for example to add options
@@ -622,6 +694,13 @@ Rules for the app:
 | `Could not write the report: …` | The zip could not be saved, for example because the disk is full. No partial zip is left. Free some space and run the command again. |
 | `Deleted … old session(s) (older than 14 days).` | Normal, when you start Wiretrace. It removed old session folders. To keep a session, move its folder out of `sessions/` before then (Part 4). |
 | `redact.… is not a known key`, or `'redact.headers' entry …` (in `presets/<name>.yaml: …`) | The `redact:` section of the preset has an unknown key or an invalid name. Use only `headers` and `json_fields`, each a list (Part 1, Step 6). |
+| The Wiretrace window says "Open the link printed in the Terminal." | The page was opened without the token, or from an earlier start. Copy the newest `Wiretrace UI:` link from the Terminal and open it. |
+| `Port TCP 8081 (Wiretrace UI): in use by another program` when starting with `--ui wiretrace` | Another Wiretrace or mitmweb window is still open. Quit it (Ctrl+C in its window) and start again. |
+| The Wiretrace window stays on "Reconnecting…" | Wiretrace is no longer running, or the Mac was asleep. Look at the Terminal. If it is still running, reload the page; if not, start it again and open the new link. |
+| The browser did not open the Wiretrace window | Copy the `Wiretrace UI:` link from the Terminal and open it by hand. |
+| `Wiretrace UI: cannot listen on 127.0.0.1:…`, and Wiretrace stops | Another program took the port in the moment between the check and the start. Quit it and start again. |
+| The Traffic list is empty but the phone works | The window lists only requests to the preset's `api_hosts`, and *Clear* or the search box may be hiding them. Check the search box, the quick filter and *Pause*. |
+| *Report bug* says "Nothing to report" | The session has no saved request and no log line yet. Make a request, then try again. |
 | Endpoint security quarantines mitmproxy | Ask IT to allowlist Wiretrace ([`install-without-admin.md`](install-without-admin.md#company-managed-macs-what-to-ask-it-for)). |
 
 ---

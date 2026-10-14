@@ -267,30 +267,56 @@ def build(folder: Path, presets_dir: Path) -> tuple[dict[str, bytes], Flows, int
     return members, flows, log_lines, rules
 
 
-def run(session_arg: str | None, sessions_dir: Path = session.SESSIONS_DIR,
-        presets_dir: Path = PRESETS_DIR, now: datetime | None = None) -> int:
+class Created(NamedTuple):
+    """A written report: the zip and the counts that `run` and the Wiretrace window show."""
+
+    zip: Path
+    requests: int
+    failed: int
+    mocked: int
+    faulted: int
+    device_lines: int
+    app_lines: int
+    cut_off: bool
+
+    @property
+    def log_lines(self) -> int:
+        return self.device_lines + self.app_lines
+
+
+def create(folder: Path, presets_dir: Path = PRESETS_DIR, now: datetime | None = None) -> Created:
+    """Write the report zip of a session folder. Raise Failure, with the message for the user, if it cannot."""
     now = now or datetime.now()
     try:
-        folder = resolve(session_arg, sessions_dir)
-        members, flows, log_lines, _ = build(folder, presets_dir)
-    except Failure as e:
-        say(str(e), err=True)
-        return 1
+        members, flows, _, _ = build(folder, presets_dir)
+    except Failure:
+        raise
     except Exception as e:
-        say(f"Could not build the report: {e}", err=True)
-        return 1
+        raise Failure(f"Could not build the report: {e}") from None
 
     target = folder / f"{folder.name}-report.zip"
     try:
         write_zip(target, folder.name, members, now)
     except Exception as e:
-        say(f"Could not write the report: {getattr(e, 'strerror', None) or e}", err=True)
+        raise Failure(f"Could not write the report: {getattr(e, 'strerror', None) or e}") from None
+    return Created(
+        zip=target, requests=flows.requests, failed=len(flows.rows), mocked=flows.mocked,
+        faulted=flows.faulted, device_lines=members.get(session.DEVICE_LOG, b"").count(b"\n"),
+        app_lines=members.get(session.APP_LOG, b"").count(b"\n"), cut_off=flows.cut_off)
+
+
+def run(session_arg: str | None, sessions_dir: Path = session.SESSIONS_DIR,
+        presets_dir: Path = PRESETS_DIR, now: datetime | None = None) -> int:
+    try:
+        created = create(resolve(session_arg, sessions_dir), presets_dir, now)
+    except Failure as e:
+        say(str(e), err=True)
         return 1
 
-    say(f"Report written: {target}")
-    if flows.cut_off:
+    say(f"Report written: {created.zip}")
+    if created.cut_off:
         say("flows.mitm ends early; the report uses the requests that could be read.")
-    say(f"Requests: {flows.requests}, failed: {len(flows.rows)}, mocked: {flows.mocked}, "
-        f"faulted: {flows.faulted}, log lines: {log_lines}")
+    say(f"Requests: {created.requests}, failed: {created.failed}, mocked: {created.mocked}, "
+        f"faulted: {created.faulted}, log lines: {created.log_lines}")
     say(LOG_NOTE)
     return 0
