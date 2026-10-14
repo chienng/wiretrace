@@ -11,8 +11,8 @@ To regenerate the images after editing the HTML:
 "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --hide-scrollbars \
   --force-device-scale-factor=2 --window-size=1480,4950 \
   --screenshot=/tmp/full.png "file://$PWD/mockups/wiretrace-mockup.html"
-# then crop each screen, e.g.:
-sips --cropOffset 388 40 -c 1712 2800 /tmp/full.png --out mockups/screens/01-main-window.png
+# then crop each screen: its .window box plus 20 px left/right and 16 px top/bottom, at 2x, e.g.:
+sips --cropOffset 380 40 -c 1712 2800 /tmp/full.png --out mockups/screens/01-main-window.png
 ```
 
 ---

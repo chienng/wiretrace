@@ -1136,7 +1136,7 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
     assert e.value.code == 2
 
 
-def test_the_version_is_0_6_0():
+def test_the_version_is_0_7_0():
     from cli import __version__
 
-    assert __version__ == "0.6.0"
+    assert __version__ == "0.7.0"

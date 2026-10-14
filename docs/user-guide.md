@@ -252,7 +252,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   is printed with `--no-ui`. It never limits what is saved. Common filters:
   `~c 500` (status 500), `~m POST`, `~u /api/v1/orders`, `~bs "SOME_TEXT"` (response body).
   More in [`PLAN.md` Appendix B](../PLAN.md#appendix-b--mitmweb-filter-expressions-for-qa).
-- If a port is in use, Wiretrace says which one and does not start. Usually another Wiretrace or mitmproxy window is still open: quit it.
+- If a port is in use, Wiretrace says which one and does not start. Usually another
+  Wiretrace or mitmproxy window is still open: quit it.
 
 ### Step 2 — See the app's logs
 

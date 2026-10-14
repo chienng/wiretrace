@@ -32,7 +32,7 @@ from cli.preset import Preset
 ROOT = Path(__file__).resolve().parent.parent
 VENV_BIN = Path(sys.prefix) / "bin"
 HOST = "api.example.com"
-ASSET = next((ROOT / "ui" / "dist" / "assets").glob("*.js"))
+ASSET = next((ROOT / "ui" / "dist" / "assets").glob("index-*.js"))
 
 
 def make_flow(path="/api/v1/profile", method="GET", status=200, host=HOST, comment="", body=b"{}",
@@ -738,7 +738,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.6.0"
+        assert state["version"] == "0.7.0"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
