@@ -29,6 +29,12 @@ if [ -z "$VERSION" ]; then
     echo "No __version__ in cli/__init__.py at $COMMIT" >&2
     exit 1
 fi
+if git cat-file -e "$COMMIT:addons/wiretrace_ui.py" 2>/dev/null && \
+   ! git cat-file -e "$COMMIT:ui/dist/index.html" 2>/dev/null; then
+    echo "ui/dist/ is not in $COMMIT, so --ui wiretrace would not work: run" >&2
+    echo "npm --prefix ui run build and commit ui/dist/ first" >&2
+    exit 1
+fi
 if [ "$REF" = HEAD ] && [ -n "$(git status --porcelain)" ]; then
     echo "warning: the working tree has uncommitted changes; they are not in this build" >&2
 fi

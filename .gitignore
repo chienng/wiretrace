@@ -1,6 +1,6 @@
 .venv/
 sessions/
-dist/
+/dist/
 .download.*/
 __pycache__/
 .pytest_cache/
