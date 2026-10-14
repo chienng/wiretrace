@@ -1,0 +1,92 @@
+[
+ {
+  "seq": 1,
+  "source": "device",
+  "ts": 1791900000.1,
+  "level": "I",
+  "tag": "ExampleApp",
+  "message": "cold start 1,182 ms",
+  "request_id": null
+ },
+ {
+  "seq": 2,
+  "source": "device",
+  "ts": 1791900000.5,
+  "level": "D",
+  "tag": "OkHttp",
+  "message": "--> GET /api/v1/profile req=req-0002",
+  "request_id": null
+ },
+ {
+  "seq": 3,
+  "source": "device",
+  "ts": 1791900001.0,
+  "level": "I",
+  "tag": "HomeFeed",
+  "message": "loaded page 1",
+  "request_id": null
+ },
+ {
+  "seq": 4,
+  "source": "device",
+  "ts": 1791900002.0,
+  "level": "W",
+  "tag": "Choreographer",
+  "message": "Skipped 34 frames! The application may be doing too much work on its main thread.",
+  "request_id": null
+ },
+ {
+  "seq": 5,
+  "source": "device",
+  "ts": 1791900004.3,
+  "level": "W",
+  "tag": "PromoViewModel",
+  "message": "validate promo=TESTCODE -> 422 PROMO_NOT_ELIGIBLE, retrying with cart refresh req=req-0009",
+  "request_id": null
+ },
+ {
+  "seq": 6,
+  "source": "device",
+  "ts": 1791900005.1,
+  "level": "E",
+  "tag": "OrderRepository",
+  "message": "createOrder failed req=req-0010: HTTP 500 ORDER_CREATE_FAILED",
+  "request_id": null
+ },
+ {
+  "seq": 7,
+  "source": "device",
+  "ts": 1791900005.2,
+  "level": "W",
+  "tag": "CheckoutViewModel",
+  "message": "Showing generic error dialog, no retry offered req=req-0010",
+  "request_id": null
+ },
+ {
+  "seq": 8,
+  "source": "device",
+  "ts": 1791900006.9,
+  "level": "E",
+  "tag": "OrderHistoryRepo",
+  "message": "load failed: HTTP 500 (injected by fault) req=req-0013",
+  "request_id": null
+ },
+ {
+  "seq": 9,
+  "source": "device",
+  "ts": 1791900009.0,
+  "level": "F",
+  "tag": "AndroidRuntime",
+  "message": "FATAL EXCEPTION: main\n  java.lang.NullPointerException: Attempt to invoke virtual method on a null object reference (example)\n    at com.example.app.Orders.onLoaded(Orders.kt:42)",
+  "request_id": null
+ },
+ {
+  "seq": 10,
+  "source": "device",
+  "ts": 1791900009.1,
+  "level": "V",
+  "tag": "System",
+  "message": "verbose line from the fixture",
+  "request_id": null
+ }
+]

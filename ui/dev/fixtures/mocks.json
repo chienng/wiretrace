@@ -1,0 +1,5 @@
+[
+ "GET/api/v1/profile.json",
+ "GET/api/v1/promotions.json",
+ "POST/api/v1/orders.json"
+]

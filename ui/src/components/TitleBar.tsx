@@ -1,0 +1,79 @@
+import { activeFaultCount } from '../logic/faults';
+import { formatElapsed } from '../logic/format';
+import { isCrash } from '../logic/logs';
+import { useNow } from '../hooks';
+import { useDispatch, useStore } from '../store';
+import { useMemo } from 'react';
+
+interface Props {
+  newCount: number;
+}
+
+function Recording({ startedAt, reconnecting }: { startedAt: number; reconnecting: boolean }) {
+  const now = useNow(1000);
+  if (reconnecting) return <span className="pill wait">Reconnecting…</span>;
+  return <span className="rec">Recording · {formatElapsed(now / 1000 - startedAt)}</span>;
+}
+
+export function TitleBar({ newCount }: Props) {
+  const { appState, ui, phase, flows, logs } = useStore();
+  const dispatch = useDispatch();
+  const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
+  const crashes = useMemo(
+    () =>
+      logs.device.filter((l) => l.seq > ui.clearedSeq.device && isCrash(l)).length +
+      logs.app.filter((l) => l.seq > ui.clearedSeq.app && isCrash(l)).length,
+    [logs, ui.clearedSeq],
+  );
+  const paused = ui.frozen !== null;
+  const faultCount = appState ? activeFaultCount(appState.faults, appState.faults_on) : 0;
+  const seen = !!appState && (appState.flow_count > 0 || flows.length > 0);
+  const deviceLogs = appState?.device_logs ?? null;
+  const deviceOn = !!deviceLogs && !/^off\b/i.test(deviceLogs);
+
+  return (
+    <header className="titlebar">
+      <span className="title">Wiretrace</span>
+      <div className="seg sm" role="tablist" aria-label="View">
+        <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>
+          Traffic
+        </button>
+        <button type="button" role="tab" aria-selected={ui.view === 'logs'} className={ui.view === 'logs' ? 'on' : ''} onClick={() => patch({ view: 'logs' })}>
+          Logs{crashes > 0 && <span className="c">{crashes} {crashes === 1 ? 'crash' : 'crashes'}</span>}
+        </button>
+      </div>
+      {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} />}
+      {ui.view === 'traffic' && (
+        <>
+          <button type="button" className="btn small" onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })} aria-pressed={paused}>
+            {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
+          </button>
+        </>
+      )}
+      <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
+        Clear
+      </button>
+      <span className="spacer" />
+      {appState && (
+        <>
+          <span className="static-select" title="Preset">Preset: {appState.preset}</span>
+          <span className={`pill ${seen ? 'ok' : 'wait'}`} title="Target and mode">
+            {appState.target} · {appState.mode === 'wireguard' ? 'WireGuard' : 'Proxy'}
+          </span>
+          <span className={`pill ${deviceOn ? 'ok' : 'off'}`} title={deviceLogs ?? 'Device logs are off'}>
+            Device logs {deviceOn ? 'on' : 'off'}
+          </span>
+        </>
+      )}
+      <button type="button" className="btn" onClick={() => patch({ dialog: 'faults' })}>
+        Faults{faultCount > 0 && <span className="count">{faultCount} active</span>}
+      </button>
+      <button type="button" className="btn" onClick={() => patch({ dialog: 'setup' })}>
+        Setup
+      </button>
+      <button type="button" className="btn primary" onClick={() => patch({ dialog: 'report' })}>
+        Report bug
+      </button>
+    </header>
+  );
+}

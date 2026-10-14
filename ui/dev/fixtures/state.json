@@ -1,0 +1,22 @@
+{
+ "version": "0.6.0",
+ "preset": "staging-example",
+ "target": "pixel-example",
+ "mode": "wireguard",
+ "started_at": 1791900000.0,
+ "session": "2026-10-14_example",
+ "device_logs": "android",
+ "default_filter": "",
+ "proxy_port": 9090,
+ "wireguard_conf": "[Interface]\nPrivateKey = test-private-key-not-real=\nAddress = 10.0.0.2/32\nDNS = 10.0.0.53\n\n[Peer]\nPublicKey = test-public-key-not-real=\nAllowedIPs = 0.0.0.0/0\nEndpoint = 192.0.2.10:51820\n",
+ "mac_ip": "192.0.2.10",
+ "faults": {
+  "filter": "",
+  "status": 0,
+  "delay_ms": 0,
+  "drop": false
+ },
+ "faults_on": false,
+ "mocks_dir": "mocks/staging-example",
+ "flow_count": 0
+}

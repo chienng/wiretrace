@@ -1,0 +1,43 @@
+[
+ {
+  "seq": 1,
+  "source": "app",
+  "ts": 1791900000.2,
+  "level": "I",
+  "tag": "Analytics",
+  "message": "event=app_open",
+  "request_id": null
+ },
+ {
+  "seq": 2,
+  "source": "app",
+  "ts": 1791900002.9,
+  "level": "I",
+  "tag": "Cart",
+  "message": "item added",
+  "request_id": "req-0007"
+ },
+ {
+  "seq": 3,
+  "source": "app",
+  "ts": 1791900005.15,
+  "level": "E",
+  "tag": "Checkout",
+  "message": "order failed: ORDER_CREATE_FAILED",
+  "request_id": "req-0010"
+ },
+ {
+  "seq": 4,
+  "source": "app",
+  "ts": 1791900009.2,
+  "level": "W",
+  "tag": "Net",
+  "message": "request failed without response",
+  "request_id": "req-0017"
+ },
+ {
+  "seq": 5,
+  "source": "app",
+  "message": "plain text line that is not JSON"
+ }
+]
