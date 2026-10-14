@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 
 PRESETS_DIR = Path(__file__).resolve().parent.parent / "presets"
@@ -17,6 +17,9 @@ PRESETS_DIR = Path(__file__).resolve().parent.parent / "presets"
 # Also part of the session folder name, so no path separators or dots.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")
+# An HTTP header field name is an RFC 9110 token.
+_HEADER = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
+DEFAULT_REQUEST_ID_HEADER = "X-Request-ID"
 
 
 class PresetError(Exception):
@@ -29,6 +32,13 @@ class Preset:
     api_hosts: tuple[str, ...]
     default_filter: str | None = None
     app: dict = field(default_factory=dict)
+    # Relative to the wiretrace folder; empty means mocks/<name>.
+    mocks_dir: str = ""
+    request_id_header: str = DEFAULT_REQUEST_ID_HEADER
+
+    def __post_init__(self) -> None:
+        if not self.mocks_dir:
+            object.__setattr__(self, "mocks_dir", f"mocks/{self.name}")
 
 
 def list_presets(presets_dir: Path = PRESETS_DIR) -> list[str]:
@@ -82,7 +92,38 @@ def parse_preset(text: str, path: Path) -> Preset:
     if not isinstance(app, dict):
         raise PresetError(f"{where}: 'app' must be 'key: value' lines")
 
-    return Preset(name=name, api_hosts=tuple(hosts), default_filter=default_filter or None, app=app)
+    mocks_dir = data.get("mocks_dir")
+    if mocks_dir is not None:
+        problem = mocks_dir_problem(mocks_dir)
+        if problem:
+            raise PresetError(f"{where}: 'mocks_dir' {problem}")
+
+    header = data.get("request_id_header")
+    if header is not None:
+        problem = header_problem(header)
+        if problem:
+            raise PresetError(f"{where}: 'request_id_header' {problem}")
+
+    return Preset(name=name, api_hosts=tuple(hosts), default_filter=default_filter or None, app=app,
+                  mocks_dir=mocks_dir or "", request_id_header=header or DEFAULT_REQUEST_ID_HEADER)
+
+
+def mocks_dir_problem(value: object) -> str | None:
+    """Why `value` is not a folder inside the wiretrace folder, or None if it is one."""
+    if not isinstance(value, str) or not value:
+        return "must be a folder path such as mocks/staging"
+    if value.startswith(("/", "\\")) or PureWindowsPath(value).is_absolute():
+        return "must be relative to the wiretrace folder, not an absolute path"
+    if ".." in re.split(r"[/\\]", value):
+        return "must not contain '..'"
+    return None
+
+
+def header_problem(value: object) -> str | None:
+    """Why `value` is not an HTTP header name, or None if it is one."""
+    if not isinstance(value, str) or not _HEADER.fullmatch(value):
+        return "must be a header name such as X-Request-ID (letters, digits and '-' only)"
+    return None
 
 
 def host_problem(host: object) -> str | None:

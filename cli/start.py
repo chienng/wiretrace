@@ -26,6 +26,9 @@ PROXY_PORT = 8080
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STILL_STOPPING_S = 15
 POLL_S = 0.1
+WIRETRACE_DIR = Path(__file__).resolve().parent.parent
+# Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
+QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
 
 RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
@@ -68,7 +71,7 @@ def busy_ports(ports: list[tuple[str, str, int, str]]) -> list[doctor.Result]:
 
 
 def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Path,
-                  proxy_port: int = PROXY_PORT) -> list[str]:
+                  proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR) -> list[str]:
     cmd = [str(bin_dir / ("mitmweb" if ui else "mitmdump"))]
     if mode == "wireguard":
         cmd += ["--mode", "wireguard"]
@@ -77,6 +80,11 @@ def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Pat
     for regex in allow_hosts_regexes(preset):
         cmd += ["--allow-hosts", regex]
     cmd += ["--save-stream-file", str(flows)]
+    cmd += ["-s", str(QA_ADDON)]
+    for host in preset.api_hosts:
+        cmd += ["--set", f"qa_api_hosts={host}"]
+    cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
+    cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
     if preset.default_filter:
         # An option, not mitmdump's positional filter argument, which would also limit saving.
         option = "view_filter" if ui else "dumper_filter"
@@ -88,8 +96,12 @@ def har_command(bin_dir: Path, flows: Path, har: Path) -> list[str]:
     return [str(bin_dir / "mitmdump"), "-n", "-r", str(flows), "--set", f"hardump={har}"]
 
 
+def count_mocks(mocks_dir: Path) -> int:
+    return sum(1 for p in mocks_dir.rglob("*.json") if p.is_file()) if mocks_dir.is_dir() else 0
+
+
 def banner(preset: Preset, target: str, mode: str, ui: bool, folder: Path,
-           proxy_port: int = PROXY_PORT) -> str:
+           proxy_port: int = PROXY_PORT, mock_count: int = 0) -> str:
     lines = [
         f"Wiretrace {__version__}: preset {preset.name}, target {target}",
         f"Decrypting {', '.join(preset.api_hosts)} and their subdomains; other traffic passes through.",
@@ -97,6 +109,13 @@ def banner(preset: Preset, target: str, mode: str, ui: bool, folder: Path,
     if preset.default_filter:
         shown = "View filter" if ui else "Print filter"
         lines.append(f"{shown}: {preset.default_filter} (every flow is still saved)")
+    shown_dir = preset.mocks_dir.strip("/\\") + "/"
+    if mock_count:
+        lines.append(f"Mocks: {mock_count} {'file' if mock_count == 1 else 'files'} in {shown_dir}")
+    else:
+        lines.append(f"Mocks: none (add files under {shown_dir}<METHOD>/…)")
+    if ui:
+        lines.append("Faults: mitmweb > Options > qa_fault_*")
     if mode == "wireguard":
         first_time = "scan the QR code in mitmweb" if ui else "enter the configuration printed below"
         lines.append(f"Phone: turn the WireGuard tunnel on (first time: {first_time}).")
@@ -117,7 +136,7 @@ def _mitmproxy_version() -> str | None:
 
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
-        bin_dir: Path | None = None, proxy_port: int = PROXY_PORT) -> int:
+        bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR) -> int:
     try:
         preset = load_preset(preset_name, presets_dir)
     except PresetError as e:
@@ -153,9 +172,10 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             say("A session folder with this name already exists; start again in a second.", err=True)
             return 1
         flows = folder / session.FLOWS
-        say(banner(preset, target, mode, ui, folder, proxy_port))
+        mock_count = count_mocks(wiretrace_dir / preset.mocks_dir)
+        say(banner(preset, target, mode, ui, folder, proxy_port, mock_count))
         return supervise(
-            build_command(preset, mode, ui, flows, bin_dir, proxy_port),
+            build_command(preset, mode, ui, flows, bin_dir, proxy_port, wiretrace_dir),
             har_command(bin_dir, flows, folder / session.HAR),
             folder,
             stops,

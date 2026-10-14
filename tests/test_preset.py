@@ -132,3 +132,29 @@ def test_allow_hosts_rejects_lookalikes():
 def test_allow_hosts_one_per_host(tmp_path):
     p = load(tmp_path, GOOD + "  - auth-staging.example.com\n")
     assert len(preset.allow_hosts_regexes(p)) == 2
+
+
+# mocks_dir and request_id_header
+
+def test_qa_keys_default(tmp_path):
+    p = load(tmp_path, GOOD)
+    assert p.mocks_dir == "mocks/staging"
+    assert p.request_id_header == "X-Request-ID"
+
+
+def test_qa_keys_set(tmp_path):
+    p = load(tmp_path, GOOD + "mocks_dir: fixtures/api\nrequest_id_header: X-Trace-Id\n")
+    assert p.mocks_dir == "fixtures/api"
+    assert p.request_id_header == "X-Trace-Id"
+
+
+@pytest.mark.parametrize("value", ["/etc", "'\\\\share'", "../mocks", "mocks/../../x", "5", "''", "[a]"])
+def test_bad_mocks_dir(tmp_path, value):
+    message = error(tmp_path, GOOD + f"mocks_dir: {value}\n")
+    assert "staging.yaml" in message and "mocks_dir" in message
+
+
+@pytest.mark.parametrize("value", ["''", "X Request", "X-Request:", "5", "'X-Id '", "[a]"])
+def test_bad_request_id_header(tmp_path, value):
+    message = error(tmp_path, GOOD + f"request_id_header: {value}\n")
+    assert "staging.yaml" in message and "request_id_header" in message

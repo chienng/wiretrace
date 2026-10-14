@@ -302,12 +302,7 @@ mitmweb --mode wireguard \
 - After stopping, make the HAR file yourself:
   `mitmdump -n -r flows.mitm --set hardump=flows.har`
 
-### Optional — Fake responses and slow networks
-
-mitmproxy can already do this with built-in options. The launcher does not pass them on
-yet, so add them to the mitmproxy command in [Without the launcher](#without-the-launcher).
-
-Return a local JSON file instead of the real response:
+Fake a response with a local JSON file, using mitmproxy's own option:
 
 ```bash
 --map-local '|api-staging.mycompany.com/api/v1/profile|./profile.json'
@@ -319,7 +314,66 @@ Add a request header:
 --modify-headers '/~d api-staging.mycompany.com/X-Debug/1'
 ```
 
-More in [`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
+Add these to the mitmproxy command above. More in
+[`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
+
+### Mock a response
+
+Wiretrace can answer a request with a JSON file from your Mac, so the app gets that data and
+the real backend is not contacted. Put one file per request under `mocks/<preset>/`, in a
+folder named after the request method, and then the request path:
+
+```text
+mocks/staging/GET/api/v1/profile.json    answers GET /api/v1/profile
+mocks/staging/POST/api/v1/orders.json    answers POST /api/v1/orders
+mocks/staging/GET/index.json             answers GET /
+```
+
+- Copy `mocks/example/` to `mocks/staging/` to start from a sample.
+- The answer is always status `200` with the file's content as JSON. A query string
+  (`?page=2`) is ignored. Use a fault (next section) for error statuses.
+- Edit, add, or delete a file while Wiretrace runs: the next request uses the change. You do
+  not restart anything.
+- No file for a request means the request goes to the backend as usual.
+- A mocked flow is marked 🚧 in mitmweb, and its comment names the file.
+- The folder comes from the preset's `mocks_dir`; the default is `mocks/<preset name>`.
+  Wiretrace prints at start where it reads mocks from and how many files it found.
+
+### Make requests fail or slow
+
+To see how the app handles a failing or slow backend, start with mitmweb (the default, not
+`--no-ui`; faults are set in mitmweb's **Options** panel, which `--no-ui` does not have).
+Open **Options** and search for `qa_fault`:
+
+| Option | What it does |
+|---|---|
+| `qa_fault_filter` | Which requests to affect. Empty means none. |
+| `qa_fault_status` | Answer with this status (100 to 599) instead of contacting the backend. `0` is off. |
+| `qa_fault_delay_ms` | Wait this many milliseconds before the request continues. |
+| `qa_fault_drop` | Close the connection without any answer. |
+
+For example, to make every call to the orders endpoint fail with a server error, set
+`qa_fault_filter` to `~u /api/v1/orders` and `qa_fault_status` to `500`. The app gets
+status `500` with the body `{"error": "injected by Wiretrace"}`, and the flow is marked 💥.
+To make the same calls slow instead, leave `qa_fault_status` at `0` and set
+`qa_fault_delay_ms` to `3000`.
+
+- `qa_fault_filter` uses the same expressions as mitmweb's search box: `~u /orders`
+  (URL contains), `~m POST` (method), and `&` to combine them, for example
+  `~m POST & ~u /orders`. Use `~all` for every request.
+- The filter looks at the request only, because it is checked when the request arrives.
+  Filters about the response, such as `~c 500`, never match.
+- Only the preset's API hosts are affected. Other traffic is never delayed or failed.
+- Changes apply to requests that arrive after you press Enter; a request already waiting
+  keeps the settings it started with. To stop, clear `qa_fault_filter`.
+- If you type an invalid filter, a status outside 100 to 599, or a negative delay, mitmweb
+  shows a message and keeps the previous value.
+- A delay can be combined with a status, a drop, or a mock: the wait comes first.
+- Ctrl+C while requests are waiting still stops Wiretrace within a few seconds.
+
+When the request or the answer has an `X-Request-ID` header, mitmweb shows it as the flow's
+comment (`request-id: …`), and it is saved in `flows.mitm`. A preset can use another header
+name with `request_id_header`.
 
 ---
 

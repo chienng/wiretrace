@@ -20,6 +20,16 @@ api_hosts:
 # Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image".
 default_filter: "!~t image"
 
+# Optional. Folder of mock files, relative to the wiretrace folder (no absolute path, no "..").
+# A file mocks/<name>/<METHOD>/<path>.json answers that request instead of the backend,
+# for example mocks/example/GET/api/v1/profile.json answers GET /api/v1/profile.
+# Default: mocks/<name>.
+mocks_dir: mocks/example
+
+# Optional. Request header whose value is shown as the flow comment in mitmweb.
+# A header name: letters, digits and "-" only. Default: X-Request-ID.
+request_id_header: X-Request-ID
+
 # Optional. The app under test; used by the log collectors (a later version).
 app:
   android_package: com.example.myapp

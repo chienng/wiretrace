@@ -3,7 +3,7 @@
 - **Date**: 2026-10-13
 - **Tier**: M
 - **Repo**: wiretrace
-- **Status**: approved
+- **Status**: implemented
 - **Branch**: `feature/qa-addon`
 - **Related**: [`PLAN.md`](../../PLAN.md) §8 Phase 1 (F3, F4, F6), §9.3; spec 002 (launcher,
   presets), whose `start.build_command` gains the addon arguments

@@ -27,7 +27,8 @@ from pathlib import Path
 from cli import start
 a = json.loads(sys.argv[1])
 sys.exit(start.run("staging", "android", "proxy", ui=False, presets_dir=Path(a["presets"]),
-                   sessions_dir=Path(a["sessions"]), bin_dir=Path(a["bin"]), proxy_port=a["port"]))
+                   sessions_dir=Path(a["sessions"]), bin_dir=Path(a["bin"]), proxy_port=a["port"],
+                   wiretrace_dir=Path(a["wiretrace"])))
 """
 
 # Stands in for mitmdump: records the signals it gets in FAKE_EVENTS. FAKE_MODE picks
@@ -105,6 +106,8 @@ class Launch:
                  bin_dir: Path | None = None):
         self.presets = tmp_path / "presets"
         self.sessions = tmp_path / "sessions"
+        # Mocks are read from here, never from the real repo's mocks/ folder.
+        self.wiretrace_dir = tmp_path / "wiretrace"
         self.events_file = tmp_path / "events.log"
         self.presets.mkdir()
         (self.presets / "staging.yaml").write_text(PRESET.format(host=host))
@@ -116,7 +119,7 @@ class Launch:
             fake.chmod(0o755)
         self.port = free_port()
         args = {"presets": str(self.presets), "sessions": str(self.sessions),
-                "bin": str(bin_dir), "port": self.port}
+                "bin": str(bin_dir), "port": self.port, "wiretrace": str(self.wiretrace_dir)}
         env = {**os.environ, "PYTHONPATH": str(ROOT),
                "FAKE_EVENTS": str(self.events_file), "FAKE_MODE": fake_mode or ""}
         self.proc = subprocess.Popen(
@@ -222,7 +225,8 @@ def test_port_in_use_starts_nothing(tmp_path, capsys, family):
         holder.listen()
         port = holder.getsockname()[1]
         code = start.run("staging", "android", "proxy", ui=False, presets_dir=tmp_path / "presets",
-                         sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=port)
+                         sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=port,
+                         wiretrace_dir=tmp_path / "wiretrace")
 
     assert code == 1
     assert f"TCP {port}" in capsys.readouterr().err
@@ -231,7 +235,8 @@ def test_port_in_use_starts_nothing(tmp_path, capsys, family):
 
 def test_unknown_preset_starts_nothing(tmp_path, capsys):
     (tmp_path / "presets").mkdir()
-    code = start.run("nope", presets_dir=tmp_path / "presets", sessions_dir=tmp_path / "sessions")
+    code = start.run("nope", presets_dir=tmp_path / "presets", sessions_dir=tmp_path / "sessions",
+                     wiretrace_dir=tmp_path / "wiretrace")
     assert code == 1
     assert "Unknown preset 'nope'" in capsys.readouterr().err
     assert not (tmp_path / "sessions").exists()
@@ -241,7 +246,8 @@ def test_missing_mitmproxy_binary_leaves_no_folder(tmp_path, capsys):
     (tmp_path / "presets").mkdir()
     (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
     code = start.run("staging", "android", "proxy", ui=False, presets_dir=tmp_path / "presets",
-                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=free_port())
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace")
     assert code == 1
     assert "Could not start mitmdump" in capsys.readouterr().err
     assert list((tmp_path / "sessions").iterdir()) == []
@@ -285,10 +291,57 @@ def test_mitmdump_filter_is_an_option_not_positional():
     assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
 
 
-def test_no_filter_no_option():
+def test_no_filter_no_filter_option():
     plain = Preset(name="staging", api_hosts=("a.example.com",))
     cmd = start.build_command(plain, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"))
-    assert "--set" not in cmd
+    assert not any(arg.startswith(("view_filter", "dumper_filter")) for arg in cmd)
+
+
+def test_command_loads_the_qa_addon():
+    cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
+                              wiretrace_dir=Path("/d"))
+    assert cmd[cmd.index("-s") + 1] == str(start.QA_ADDON)
+    assert start.QA_ADDON.is_file()
+    assert [a for a in cmd if a.startswith("qa_api_hosts=")] == [
+        "qa_api_hosts=a.example.com", "qa_api_hosts=b.example.com"]
+    assert "qa_mocks_dir=/d/mocks/staging" in cmd
+    assert "qa_request_id_header=X-Request-ID" in cmd
+    # Every value follows a --set, and the filter option still comes last.
+    assert all(cmd[i - 1] == "--set" for i, a in enumerate(cmd) if a.startswith("qa_"))
+    assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
+
+
+def test_command_uses_the_preset_mocks_dir_and_header():
+    custom = Preset(name="staging", api_hosts=("a.example.com",), mocks_dir="fixtures/api",
+                    request_id_header="X-Trace-Id")
+    cmd = start.build_command(custom, "proxy", True, Path("/s/flows.mitm"), Path("/v/bin"),
+                              wiretrace_dir=Path("/d"))
+    assert "qa_mocks_dir=/d/fixtures/api" in cmd
+    assert "qa_request_id_header=X-Trace-Id" in cmd
+
+
+# Banner
+
+def test_banner_counts_mock_files_and_shows_a_relative_path():
+    text = start.banner(PRESET_WITH_FILTER, "android", "proxy", True, Path("/s"), mock_count=3)
+    assert "Mocks: 3 files in mocks/staging/" in text
+    assert "Faults: mitmweb > Options > qa_fault_*" in text
+    assert "/d/" not in text
+
+
+def test_banner_without_mocks_or_mitmweb():
+    text = start.banner(PRESET_WITH_FILTER, "android", "proxy", False, Path("/s"))
+    assert "Mocks: none (add files under mocks/staging/<METHOD>/…)" in text
+    assert "Faults:" not in text
+
+
+def test_count_mocks_counts_json_files_in_nested_folders(tmp_path):
+    assert start.count_mocks(tmp_path / "missing") == 0
+    (tmp_path / "GET" / "api").mkdir(parents=True)
+    (tmp_path / "GET" / "api" / "a.json").write_text("{}")
+    (tmp_path / "GET" / "index.json").write_text("{}")
+    (tmp_path / "GET" / "notes.txt").write_text("x")
+    assert start.count_mocks(tmp_path) == 2
 
 
 def test_needed_ports():
@@ -304,7 +357,10 @@ def test_needed_ports():
 # Integration: real mitmdump
 
 class _Hello(http.server.BaseHTTPRequestHandler):
+    paths: list[str] = []
+
     def do_GET(self):
+        self.paths.append(self.path)
         body = b"hello"
         self.send_response(200)
         self.send_header("Content-Length", str(len(body)))
@@ -328,16 +384,26 @@ def test_real_mitmdump_two_sigints(launch):
     from mitmproxy import io
 
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), _Hello)
+    _Hello.paths = []
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         run = launch(None, host="127.0.0.1", bin_dir=VENV_BIN)
+        mock = run.wiretrace_dir / "mocks" / "staging" / "GET" / "mocked.json"
+        mock.parent.mkdir(parents=True)
+        mock.write_bytes(b'{"mocked": true}')
         wait_for(lambda: _accepts(run.port), timeout=60)
 
         conn = http.client.HTTPConnection("127.0.0.1", run.port, timeout=10)
         conn.request("GET", f"http://127.0.0.1:{server.server_port}/hello")
         response = conn.getresponse()
         assert (response.status, response.read()) == (200, b"hello")
+        conn.request("GET", f"http://127.0.0.1:{server.server_port}/mocked?page=2",
+                     headers={"X-Request-ID": "req-42"})
+        response = conn.getresponse()
+        assert (response.status, response.read()) == (200, b'{"mocked": true}')
+        assert response.getheader("Content-Type") == "application/json"
         conn.close()
+        assert _Hello.paths == ["/hello"]
 
         # A Terminal Ctrl+C: the whole group gets SIGINT, and the launcher sends mitmdump
         # one more, so mitmdump receives two.
@@ -349,8 +415,10 @@ def test_real_mitmdump_two_sigints(launch):
     [folder] = run.folders()
     with open(folder / session.FLOWS, "rb") as f:
         flows = list(io.FlowReader(f).stream())
-    assert len(flows) == 1
-    assert flows[0].request.path == "/hello"
+    assert [flow.request.path for flow in flows] == ["/hello", "/mocked?page=2"]
+    assert flows[0].marked == "" and flows[0].comment == ""
+    assert flows[1].marked == ":construction:"
+    assert flows[1].comment == "request-id: req-42; mock: GET/mocked.json"
     har = json.loads((folder / session.HAR).read_text())
-    assert len(har["log"]["entries"]) == 1
+    assert len(har["log"]["entries"]) == 2
     assert session.read_meta(folder)["status"] == "stopped"
