@@ -223,6 +223,13 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
   Wi-Fi proxy to `<Mac IP>:8080`.
+- **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
+  `--target ios-sim --mode proxy`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8080`
+  (this usually needs admin rights; see
+  [`install-without-admin.md`](install-without-admin.md#ios-simulator-without-admin)), and
+  install the certificate in the booted Simulator once:
+  `xcrun simctl keychain booted add-root-cert ~/.mitmproxy/mitmproxy-ca-cert.pem`.
+  Ignore the "set the Wi-Fi proxy" reminder Wiretrace prints; it is meant for phones.
 - The preset's `default_filter` is the starting filter: in mitmweb's search box, or what
   is printed with `--no-ui`. It never limits what is saved. Common filters:
   `~c 500` (status 500), `~m POST`, `~u /api/v1/orders`, `~bs "SOME_TEXT"` (response body).
@@ -317,7 +324,9 @@ not do this for you yet; see *Without the launcher*).
 ### Step 5 — Export for the bug ticket
 
 Attach `flows.har` from the session folder. It opens in Chrome DevTools, Charles,
-Proxyman, …
+Proxyman, … For the app's side of the problem, also attach `device.log.jsonl` and
+`app.log.jsonl` if they are there; the time in each line (`ts`) helps match it to the
+request.
 
 To look at the session again later: `mitmweb -r flows.mitm`. In mitmweb you can also
 copy a single request as cURL.
@@ -327,6 +336,64 @@ copy a single request as cURL.
 > whatever the test account sent or the app logged. Attach them only
 > to internal tickets, never to public places or chats. Automatic redaction is planned
 > (feature F5). Use test accounts only.
+
+### Mock a response
+
+Wiretrace can answer a request with a JSON file from your Mac, so the app gets that data and
+the real backend is not contacted. Put one file per request under `mocks/<preset>/`, in a
+folder named after the request method, and then the request path:
+
+```text
+mocks/staging/GET/api/v1/profile.json    answers GET /api/v1/profile
+mocks/staging/POST/api/v1/orders.json    answers POST /api/v1/orders
+mocks/staging/GET/index.json             answers GET /
+```
+
+- Copy `mocks/example/` to `mocks/staging/` to start from a sample.
+- The answer is always status `200` with the file's content as JSON. A query string
+  (`?page=2`) is ignored. Use a fault (next section) for error statuses.
+- Edit, add, or delete a file while Wiretrace runs: the next request uses the change. You do
+  not restart anything.
+- No file for a request means the request goes to the backend as usual.
+- A mocked flow is marked 🚧 in mitmweb, and its comment names the file.
+- The folder comes from the preset's `mocks_dir`; the default is `mocks/<preset name>`.
+  Wiretrace prints at start where it reads mocks from and how many files it found.
+
+### Make requests fail or slow
+
+To see how the app handles a failing or slow backend, start with mitmweb (the default, not
+`--no-ui`; faults are set in mitmweb's **Options** panel, which `--no-ui` does not have).
+Open **Options** and search for `qa_fault`:
+
+| Option | What it does |
+|---|---|
+| `qa_fault_filter` | Which requests to affect. Empty means none. |
+| `qa_fault_status` | Answer with this status (100 to 599) instead of contacting the backend. `0` is off. |
+| `qa_fault_delay_ms` | Wait this many milliseconds before the request continues. |
+| `qa_fault_drop` | Close the connection without any answer. |
+
+For example, to make every call to the orders endpoint fail with a server error, set
+`qa_fault_filter` to `~u /api/v1/orders` and `qa_fault_status` to `500`. The app gets
+status `500` with the body `{"error": "injected by Wiretrace"}`, and the flow is marked 💥.
+To make the same calls slow instead, leave `qa_fault_status` at `0` and set
+`qa_fault_delay_ms` to `3000`.
+
+- `qa_fault_filter` uses the same expressions as mitmweb's search box: `~u /orders`
+  (URL contains), `~m POST` (method), and `&` to combine them, for example
+  `~m POST & ~u /orders`. Use `~all` for every request.
+- The filter looks at the request only, because it is checked when the request arrives.
+  Filters about the response, such as `~c 500`, never match.
+- Only the preset's API hosts are affected. Other traffic is never delayed or failed.
+- Changes apply to requests that arrive after you press Enter; a request already waiting
+  keeps the settings it started with. To stop, clear `qa_fault_filter`.
+- If you type an invalid filter, a status outside 100 to 599, or a negative delay, mitmweb
+  shows a message and keeps the previous value.
+- A delay can be combined with a status, a drop, or a mock: the wait comes first.
+- Ctrl+C while requests are waiting still stops Wiretrace within a few seconds.
+
+When the request or the answer has an `X-Request-ID` header, mitmweb shows it as the flow's
+comment (`request-id: …`), and it is saved in `flows.mitm`. A preset can use another header
+name with `request_id_header`.
 
 ### Without the launcher
 
@@ -386,64 +453,6 @@ For an iOS crash, also pull the crash reports into the folder:
 ```bash
 pymobiledevice3 crash pull ./crashes
 ```
-
-### Mock a response
-
-Wiretrace can answer a request with a JSON file from your Mac, so the app gets that data and
-the real backend is not contacted. Put one file per request under `mocks/<preset>/`, in a
-folder named after the request method, and then the request path:
-
-```text
-mocks/staging/GET/api/v1/profile.json    answers GET /api/v1/profile
-mocks/staging/POST/api/v1/orders.json    answers POST /api/v1/orders
-mocks/staging/GET/index.json             answers GET /
-```
-
-- Copy `mocks/example/` to `mocks/staging/` to start from a sample.
-- The answer is always status `200` with the file's content as JSON. A query string
-  (`?page=2`) is ignored. Use a fault (next section) for error statuses.
-- Edit, add, or delete a file while Wiretrace runs: the next request uses the change. You do
-  not restart anything.
-- No file for a request means the request goes to the backend as usual.
-- A mocked flow is marked 🚧 in mitmweb, and its comment names the file.
-- The folder comes from the preset's `mocks_dir`; the default is `mocks/<preset name>`.
-  Wiretrace prints at start where it reads mocks from and how many files it found.
-
-### Make requests fail or slow
-
-To see how the app handles a failing or slow backend, start with mitmweb (the default, not
-`--no-ui`; faults are set in mitmweb's **Options** panel, which `--no-ui` does not have).
-Open **Options** and search for `qa_fault`:
-
-| Option | What it does |
-|---|---|
-| `qa_fault_filter` | Which requests to affect. Empty means none. |
-| `qa_fault_status` | Answer with this status (100 to 599) instead of contacting the backend. `0` is off. |
-| `qa_fault_delay_ms` | Wait this many milliseconds before the request continues. |
-| `qa_fault_drop` | Close the connection without any answer. |
-
-For example, to make every call to the orders endpoint fail with a server error, set
-`qa_fault_filter` to `~u /api/v1/orders` and `qa_fault_status` to `500`. The app gets
-status `500` with the body `{"error": "injected by Wiretrace"}`, and the flow is marked 💥.
-To make the same calls slow instead, leave `qa_fault_status` at `0` and set
-`qa_fault_delay_ms` to `3000`.
-
-- `qa_fault_filter` uses the same expressions as mitmweb's search box: `~u /orders`
-  (URL contains), `~m POST` (method), and `&` to combine them, for example
-  `~m POST & ~u /orders`. Use `~all` for every request.
-- The filter looks at the request only, because it is checked when the request arrives.
-  Filters about the response, such as `~c 500`, never match.
-- Only the preset's API hosts are affected. Other traffic is never delayed or failed.
-- Changes apply to requests that arrive after you press Enter; a request already waiting
-  keeps the settings it started with. To stop, clear `qa_fault_filter`.
-- If you type an invalid filter, a status outside 100 to 599, or a negative delay, mitmweb
-  shows a message and keeps the previous value.
-- A delay can be combined with a status, a drop, or a mock: the wait comes first.
-- Ctrl+C while requests are waiting still stops Wiretrace within a few seconds.
-
-When the request or the answer has an `X-Request-ID` header, mitmweb shows it as the flow's
-comment (`request-id: …`), and it is saved in `flows.mitm`. A preset can use another header
-name with `request_id_header`.
 
 ### Logs from the app (for the mobile team)
 
@@ -517,7 +526,9 @@ Rules for the app:
 | `Device logs: waiting for a device` | No phone is connected, or it is not ready. Connect it by USB; on Android accept **Allow USB debugging**; on iPhone tap **Trust**. For the Simulator, boot one. Check `./wiretrace doctor`. |
 | `Device logs: more than one device connected; connect only one` | Disconnect the other phone or quit the other emulator or Simulator. Choosing a device is not supported yet. |
 | `Device logs: waiting for the app to start` (Android) | Open the app. The log follows it from then on. |
-| `Device logs: adb failed (exit code …); retrying in 2 s` (or `pymobiledevice3`, `xcrun`) | The tool stopped or could not run. Wiretrace retries by itself. If it keeps repeating, run `./wiretrace doctor`. |
+| `Device logs: adb failed (exit code …); retrying in 2 s`, or `adb did not run or answer; retrying in 2 s` (or `pymobiledevice3`, `xcrun`) | The tool stopped, could not be started, or did not answer within 10 seconds. Wiretrace retries by itself. If it keeps repeating, run `./wiretrace doctor`. |
+| `Device logs: could not start the collector` | Wiretrace could not run its own log collector. Traffic is still captured. Run `scripts/setup-mac.sh` again, then start again. |
+| `Device logs: stopped after an internal error (…)` | A bug in Wiretrace's log collector; the traffic capture goes on. Report it with the name in brackets, and stop and start Wiretrace to get the device log back. |
 | `Device logs: collector stopped (exit code …); capture continues` | The log collector ended. Traffic capture is not affected. Stop and start Wiretrace to get the device log back. |
 | `device.log.jsonl` is empty, or missing | The app wrote nothing while Wiretrace ran, or the process name or package in the preset is wrong. A file is created with the first line only. |
 | iOS logs show `<private>` | The app logs with `print()` or private values. Ask the mobile team (R4). |
@@ -543,8 +554,9 @@ tar -xzf wiretrace-<version>-macos.tar.gz -C ~
 cd ~/wiretrace && scripts/setup-mac.sh
 ```
 
-Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, and any
-sessions you want to keep from `~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
+Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
+files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, and any sessions you want to keep from
+`~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
 
 **Remove Wiretrace completely:**
 
