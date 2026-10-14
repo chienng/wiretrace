@@ -738,7 +738,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.7.0"
+        assert state["version"] == "0.7.1"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
