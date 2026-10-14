@@ -17,6 +17,9 @@ PRESETS_DIR = Path(__file__).resolve().parent.parent / "presets"
 # Also part of the session folder name, so no path separators or dots.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
 _LABEL = re.compile(r"(?!-)[A-Za-z0-9-]{1,63}(?<!-)")
+# `ios_process` is placed inside a `log stream` predicate: quotes and backslashes are rejected.
+_JAVA_PACKAGE = re.compile(r"[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+")
+_IOS_PROCESS = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._-]{0,63}")
 # An HTTP header field name is an RFC 9110 token.
 _HEADER = re.compile(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+")
 DEFAULT_REQUEST_ID_HEADER = "X-Request-ID"
@@ -91,6 +94,9 @@ def parse_preset(text: str, path: Path) -> Preset:
     app = data.get("app") or {}
     if not isinstance(app, dict):
         raise PresetError(f"{where}: 'app' must be 'key: value' lines")
+    problem = app_problem(app)
+    if problem:
+        raise PresetError(f"{where}: {problem}")
 
     mocks_dir = data.get("mocks_dir")
     if mocks_dir is not None:
@@ -106,6 +112,19 @@ def parse_preset(text: str, path: Path) -> Preset:
 
     return Preset(name=name, api_hosts=tuple(hosts), default_filter=default_filter or None, app=app,
                   mocks_dir=mocks_dir or "", request_id_header=header or DEFAULT_REQUEST_ID_HEADER)
+
+
+def app_problem(app: dict) -> str | None:
+    """Why an `app` value cannot be used, or None. A key left empty counts as not set."""
+    checks = {
+        "android_package": (_JAVA_PACKAGE, "must be a package name such as com.example.myapp"),
+        "ios_process": (_IOS_PROCESS, "must be a process name: up to 64 letters, digits, spaces, '.', '_' or '-'"),
+    }
+    for key, (pattern, message) in checks.items():
+        value = app.get(key)
+        if value is not None and not (isinstance(value, str) and pattern.fullmatch(value)):
+            return f"'app.{key}' {message}"
+    return None
 
 
 def mocks_dir_problem(value: object) -> str | None:

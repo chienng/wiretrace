@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -158,3 +159,53 @@ def test_bad_mocks_dir(tmp_path, value):
 def test_bad_request_id_header(tmp_path, value):
     message = error(tmp_path, GOOD + f"request_id_header: {value}\n")
     assert "staging.yaml" in message and "request_id_header" in message
+
+
+# app: android_package and ios_process feed the log collectors
+
+def app_text(**app) -> str:
+    # JSON is valid YAML, so any value, quotes and backslashes included, can be written as is.
+    return GOOD + f"app: {json.dumps(app)}\n"
+
+
+@pytest.mark.parametrize("package", ["com.example.myapp", "com.example.my_app2", "A.b", "a.b.c.d.e"])
+def test_good_android_package(tmp_path, package):
+    assert load(tmp_path, app_text(android_package=package)).app == {"android_package": package}
+
+
+@pytest.mark.parametrize("package", [
+    "myapp", "com.", ".com.example", "com..example", "1com.example", "com.1example", "com.exa-mple",
+    "com.example.my app", "com.example.myapp\n", 'com.example"; rm', "", 5, ["com.example"], True,
+])
+def test_bad_android_package(tmp_path, package):
+    message = error(tmp_path, app_text(android_package=package))
+    assert "staging.yaml" in message and "app.android_package" in message
+
+
+@pytest.mark.parametrize("process", ["MyApp", "My App", "my.app_2-x", "9lives", "A" * 64])
+def test_good_ios_process(tmp_path, process):
+    assert load(tmp_path, app_text(ios_process=process)).app == {"ios_process": process}
+
+
+@pytest.mark.parametrize("process", [
+    'My"App', "My'App", "My\\App", 'x" OR process == "y', " MyApp", ".MyApp", "My/App", "My;App", "My\nApp",
+    "A" * 65, "", 5, ["MyApp"], False,
+])
+def test_bad_ios_process(tmp_path, process):
+    message = error(tmp_path, app_text(ios_process=process))
+    assert "staging.yaml" in message and "app.ios_process" in message
+
+
+def test_app_keys_left_empty_count_as_not_set(tmp_path):
+    p = load(tmp_path, GOOD + "app:\n  android_package:\n  ios_process:\n")
+    assert p.app == {"android_package": None, "ios_process": None}
+
+
+def test_unknown_app_keys_are_still_ignored(tmp_path):
+    p = load(tmp_path, app_text(android_package="com.example.app", build_flavor="qa", anything=[1, 2]))
+    assert p.app["android_package"] == "com.example.app"
+
+
+def test_app_without_keys_or_missing_still_loads(tmp_path):
+    assert load(tmp_path, GOOD).app == {}
+    assert load(tmp_path, GOOD + "app: {}\n").app == {}

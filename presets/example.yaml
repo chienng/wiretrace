@@ -30,7 +30,12 @@ mocks_dir: mocks/example
 # A header name: letters, digits and "-" only. Default: X-Request-ID.
 request_id_header: X-Request-ID
 
-# Optional. The app under test; used by the log collectors (a later version).
+# Optional. The app under test, so `./wiretrace start` can collect its device log into
+# device.log.jsonl. Without the key for your --target, the device log is off and Wiretrace
+# says so at start.
 app:
+  # --target android or android-emu: the app's package name, as in `adb shell pm list packages`.
   android_package: com.example.myapp
+  # --target ios or ios-sim: the app's process name, as shown in Xcode or Console.
+  # Letters, digits, spaces, '.', '_' and '-' only, up to 64 characters.
   ios_process: MyApp

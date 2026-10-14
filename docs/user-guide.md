@@ -1,12 +1,13 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.2.1**.
+For QA engineers. Covers Wiretrace **0.4.0**.
 
-What 0.2.1 gives you: a one-command install that needs no admin rights, a setup
+What 0.4.0 gives you: a one-command install that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
-HAR file (Part 3). Mocks, redaction, log collection, and bug-report export are planned
-([`PLAN.md`](../PLAN.md) Phase 1) and not in this version yet.
+HAR file, mocks, injected faults, and the app's logs next to the traffic (Part 3).
+Redaction and bug-report export are planned ([`PLAN.md`](../PLAN.md) Phase 1) and not in
+this version yet.
 
 ---
 
@@ -217,7 +218,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - Every request and response is saved to `flows.mitm` in the session folder as it
   happens, so nothing is lost if you close the window.
 - `--target` is `android`, `ios`, `android-emu`, `ios-sim`, or `device` (the default). It
-  names the session folder and picks the setup reminders printed at start.
+  names the session folder, picks the setup reminders printed at start, and picks which
+  device log is collected (Step 2).
 - `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
   Wi-Fi proxy to `<Mac IP>:8080`.
@@ -227,26 +229,71 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   More in [`PLAN.md` Appendix B](../PLAN.md#appendix-b--mitmweb-filter-expressions-for-qa).
 - If a port is in use, Wiretrace says which one and does not start. Usually another Wiretrace or mitmproxy window is still open: quit it.
 
-### Step 2 — Collect app logs (second Terminal window)
+### Step 2 — See the app's logs
 
-Connect the phone by USB, and `cd` into the session folder printed at start, so the
-log file ends up next to `flows.mitm`.
+Wiretrace collects the app's log for you, in the same Terminal and the same session folder.
+You do not open a second window. It needs the app's name in your preset (Part 1, Step 6):
 
-Android (replace `com.mycompany.myapp` with your app's package name):
-
-```bash
-adb logcat --pid=$(adb shell pidof -s com.mycompany.myapp) | tee android.log
+```yaml
+app:
+  android_package: com.mycompany.myapp   # for --target android or android-emu
+  ios_process: MyApp                      # for --target ios or ios-sim
 ```
 
-iPhone (replace `MyApp` with your app's process name):
+| `--target` | Where the log comes from | What you need |
+|---|---|---|
+| `android`, `android-emu` | `adb logcat`, only the app's process | `app.android_package`; one phone connected by USB with USB debugging on, or one running emulator |
+| `ios` | `pymobiledevice3 syslog live`, only the app's process | `app.ios_process`; one iPhone connected by USB that trusts this Mac |
+| `ios-sim` | the Simulator's `log stream`, only the app's process | `app.ios_process`; one booted Simulator; Xcode's command line tools (`xcrun`) |
+| `device` | none | Use one of the targets above to get a device log. |
 
-```bash
-source ~/wiretrace/.venv/bin/activate
-pymobiledevice3 syslog live -pn MyApp | tee ios.log
+Wiretrace prints one line at start, for example
+`Device logs: Android, com.mycompany.myapp → device.log.jsonl`. If a device log is off,
+the same line says why: `--target device`, a missing `app.android_package` or
+`app.ios_process` in the preset, or a missing tool (`adb`, `pymobiledevice3`, `xcrun`).
+Wiretrace still starts, and the traffic is captured as usual.
+
+The log goes to `device.log.jsonl` in the session folder: one JSON object per line.
+
+```json
+{"ts": "2026-10-14T09:30:12.481+07:00", "source": "android", "level": "E", "tag": "OkHttp", "message": "…"}
 ```
 
-On Android, start the app first; if the app restarts, run the command again (its process
-ID changes).
+| Field | Meaning |
+|---|---|
+| `ts` | When the line was logged, in this Mac's time zone. |
+| `source` | `android`, `ios`, or `ios-sim`. |
+| `level` | `V`, `D`, `I`, `W`, `E`, or `F`. iOS logs use only `D`, `I`, `E`, and `F`. |
+| `tag` | Android: the log tag. iOS: the log category, or the subsystem. |
+| `message` | The text, as the app logged it. |
+
+Watch it while you test: `tail -f sessions/<session folder>/device.log.jsonl`.
+
+What to expect:
+
+- Wiretrace prints the state of the log on the Terminal, starting with `Device logs:`.
+  It never prints the log lines themselves, or the phone's serial number.
+- **Android:** you can start Wiretrace before or after the app. Lines the app logged before
+  its first screen are included, but not lines from before you ran `./wiretrace start`. If you
+  force-stop the app, or it crashes, and you open it again, the new process is followed,
+  and the crash stack trace is in the file.
+- **iPhone and Simulator:** the log keeps going after the app restarts.
+- Unplug the phone and plug it back in: the log resumes by itself. Nothing is lost from the
+  traffic capture in the meantime.
+- The log needs exactly **one** device. With none, or with more than one, Wiretrace says so
+  (`waiting for a device`, `more than one device connected; connect only one`) and checks
+  again every 2 seconds. Disconnect the extra phone or quit the extra emulator.
+- Ctrl+C stops the log with everything else. No `adb`, `pymobiledevice3` or `log` process
+  is left behind.
+
+The log stays on your Mac. Nothing is sent to any server.
+
+**Logs the app sends itself** go to `app.log.jsonl` in the same folder. That needs a QA
+build that supports it; see *Logs from the app* below. In WireGuard mode the phone must
+look up names through Wiretrace, so turn off **Private DNS** on Android (Settings → Network
+& internet → Private DNS → Off; the menu names vary by vendor), and remove any encrypted
+DNS profile on the iPhone (Settings → General → VPN & Device Management). With the Wi-Fi
+proxy (`--mode proxy`) you do not need this.
 
 ### Step 3 — Reproduce the problem
 
@@ -255,18 +302,17 @@ the request and the log lines.
 
 ### Step 4 — Stop
 
-Press **Ctrl+C** once in the Wiretrace window. It stops mitmproxy, writes `flows.har` next to
-`flows.mitm`, and prints the session folder. If it says *still stopping*, press Ctrl+C
-again to force it. If nothing was captured, the session folder is removed.
+Press **Ctrl+C** once in the Wiretrace window. It stops mitmproxy and the device log, writes
+`flows.har` next to `flows.mitm`, and prints the session folder. If it says *still
+stopping*, press Ctrl+C again to force it. If nothing was captured (no requests and no log
+lines), the session folder is removed. If only log lines were captured, the folder is kept
+and Wiretrace says that `flows.har` was not written.
 
-Press **Ctrl+C** in the log window too.
+`meta.json` in the session folder says which device log ran (`device_logs`) and how many
+lines each log file has (`device_log_lines`, `app_log_lines`).
 
-For an iOS crash, also pull the crash reports into the session folder:
-
-```bash
-source ~/wiretrace/.venv/bin/activate
-pymobiledevice3 crash pull ./crashes
-```
+For an iOS crash, also pull the crash reports into the session folder (the launcher does
+not do this for you yet; see *Without the launcher*).
 
 ### Step 5 — Export for the bug ticket
 
@@ -276,8 +322,9 @@ Proxyman, …
 To look at the session again later: `mitmweb -r flows.mitm`. In mitmweb you can also
 copy a single request as cURL.
 
-> **Important: exports are not redacted yet.** `flows.mitm`, `flows.har` and the log
-> files contain access tokens, cookies, and whatever the test account sent. Attach them only
+> **Important: exports are not redacted yet.** `flows.mitm`, `flows.har`,
+> `device.log.jsonl` and `app.log.jsonl` contain access tokens, cookies, request IDs, and
+> whatever the test account sent or the app logged. Attach them only
 > to internal tickets, never to public places or chats. Automatic redaction is planned
 > (feature F5). Use test accounts only.
 
@@ -316,6 +363,29 @@ Add a request header:
 
 Add these to the mitmproxy command above. More in
 [`PLAN.md` Appendix A](../PLAN.md#appendix-a--command-cheat-sheet).
+
+To collect a device log without the launcher, use a second Terminal window and `cd` into
+the session folder, so the file ends up next to `flows.mitm`:
+
+Android (start the app first; its process ID changes when it restarts, so run the command
+again then):
+
+```bash
+adb logcat --pid=$(adb shell pidof -s com.mycompany.myapp) | tee android.log
+```
+
+iPhone:
+
+```bash
+source ~/wiretrace/.venv/bin/activate
+pymobiledevice3 syslog live -pn MyApp | tee ios.log
+```
+
+For an iOS crash, also pull the crash reports into the folder:
+
+```bash
+pymobiledevice3 crash pull ./crashes
+```
 
 ### Mock a response
 
@@ -375,6 +445,48 @@ When the request or the answer has an `X-Request-ID` header, mitmweb shows it as
 comment (`request-id: …`), and it is saved in `flows.mitm`. A preset can use another header
 name with `request_id_header`.
 
+### Logs from the app (for the mobile team)
+
+A QA build can send its own log lines to Wiretrace, so they land in the session folder next
+to the traffic. This is requirement R6 in [`PLAN.md`](../PLAN.md#7-requirements-for-the-mobile-development-team).
+It works only while `./wiretrace start` is running, and the lines stay on the QA engineer's Mac.
+
+Send a `POST` to `https://qa-logs.internal/log` with `Content-Type: application/json`. The
+body is one JSON object, or an array of up to 1,000 objects:
+
+```json
+[{"message": "Order list loaded", "level": "I", "tag": "Orders", "ts": "2026-10-14T09:30:12.481+07:00", "request_id": "6f1c…"}]
+```
+
+| Field | Required | Limit |
+|---|---|---|
+| `message` | yes | a string |
+| `level` | no | a string, up to 64 characters (for example `V`, `D`, `I`, `W`, `E`) |
+| `tag` | no | a string, up to 64 characters |
+| `ts` | no | a string, up to 64 characters. Without it, Wiretrace uses the time it received the line. |
+| `request_id` | no | a string, up to 128 characters, for example the `X-Request-ID` of the request |
+
+Other keys are ignored. Each object becomes one line in `app.log.jsonl`, together with the
+time Wiretrace received it.
+
+| Wiretrace answers | When |
+|---|---|
+| `204` | The body is valid. The lines are stored. |
+| `400` | The body is not JSON, has the wrong shape, a missing `message`, a field of the wrong type or too long, or more than 1,000 objects. Nothing from that request is stored. |
+| `413` | The body is larger than 1 MiB. |
+| `404` / `405` | Another path, or another method than `POST` on `/log`. |
+
+Rules for the app:
+
+- Send it fire-and-forget and ignore every failure. When Wiretrace is not running, the name
+  `qa-logs.internal` does not exist, and the request just fails. Nothing is ever sent to the
+  internet or to the backend.
+- The request goes through the same proxy and trusts the same certificate as the API calls
+  (R1), in WireGuard mode and in Wi-Fi proxy mode. In WireGuard mode, the phone's Private DNS
+  must be off (Part 3, Step 2).
+- mitmweb shows these requests, so you can see whether the app is sending, but they are not
+  saved in `flows.mitm` or `flows.har`.
+
 ---
 
 ## Part 4 — After testing
@@ -382,7 +494,7 @@ name with `request_id_header`.
 - Turn the WireGuard tunnel off when you are not testing.
 - When a device leaves testing: delete the tunnel, and remove the **mitmproxy** profile /
   certificate (iPhone: VPN & Device Management; Android: Security → Trusted credentials → User).
-- Delete old session folders in `~/wiretrace/sessions/`; they contain tokens.
+- Delete old session folders in `~/wiretrace/sessions/`; they contain tokens and log lines.
 - Never copy or share `~/.mitmproxy/mitmproxy-ca.pem`. It is the private key that lets
   your Mac decrypt traffic from every device that trusts it.
 
@@ -399,12 +511,22 @@ name with `request_id_header`.
 | Some app's traffic is missing | That app ignores the phone's proxy settings: WireGuard mode normally catches it; if not, ask the mobile team (R7). |
 | `mitmweb: command not found` | Run `cd ~/wiretrace && source .venv/bin/activate` in this window. |
 | `adb: command not found` | Open a new Terminal window, or run setup without `--skip-android`. |
-| `adb logcat --pid=…` prints an error | The app is not running. Start it, then rerun the command. |
-| iOS logs are empty or show `<private>` | The app logs with `print()` or private values. Ask the mobile team (R4). |
+| `Device logs: off (add app.android_package to the preset)`, or `app.ios_process` | Add the key to the preset's `app:` section (Part 3, Step 2), then start again. |
+| `Device logs: off (adb not found)`, `pymobiledevice3`, or `xcrun` | The tool is missing. For `adb` or `pymobiledevice3`, run `scripts/setup-mac.sh`. For `xcrun`, install Xcode's command line tools. |
+| `Device logs: off (--target device has no device log)` | Start with `--target android`, `ios`, `android-emu` or `ios-sim`. |
+| `Device logs: waiting for a device` | No phone is connected, or it is not ready. Connect it by USB; on Android accept **Allow USB debugging**; on iPhone tap **Trust**. For the Simulator, boot one. Check `./wiretrace doctor`. |
+| `Device logs: more than one device connected; connect only one` | Disconnect the other phone or quit the other emulator or Simulator. Choosing a device is not supported yet. |
+| `Device logs: waiting for the app to start` (Android) | Open the app. The log follows it from then on. |
+| `Device logs: adb failed (exit code …); retrying in 2 s` (or `pymobiledevice3`, `xcrun`) | The tool stopped or could not run. Wiretrace retries by itself. If it keeps repeating, run `./wiretrace doctor`. |
+| `Device logs: collector stopped (exit code …); capture continues` | The log collector ended. Traffic capture is not affected. Stop and start Wiretrace to get the device log back. |
+| `device.log.jsonl` is empty, or missing | The app wrote nothing while Wiretrace ran, or the process name or package in the preset is wrong. A file is created with the first line only. |
+| iOS logs show `<private>` | The app logs with `print()` or private values. Ask the mobile team (R4). |
+| `app.log.jsonl` is missing | The app sent nothing. Check in mitmweb whether requests to `qa-logs.internal` appear, and with which answer (`400`: the body is wrong). Check that Private DNS is off (WireGuard mode). The QA build must implement R6. |
 | `Port … in use by another program` when starting | Another Wiretrace or mitmproxy is still running, often the `mitmweb` from Part 2. Quit it (Ctrl+C in its window). |
 | `Unknown preset '…'. Available presets: …` | Check the spelling; the name is the file name in `presets/` without `.yaml`. To add one, see Part 1, Step 6. |
 | `presets/<name>.yaml: …` | The preset file has a mistake; the message says which field. Fix the file and start again. |
-| `Nothing was captured; the session folder was removed.` | No request reached Wiretrace before you stopped. See *No requests appear at all*. |
+| `Nothing was captured; the session folder was removed.` | No request and no log line reached Wiretrace before you stopped. See *No requests appear at all*. |
+| `No traffic was captured; flows.har was not written.` | The session has log lines but no requests, so there is no HAR file. The session folder is kept. See *No requests appear at all*. |
 | `flows.har was not written (…)` | `flows.mitm` is kept. Make the HAR yourself: `cd` into the session folder, `source ~/wiretrace/.venv/bin/activate`, then `mitmdump -n -r flows.mitm --set hardump=flows.har`. |
 | Endpoint security quarantines mitmproxy | Ask IT to allowlist Wiretrace ([`install-without-admin.md`](install-without-admin.md#company-managed-macs-what-to-ask-it-for)). |
 

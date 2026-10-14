@@ -1,19 +1,26 @@
 """`wiretrace start`: run mitmweb or mitmdump with a preset and save the session.
 
-The launcher only builds the mitmproxy command line and supervises that one child
+The launcher only builds the mitmproxy command line and supervises that child
 process; QA logic belongs in mitmproxy addons. The child runs in the launcher's
 process group, so a Terminal Ctrl+C or a closed window reaches both directly.
 
-States (docs/specs/002-start-launcher-presets-sessions.md):
+A second child, the device log collector (`python -m collectors`), runs in its own
+process group so one killpg ends it and the tools it started. A Terminal Ctrl+C no
+longer reaches it, so the launcher forwards every stop. It never decides the state.
+
+States (docs/specs/002-start-launcher-presets-sessions.md, 004-log-collectors-and-app-log-receiver.md):
 PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> ABORTED.
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import signal
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
@@ -25,10 +32,19 @@ MODES = ("wireguard", "proxy")
 PROXY_PORT = 8080
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STILL_STOPPING_S = 15
+COLLECTOR_STOP_S = 3
 POLL_S = 0.1
 WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 # Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
+APP_LOGS_ADDON = WIRETRACE_DIR / "addons" / "app_logs.py"
+RECEIVER_HOST = "qa-logs.internal"
+RECEIVER_ALLOW_HOSTS = r"^qa-logs\.internal(:\d+)?$"
+RECEIVER_SAVE_FILTER = r"!~d ^qa-logs\.internal$"
+# Which log source each target runs, and how the banner names it.
+DEVICE_LOGS = {"android": "android", "android-emu": "android", "ios": "ios", "ios-sim": "ios-sim"}
+DEVICE_LOG_NAMES = {"android": "Android", "ios": "iPhone", "ios-sim": "iOS Simulator"}
+APP_KEYS = {"android": "android_package", "ios": "ios_process", "ios-sim": "ios_process"}
 
 RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
@@ -79,12 +95,17 @@ def build_command(preset: Preset, mode: str, ui: bool, flows: Path, bin_dir: Pat
         cmd += ["--mode", "regular", "--listen-port", str(proxy_port)]
     for regex in allow_hosts_regexes(preset):
         cmd += ["--allow-hosts", regex]
+    # Only the receiver host, no subdomains, so its HTTPS request is decrypted.
+    cmd += ["--allow-hosts", RECEIVER_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
-    cmd += ["-s", str(QA_ADDON)]
+    cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
     for host in preset.api_hosts:
         cmd += ["--set", f"qa_api_hosts={host}"]
     cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
     cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
+    cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
+    # Receiver flows stay visible in mitmweb but are not saved: they would duplicate app.log.jsonl.
+    cmd += ["--set", f"save_stream_filter={RECEIVER_SAVE_FILTER}"]
     if preset.default_filter:
         # An option, not mitmdump's positional filter argument, which would also limit saving.
         option = "view_filter" if ui else "dumper_filter"
@@ -96,12 +117,36 @@ def har_command(bin_dir: Path, flows: Path, har: Path) -> list[str]:
     return [str(bin_dir / "mitmdump"), "-n", "-r", str(flows), "--set", f"hardump={har}"]
 
 
+def collector_command(preset: Preset, target: str, bin_dir: Path, out: Path, *,
+                      find_adb: Callable[[], str | None] = doctor.find_adb,
+                      which: Callable[[str], str | None] = shutil.which) -> tuple[list[str] | None, str]:
+    """The collector's argument list and "", or None and why device logs are off."""
+    source = DEVICE_LOGS.get(target)
+    if source is None:
+        return None, "--target device has no device log"
+    key = APP_KEYS[source]
+    app = preset.app.get(key)
+    if not app:
+        return None, f"add app.{key} to the preset"
+    if source == "android":
+        tool, found = "adb", find_adb()
+    elif source == "ios":
+        pymobiledevice3 = bin_dir / "pymobiledevice3"
+        tool, found = "pymobiledevice3", str(pymobiledevice3) if os.access(pymobiledevice3, os.X_OK) else None
+    else:
+        tool, found = "xcrun", which("xcrun")
+    if not found:
+        return None, f"{tool} not found"
+    return [sys.executable, "-m", "collectors", "--target", target, "--app", app,
+            "--out", str(out), f"--{tool}", found], ""
+
+
 def count_mocks(mocks_dir: Path) -> int:
     return sum(1 for p in mocks_dir.rglob("*.json") if p.is_file()) if mocks_dir.is_dir() else 0
 
 
 def banner(preset: Preset, target: str, mode: str, ui: bool, folder: Path,
-           proxy_port: int = PROXY_PORT, mock_count: int = 0) -> str:
+           proxy_port: int = PROXY_PORT, mock_count: int = 0, device_logs: str = "off") -> str:
     lines = [
         f"Wiretrace {__version__}: preset {preset.name}, target {target}",
         f"Decrypting {', '.join(preset.api_hosts)} and their subdomains; other traffic passes through.",
@@ -116,6 +161,8 @@ def banner(preset: Preset, target: str, mode: str, ui: bool, folder: Path,
         lines.append(f"Mocks: none (add files under {shown_dir}<METHOD>/…)")
     if ui:
         lines.append("Faults: mitmweb > Options > qa_fault_*")
+    lines.append(f"Device logs: {device_logs}")
+    lines.append(f"App logs: POST https://{RECEIVER_HOST}/log → {session.APP_LOG}")
     if mode == "wireguard":
         first_time = "scan the QR code in mitmweb" if ui else "enter the configuration printed below"
         lines.append(f"Phone: turn the WireGuard tunnel on (first time: {first_time}).")
@@ -136,7 +183,8 @@ def _mitmproxy_version() -> str | None:
 
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
-        bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR) -> int:
+        bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
+        collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
     try:
         preset = load_preset(preset_name, presets_dir)
     except PresetError as e:
@@ -159,6 +207,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         "target": target,
         "mode": mode,
         "ui": "mitmweb" if ui else "mitmdump",
+        "device_logs": None,
         "status": "running",
     }
 
@@ -173,12 +222,20 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             return 1
         flows = folder / session.FLOWS
         mock_count = count_mocks(wiretrace_dir / preset.mocks_dir)
-        say(banner(preset, target, mode, ui, folder, proxy_port, mock_count))
+        collector_cmd, problem = collector_for(preset, target, bin_dir, folder / session.DEVICE_LOG)
+        source = DEVICE_LOGS.get(target) if collector_cmd else None
+        if source:
+            session.update_meta(folder, device_logs=source)
+            device_logs = f"{DEVICE_LOG_NAMES[source]}, {preset.app[APP_KEYS[source]]} → {session.DEVICE_LOG}"
+        else:
+            device_logs = f"off ({problem})"
+        say(banner(preset, target, mode, ui, folder, proxy_port, mock_count, device_logs))
         return supervise(
             build_command(preset, mode, ui, flows, bin_dir, proxy_port, wiretrace_dir),
             har_command(bin_dir, flows, folder / session.HAR),
             folder,
             stops,
+            collector_cmd,
         )
     finally:
         for sig, handler in previous.items():
@@ -187,7 +244,73 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
 
 # RUNNING, STOPPING, KILLED
 
-def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: list[int]) -> int:
+class _Collector:
+    """The device log collector: a child in its own process group, so one killpg ends all of it."""
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self.proc = proc
+        self.interrupted_at: float | None = None
+        self.exit_reported = False
+        self.closed = False
+
+    @classmethod
+    def start(cls, cmd: list[str]) -> _Collector | None:
+        pythonpath = os.pathsep.join(p for p in (str(WIRETRACE_DIR), os.environ.get("PYTHONPATH")) if p)
+        try:
+            proc = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, start_new_session=True,
+                                    env={**os.environ, "PYTHONPATH": pythonpath})
+        except OSError:
+            say("Device logs: could not start the collector", err=True)
+            return None
+        return cls(proc)
+
+    def _signal_group(self, sig: int) -> None:
+        try:
+            os.killpg(self.proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            pass
+
+    def interrupt(self) -> None:
+        """The one SIGINT (launcher invariant 4)."""
+        if self.interrupted_at is None:
+            self.interrupted_at = time.monotonic()
+            self._signal_group(signal.SIGINT)
+
+    def kill(self) -> None:
+        self._signal_group(signal.SIGKILL)
+
+    def notice_exit(self) -> None:
+        """The collector ended by itself while RUNNING: say so once, clean up its tools, go on."""
+        code = self.proc.poll()
+        if code is not None and not self.exit_reported:
+            self.exit_reported = True
+            self.kill()
+            say(f"Device logs: collector stopped (exit code {code}); capture continues", err=True)
+
+    def stop(self, stops: list[int], killed: bool) -> None:
+        """After the mitm child is gone: SIGINT, then SIGKILL after COLLECTOR_STOP_S, then reap."""
+        if killed:
+            self.kill()
+        else:
+            self.interrupt()
+        deadline = (self.interrupted_at or time.monotonic()) + COLLECTOR_STOP_S
+        while self.proc.poll() is None and not stops and time.monotonic() < deadline:
+            time.sleep(POLL_S / 2)
+        stops.clear()
+        self.close()
+
+    def close(self) -> None:
+        """Invariant 1: whatever the path, nothing in the collector's group stays alive."""
+        # Once only: after the reap below, an empty group's ID is free for the system to reuse.
+        if self.closed:
+            return
+        self.closed = True
+        self.kill()
+        self.proc.wait()
+
+
+def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: list[int],
+              collector_cmd: list[str] | None = None) -> int:
     """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`."""
     tool = Path(child_cmd[0]).name
     try:
@@ -197,21 +320,31 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
         say(f"Could not start {tool}: {e.strerror or e}", err=True)
         return 1
 
+    collector = None
     try:
-        state = _wait(child, stops)
+        # Invariant 2: only after the child started; a collector that cannot start is skipped.
+        if collector_cmd:
+            collector = _Collector.start(collector_cmd)
+            if collector is None:
+                session.update_meta(folder, device_logs=None)
+        state = _wait(child, stops, collector)
+        ended_at = session.timestamp()
+        if state == RUNNING:
+            say(f"{tool} exited on its own (exit code {child.returncode}).", err=True)
+        if collector:
+            collector.stop(stops, state == KILLED)
     finally:
-        # Invariant 1: no exit path leaves the child running.
+        # Invariant 1: no exit path leaves the child, or anything in the collector's group, running.
         if child.poll() is None:
             child.kill()
             child.wait()
+        if collector:
+            collector.close()
 
-    ended_at = session.timestamp()
-    if state == RUNNING:
-        say(f"{tool} exited on its own (exit code {child.returncode}).", err=True)
     return _finalize(folder, har_cmd, STATUS[state], ended_at, stops)
 
 
-def _wait(child: subprocess.Popen, stops: list[int]) -> str:
+def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | None = None) -> str:
     """Return the state the child exited in."""
     state, stopping_since, warned = RUNNING, 0.0, False
     while True:
@@ -222,13 +355,19 @@ def _wait(child: subprocess.Popen, stops: list[int]) -> str:
                 say("\nStopping… press Ctrl+C again to force.")
                 # The one SIGINT of our own: the stop may not have come from the Terminal.
                 child.send_signal(signal.SIGINT)
+                if collector:
+                    collector.interrupt()
             elif state == STOPPING:
                 state = KILLED
                 say("Force-stopping.")
                 child.kill()
+                if collector:
+                    collector.kill()
         if state == STOPPING and not warned and time.monotonic() - stopping_since >= STILL_STOPPING_S:
             say("still stopping — press Ctrl+C again to force")
             warned = True
+        if collector and state == RUNNING:
+            collector.notice_exit()
         try:
             child.wait(timeout=POLL_S)
         except subprocess.TimeoutExpired:
@@ -243,14 +382,22 @@ def _wait(child: subprocess.Popen, stops: list[int]) -> str:
 # FINALIZING
 
 def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stops: list[int]) -> int:
-    if not session.has_flows(folder):
+    flows = session.has_flows(folder)
+    if not flows and not session.has_logs(folder):
         session.remove(folder)
         say("Nothing was captured; the session folder was removed.")
         return 1
 
-    say("Writing flows.har…")
-    har_error = convert_har(har_cmd, folder / session.HAR, stops)
-    session.update_meta(folder, ended_at=ended_at, status=status)
+    # Both log files are complete here: the collector is reaped and mitmproxy has exited.
+    counts = {"device_log_lines": session.count_lines(folder / session.DEVICE_LOG),
+              "app_log_lines": session.count_lines(folder / session.APP_LOG)}
+    har_error = None
+    if flows:
+        say("Writing flows.har…")
+        har_error = convert_har(har_cmd, folder / session.HAR, stops)
+    else:
+        say("No traffic was captured; flows.har was not written.")
+    session.update_meta(folder, ended_at=ended_at, status=status, **counts)
     say(f"Session saved: {folder}")
     if har_error:
         say(f"flows.har was not written ({har_error}); flows.mitm is kept.", err=True)

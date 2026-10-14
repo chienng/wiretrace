@@ -1,7 +1,7 @@
 """Session folders: sessions/<YYYY-MM-DD_HHMMSS>_<preset>_<target>/ in the wiretrace folder.
 
-meta.json says what the run was (preset, target, mode, times, versions). It never
-holds device identifiers, user names or host names, and no absolute paths, which
+meta.json says what the run was (preset, target, mode, times, versions, log line
+counts). It never holds device identifiers, user names or host names, and no absolute paths, which
 contain the user name.
 """
 
@@ -16,6 +16,8 @@ from pathlib import Path
 SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
 FLOWS = "flows.mitm"
 HAR = "flows.har"
+DEVICE_LOG = "device.log.jsonl"
+APP_LOG = "app.log.jsonl"
 META = "meta.json"
 
 
@@ -51,6 +53,19 @@ def update_meta(folder: Path, **changes: object) -> None:
 def has_flows(folder: Path) -> bool:
     flows = folder / FLOWS
     return flows.is_file() and flows.stat().st_size > 0
+
+
+def count_lines(path: Path) -> int:
+    """Complete or partial lines in a log file; 0 if it does not exist."""
+    try:
+        with open(path, "rb") as f:
+            return sum(1 for line in f if line.strip())
+    except OSError:
+        return 0
+
+
+def has_logs(folder: Path) -> bool:
+    return any(count_lines(folder / name) for name in (DEVICE_LOG, APP_LOG))
 
 
 def remove(folder: Path) -> None:
