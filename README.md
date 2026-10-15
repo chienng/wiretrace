@@ -63,40 +63,71 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 
 ## Quick start
 
-Download `wiretrace-0.7.2-macos.tar.gz` and its `.sha256` file from the Releases page, then:
+Run every command below in **Terminal**, one block at a time. The
+[user guide](docs/user-guide.md) explains each step in more detail.
+
+**1. Download.** From the Releases page, download `wiretrace-0.7.2-macos.tar.gz` and
+`wiretrace-0.7.2-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
+
+**2. Check and unpack** into your home folder. The first line must print `OK`:
 
 ```bash
 cd ~/Downloads
 shasum -a 256 -c wiretrace-0.7.2-macos.tar.gz.sha256
 tar -xzf wiretrace-0.7.2-macos.tar.gz -C ~
-
-cd ~/wiretrace
-scripts/setup-mac.sh                 # add --skip-android if you only test iOS
-./wiretrace doctor                   # re-check the setup at any time
 ```
 
-Create a preset with your API hosts, then capture a session:
+**3. Install** (a few minutes, no password needed, never use `sudo`):
 
 ```bash
-cp presets/example.yaml presets/staging.yaml     # set name: staging and api_hosts
-./wiretrace start --preset staging --target android
+cd ~/wiretrace
+scripts/setup-mac.sh                 # add --skip-android if you only test iOS
 ```
 
-This opens mitmweb. For Wiretrace's own window, with the Rules view, add `--ui wiretrace`:
+It ends with a setup check. Only `FAIL` lines must be fixed; run `./wiretrace doctor` to
+check again. Then open a **new** Terminal window.
+
+**4. Create a preset** for your project. A preset tells Wiretrace which hosts to decrypt:
+
+```bash
+cd ~/wiretrace
+cp presets/example.yaml presets/staging.yaml
+open -e presets/staging.yaml
+```
+
+In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
+
+| Line | Change it to |
+|---|---|
+| `name: example` | `name: staging`: the file name without `.yaml` |
+| the two hosts under `api_hosts:` | your app's API hosts, such as `api-staging.mycompany.com` (no `https://`, no path). Ask the app's developers if you do not know them. |
+| `android_package:` | for Android, the app's package name, such as `com.mycompany.myapp` |
+| `ios_process:` | for iOS, the app's process name, such as `MyApp` |
+
+If `./wiretrace start` says *name is 'example', but must equal the file name*, the file was
+not changed or not saved.
+
+**5. Start capturing:**
 
 ```bash
 ./wiretrace start --preset staging --target android --ui wiretrace
 ```
 
-Use the app, then press Ctrl+C. Wiretrace writes `flows.har` (secrets masked) into the
-session folder. For a bug ticket:
+Use `--target ios` for an iPhone. The Wiretrace window opens in your browser. Without
+`--ui wiretrace` you get mitmweb instead.
+
+**6. The first time only, connect the phone:** install the WireGuard app, scan the QR code
+under *Setup* in the window, turn the tunnel on, then open `http://mitm.it` on the phone
+and install the certificate. On an iPhone, also turn on full trust for it in Settings →
+General → About → Certificate Trust Settings. Details:
+[Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
+
+**7. Test, stop, report.** Use the app, then press Ctrl+C in Terminal. Wiretrace writes
+`flows.har` (secrets masked) into the session folder. For a bug ticket:
 
 ```bash
 ./wiretrace report
 ```
-
-The first time, connect each phone to Wiretrace and install its certificate. The
-[user guide](docs/user-guide.md) covers this and everything else, step by step.
 
 ## Design
 

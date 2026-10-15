@@ -1,13 +1,16 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.4.0**.
+For QA engineers. Covers Wiretrace **0.7.2**, on Intel and Apple silicon Macs.
 
-What 0.4.0 gives you: a one-command install that needs no admin rights, a setup
+What 0.7.2 gives you: a one-command install that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
-HAR file, mocks, injected faults, and the app's logs next to the traffic (Part 3).
-Redaction and bug-report export are planned ([`PLAN.md`](../PLAN.md) Phase 1) and not in
-this version yet.
+HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
+next to the traffic (Part 3). `./wiretrace report` turns a session into a zip for the bug
+ticket. The Wiretrace window (`--ui wiretrace`) is a preview.
+
+New to Wiretrace? Do Part 1 once per Mac, Part 2 once per phone, then Part 3 every time
+you test. Run each command in **Terminal** (Applications → Utilities → Terminal).
 
 ---
 
@@ -19,9 +22,10 @@ this version yet.
   for a password.
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
-- The release file and its checksum: either `wiretrace-0.4.0-macos.tar.gz` and
-  `wiretrace-0.4.0-macos.tar.gz.sha256`, or `wiretrace-0.4.0-macos.dmg` and
-  `wiretrace-0.4.0-macos.dmg.sha256`. Both contain the same files.
+- The release file and its checksum, from the Releases page, saved in Downloads: either
+  `wiretrace-0.7.2-macos.tar.gz` and `wiretrace-0.7.2-macos.tar.gz.sha256`, or
+  `wiretrace-0.7.2-macos.dmg` and `wiretrace-0.7.2-macos.dmg.sha256`. Both contain the same
+  files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
 
@@ -30,8 +34,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.4.0-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.4.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.7.2-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.7.2-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -41,14 +45,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.4.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.7.2-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.4.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.7.2**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -115,10 +119,24 @@ cp presets/example.yaml presets/staging.yaml
 open -e presets/staging.yaml
 ```
 
-Set `name: staging` (it must match the file name) and list your API hosts under
-`api_hosts`: host names only, such as `api-staging.mycompany.com`, without `https://`,
-port, or path. Each host's subdomains are included. The comments in the file explain the
-other fields. If the file has a mistake, `./wiretrace start` names the file and the problem.
+The file opens in TextEdit. Change the lines marked `CHANGE`, then save with **Cmd+S**:
+
+1. `name: example` → `name: staging`. It must be the file name without `.yaml`.
+2. Under `api_hosts:`, replace the two example hosts with your app's API hosts, one per
+   line, each starting with `  - `. Host names only, such as `api-staging.mycompany.com`:
+   no `https://`, port, or path. Each host's subdomains are included. If you do not know
+   the hosts, ask the app's developers which ones the test build calls.
+3. Under `app:`, set `android_package` (Android) and/or `ios_process` (iOS). They let
+   Wiretrace collect the app's log. To find an Android package name, connect the phone and
+   run `adb shell pm list packages | grep -i <part of the app name>`; use the text after
+   `package:`.
+
+Leave the other lines as they are; the comments in the file explain them. Keep the spaces
+at the start of each line: YAML uses them.
+
+If the file has a mistake, `./wiretrace start` names the file and the problem. The most
+common one, *name is 'example', but must equal the file name*, means the file was not
+changed or not saved.
 
 Wiretrace always hides passwords, tokens and cookies in the files you attach to a ticket
 (see Part 3, Step 5). If your app sends other secrets, name them in an optional `redact:`
@@ -728,6 +746,7 @@ Rules for the app:
 | `app.log.jsonl` is missing | The app sent nothing. Check in mitmweb whether requests to `qa-logs.internal` appear, and with which answer (`400`: the body is wrong). Check that Private DNS is off (WireGuard mode). The QA build must implement R6. |
 | `Port … in use by another program` when starting | Another Wiretrace or mitmproxy is still running, for example a session from Part 2 or a `mitmweb` you started yourself. Quit it (Ctrl+C in its window). |
 | `Unknown preset '…'. Available presets: …` | Check the spelling; the name is the file name in `presets/` without `.yaml`. To add one, see Part 1, Step 6. |
+| `presets/staging.yaml: name is 'example', but must equal the file name without .yaml ('staging')` | The copied preset was not changed, or not saved. Open it (`open -e presets/staging.yaml`), set `name: staging`, your `api_hosts` and the `app:` names (Part 1, Step 6), save with Cmd+S, and start again. |
 | `presets/<name>.yaml: …` | The preset file has a mistake; the message says which field. Fix the file and start again. |
 | `Nothing was captured; the session folder was removed.` | No request and no log line reached Wiretrace before you stopped. See *No requests appear at all*. |
 | `No traffic was captured; flows.har was not written.` | The session has log lines but no requests, so there is no HAR file. The session folder is kept. See *No requests appear at all*. |

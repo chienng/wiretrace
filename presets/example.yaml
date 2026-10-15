@@ -1,30 +1,34 @@
 # Wiretrace preset: one file per project and environment.
-# Copy this file to presets/<name>.yaml, set `name` to <name>, and list your API hosts.
-# Start with: ./wiretrace start --preset <name>
+#
+# After copying this file to presets/<name>.yaml, change the lines marked CHANGE:
+#   1. name                  the file name without .yaml
+#   2. api_hosts             your app's API hosts (ask the app's developers)
+#   3. app.android_package   for Android, and/or app.ios_process for iOS
+# Then save and start with: ./wiretrace start --preset <name> --target android
 #
 # Keys Wiretrace does not know yet are ignored, so a preset can already carry
 # settings for later features.
 
-# Required. Must equal the file name without .yaml.
-name: example
+# Required. Must equal the file name without .yaml: presets/staging.yaml needs name: staging.
+name: example                       # CHANGE
 
 # Required. Host names only: no https://, no port, no path, no wildcard.
 # Each host and all of its subdomains are decrypted, on any port; traffic to
 # every other host passes through undecrypted.
-api_hosts:
+api_hosts:                          # CHANGE: replace both lines with your hosts
   - api-staging.example.com
   - auth-staging.example.com
 
 # Optional. mitmproxy filter expression shown at start: the view filter in mitmweb,
 # the print filter with --no-ui. It never limits what is saved.
-# Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image".
-default_filter: "!~t image"
+# Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image". Default: no filter.
+# default_filter: "!~t image"
 
 # Optional. Folder of mock files, relative to the wiretrace folder (no absolute path, no "..").
 # A file mocks/<name>/<METHOD>/<path>.json answers that request instead of the backend,
 # for example mocks/example/GET/api/v1/profile.json answers GET /api/v1/profile.
-# Default: mocks/<name>.
-mocks_dir: mocks/example
+# Default: mocks/<name>, which follows the preset's name.
+# mocks_dir: mocks/example
 
 # Optional. Request header whose value is shown as the flow comment in mitmweb.
 # A header name: letters, digits and "-" only. Default: X-Request-ID.
@@ -35,10 +39,10 @@ request_id_header: X-Request-ID
 # says so at start.
 app:
   # --target android or android-emu: the app's package name, as in `adb shell pm list packages`.
-  android_package: com.example.myapp
+  android_package: com.example.myapp   # CHANGE for Android
   # --target ios or ios-sim: the app's process name, as shown in Xcode or Console.
   # Letters, digits, spaces, '.', '_' and '-' only, up to 64 characters.
-  ios_process: MyApp
+  ios_process: MyApp                   # CHANGE for iOS
 
 # Optional. Names to hide in addition to the built-in ones, in flows.har and in the bug report
 # zip (`./wiretrace report`). Built in: the headers Authorization, Proxy-Authorization, Cookie and
