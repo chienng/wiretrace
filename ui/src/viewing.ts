@@ -9,9 +9,15 @@ function failed(dispatch: Dispatch<Action>, e: unknown, fallback: string): void 
 
 /** Open a previous session read-only: the server reads it, then its flows and logs are loaded. */
 export async function openSession(dispatch: Dispatch<Action>, name: string): Promise<boolean> {
+  let opened;
   try {
-    const opened = await api.view(name);
-    if (opened.viewing !== name) return false;
+    opened = await api.view(name);
+  } catch (e) {
+    failed(dispatch, e, 'Could not open that session');
+    return false;
+  }
+  if (opened.viewing !== name) return false;
+  try {
     const [flows, device, app] = await Promise.all([api.flows(name), api.logs('device', name), api.logs('app', name)]);
     dispatch({
       type: 'viewOpened',
@@ -19,7 +25,10 @@ export async function openSession(dispatch: Dispatch<Action>, name: string): Pro
     });
     return true;
   } catch (e) {
+    // The server already holds this session open and refuses live-only actions until it is closed.
     failed(dispatch, e, 'Could not open that session');
+    await api.view(null).catch(() => undefined);
+    dispatch({ type: 'viewClosed' });
     return false;
   }
 }
