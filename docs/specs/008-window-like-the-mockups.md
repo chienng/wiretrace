@@ -1,10 +1,10 @@
 # Spec: the Wiretrace window like mockup screens 1–4
 
 - **Date**: 2026-10-15
-- **Tier**: L. It extends spec 006's local server, which shows captured traffic (tokens
+- **Risk**: high — it extends spec 006's local server, which shows captured traffic (tokens
   included) and the phone's WireGuard private key, with new mutations: writing a rules file,
-  replaying requests, opening other sessions from disk. Gates E, A, B, C, R, P. Gate D does
-  not apply: one repo.
+  replaying requests, opening other sessions from disk. Needs a UI, code, security and privacy
+  review and a runtime check.
 - **Repo**: wiretrace
 - **Status**: approved
 - **Branch**: `feature/ui-mockups`
@@ -138,9 +138,9 @@ reviewed and used on its own: **A** rules (screen 4), **B** setup wizard (screen
       `X-Wiretrace: 1` on mutations, Origin on the WebSocket, CSP). No new endpoint takes a file
       path from the client.
 - [ ] Nothing new is printed or logged with flow content, log content, device identifiers or
-      rule bodies (Gate C).
+      rule bodies (privacy review).
 - [ ] Colours, spacing, radius and type come from `ui/src/styles.css` variables, which follow
-      the mockup (Gate E). No UI library is added.
+      the mockup (UI review). No UI library is added.
 - [ ] Version 0.8.0. User guide and README updated (the README's Design table marks screens
       1–4 as built, with the decisions above as the remaining differences).
 
@@ -156,8 +156,8 @@ once a second from `request`. The window writes the file (atomic `os.replace`) a
 live `QATools.reload_rules()` (found with `ctx.master.addons.get("qatools")`), so a save applies at
 once. Validation is one function, `parse_rules(data, api_hosts, mocks_dir) -> Rules | error`, in
 `qa_tools`; the window imports the module for it (pure functions; the live instance is always the
-one from the addon chain). Value types are `NamedTuple` (incident 2026-10-14: `@dataclass` in a
-`-s` script).
+one from the addon chain). Value types are `NamedTuple`: a `@dataclass` defined in a `-s`
+script fails when mitmproxy loads it.
 
 Rejected: rules as more mitmproxy options (lists of structured values do not fit options, and
 options are visible in `ps`); an engine inside the window addon (would not work with mitmweb).
@@ -185,8 +185,8 @@ request body.
 The window addon adds `client_connected` (sets `device_seen_at`; nothing about the peer is kept)
 and `tls_failed_client` for API hosts (counts `tls_failures`), exposed in `/api/state`. The
 launcher adds `--allow-hosts ^mitm\.it(:\d+)?$` (as it does for `qa-logs.internal`) so
-mitmproxy's own certificate page loads through the tunnel; Gate R must show it loading on a
-device. The emulator configuration is the WireGuard configuration with its `Endpoint` line
+mitmproxy's own certificate page loads through the tunnel; the runtime check must show it
+loading on a device. The emulator configuration is the WireGuard configuration with its `Endpoint` line
 replaced, done in the page.
 
 ### C. Device status file
@@ -267,7 +267,7 @@ resets its counters, re-arm resets them, a session starts at zero. They are neve
   applying rule wins, matching-but-not-applying passes on; order rules → faults → mocks; reload
   on mtime; invalid file keeps old rules; snapshot held across a delay (invariant 1); comment parts.
 - A real `mitmdump -s` test loads `qa_tools.py` with a rules file and gets the rule's response
-  (incident 2026-10-14 prevention).
+  (guards against the `@dataclass` failure above).
 - `tests/test_wiretrace_ui.py`: rules GET/PUT (valid, invalid, 409 stale revision, atomic write),
   test endpoint leaves counters, re-arm; sessions list and view (bad names, names outside the
   listing, symlinks refused, cut-off `flows.mitm`); `?session=` on read endpoints; search over

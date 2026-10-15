@@ -1,9 +1,8 @@
 # Spec: redaction, bug report zip, and old-session cleanup
 
 - **Date**: 2026-10-14
-- **Tier**: L — decides which secrets leave the Mac in files QA attach to tickets
-  (always-L: "anything that logs user data", "anything leaving the device"). Gates A, B,
-  C, R, P. Gate D does not apply: one repo, no shared library.
+- **Risk**: high — decides which secrets leave the Mac in files QA attach to tickets.
+  Needs a code, security and privacy review and a runtime check.
 - **Repo**: wiretrace
 - **Status**: implemented
 - **Branch**: `main` (as specs 003 and 004)
@@ -251,7 +250,7 @@ the wrong folder.
 
 ## Errata
 
-Changed after the security review (Gate B), before the first commit:
+Changed after the security review, before the first commit:
 
 - Default fields also include `token`, `api_key` and `secret`.
 - `meta.json` records the rules used at capture (`redact: {headers, json_fields}`); the report
@@ -260,7 +259,7 @@ Changed after the security review (Gate B), before the first commit:
   a path separator is taken as a path.
 - `;` separates query and form pairs as well as `&`.
 - A fragment with a client-side route (`#/callback?access_token=…`) has the parameters after
-  its `?` masked (found by Gate A).
+  its `?` masked (found in code review).
 - A body that starts like JSON (`{` or `[`) but does not parse is masked with the log-text
   patterns instead of being left as it was.
 - JSON log lines: matching keys are masked, and every text value goes through the log-text

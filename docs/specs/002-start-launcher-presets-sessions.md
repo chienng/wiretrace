@@ -1,7 +1,6 @@
 # Spec: `wiretrace start` — presets, host allowlist, session folder, launcher
 
 - **Date**: 2026-10-13
-- **Tier**: M
 - **Repo**: wiretrace
 - **Status**: implemented
 - **Branch**: `feature/start-launcher`
@@ -17,13 +16,13 @@ own folder, with a HAR file written when they press Ctrl+C.
 
 This is the first of five Phase 1 specs, all in this repo:
 
-| Spec | Scope | Tier |
+| Spec | Scope | Risk |
 |---|---|---|
-| **002** (this) | Presets (F1), host allowlist (F2), session folder (F10), launcher (F12) | M |
-| 003 | QA addon: mocks (F3), fault injection (F4), request ID tagging (F6) | M |
-| 004 | Log collectors (F7, F8) and in-app log receiver (F9) | M |
-| 005 | Redaction (F5), bug report zip (F11), old-session cleanup | M |
-| 006 | Post bug to YouTrack (F13) — personal tokens | **L** |
+| **002** (this) | Presets (F1), host allowlist (F2), session folder (F10), launcher (F12) | low |
+| 003 | QA addon: mocks (F3), fault injection (F4), request ID tagging (F6) | low |
+| 004 | Log collectors (F7, F8) and in-app log receiver (F9) | low |
+| 005 | Redaction (F5), bug report zip (F11), old-session cleanup | low |
+| 006 | Post bug to YouTrack (F13) — personal tokens | **high** |
 
 ## Acceptance criteria
 
@@ -200,7 +199,7 @@ files can be added later without a spec change.
 
 ## Errata
 
-- 2026-10-13, Gate R finding, approved at Gate P: `doctor.check_port` also binds `::`
+- 2026-10-13, found in the runtime check: `doctor.check_port` also binds `::`
   (IPv6 only) for TCP ports on `0.0.0.0`, because mitmproxy's TCP servers listen on both
   families and fail to start if either is taken. Without it, a port held only on IPv6
   passed the pre-check and mitmproxy then exited with "address already in use". UDP is

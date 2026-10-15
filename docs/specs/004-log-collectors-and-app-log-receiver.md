@@ -1,9 +1,9 @@
 # Spec: log collectors and in-app log receiver
 
 - **Date**: 2026-10-14
-- **Tier**: L — the receiver accepts app log lines sent off the phone, and both features
-  store app log content (always-L: "anything that logs user data", "anything leaving the
-  device"). Gates A, B, C, R, P, D.
+- **Risk**: high — the receiver accepts app log lines sent off the phone, and both features
+  store app log content. Needs a code, security and privacy review, a runtime check, and
+  a maintainer's sign-off before merge.
 - **Repo**: wiretrace
 - **Status**: implemented
 - **Branch**: `feature/log-collectors`
@@ -163,7 +163,8 @@ redact). They remain visible in mitmweb, which shows whether the app is sending.
 Rejected: `--set connection_strategy=lazy` (one line, but for **all** traffic it turns an
 unreachable backend into a `502` from mitmproxy instead of a failed connection, and an
 invalid backend certificate into a later error — the app under test would see different
-failures than in production); a path on an API host such as `/__wiretrace/log` (without Wiretrace running, the QA build would send its logs to the real backend).
+failures than in production); a path on an API host such as `/__wiretrace/log` (without DV
+Lens running, the QA build would send its logs to the real backend).
 
 **Options** (registered in `load`):
 

@@ -366,7 +366,7 @@ Everything Wiretrace needs runs in the user's home folder, so it works on standa
 ```mermaid
 flowchart LR
     subgraph Dist["Distribution"]
-        GIT["Internal GitLab repo<br/>(source, presets, shared mocks)"]
+        GIT["Git repo<br/>(source, presets, shared mocks)"]
         SSV["IT Self Service<br/>(Jamf / Intune / Munki)"]
     end
 

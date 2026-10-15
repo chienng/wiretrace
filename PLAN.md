@@ -2,7 +2,7 @@
 
 ## 1. Summary
 
-Wiretrace is an internal macOS tool for the mobile QA team to:
+Wiretrace is a macOS tool for mobile QA teams to:
 
 - See every API request and response between the mobile app (iOS / Android) and backend servers.
 - Filter and search that traffic quickly (by host, path, method, status code, body content).
@@ -666,7 +666,7 @@ class YouTrack:
 | Phase | Distribution |
 |---|---|
 | Phase 0 | `uv tool install mitmproxy` + guide |
-| Phase 1 | Internal git repo; `scripts/setup-mac.sh` installs `uv`, Android platform-tools, and Python deps into a project venv. Run via `./wiretrace`. |
+| Phase 1 | Git repo; `scripts/setup-mac.sh` installs `uv`, Android platform-tools, and Python deps into a project venv. Run via `./wiretrace`. |
 | Phase 2 | Tauri `.app` / `.dmg` with the Python backend bundled (PyInstaller sidecar). **Signed with a Developer ID and notarized** so Gatekeeper allows it. Auto-update via Tauri's updater or a shared drive. |
 | Company-managed Macs | IT publishes Phase 1 or Phase 2 in **Self Service** (Jamf / Intune / Munki), so QA installs and updates with one click. |
 
@@ -750,7 +750,7 @@ All options install into the user's home folder (`~/wiretrace`, `~/Applications`
 
 | Task | Command |
 |---|---|
-| Install uv (no admin) | `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
+| Install uv (no admin) | `scripts/setup-mac.sh` (pinned release, SHA-256 checked) |
 | Install mitmproxy (Phase 0, no admin) | `uv tool install mitmproxy` |
 | Start with WireGuard | `mitmweb --mode wireguard` |
 | Start as regular proxy | `mitmweb --listen-port 8080` |

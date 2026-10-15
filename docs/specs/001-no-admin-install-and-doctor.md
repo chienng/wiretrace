@@ -1,11 +1,10 @@
 # Spec: No-admin install script and `wiretrace doctor`
 
 - **Date**: 2026-10-13
-- **Tier**: M
 - **Repo**: wiretrace
 - **Status**: approved
-- **Branch**: n/a — `wiretrace/` is not a git repository yet (it is ignored by the
-  workspace repo; `PLAN.md` targets `gitlab.mycompany.com/qa/wiretrace`)
+- **Branch**: n/a — `wiretrace/` is not a git repository yet (`PLAN.md` targets
+  `gitlab.mycompany.com/qa/wiretrace`)
 - **Related**: [`PLAN.md`](../../PLAN.md) §5, §9.1, §9.7, §10;
   [`docs/install-without-admin.md`](../install-without-admin.md) steps 1–4
 
@@ -165,43 +164,43 @@ state. Two invariants still hold everywhere:
 - Privacy: doctor's rendered output for a parsed device list containing a serial does
   not contain that serial.
 
-## Gate R plan
+## Runtime check
 
-On the Orchestrator's Mac (Intel, admin account, no `uv` installed): run
+On the maintainer's Mac (Intel, admin account, no `uv` installed): run
 `setup-mac.sh` with `HOME` pointed at a fresh temporary folder, so `uv`, Python,
 platform-tools and `.zshrc` all land there and the real home is untouched. Run it a
 second time to check idempotence, then run `pytest`. A standard-account run on a
-company Mac (manual test step 1) is **Not verified** by the agent; it is part of
+company Mac (manual test step 1) is not part of this check; it is part of
 the `install-without-admin.md` Phase 0 check.
 
 ## Risks
 
 - A dependency of `pymobiledevice3` or `mitmproxy` without a prebuilt wheel for the
   Mac's Python and CPU would need a compiler, which on a Mac without CLT opens the
-  install dialog or fails. Gate R on Intel and the Phase 0 run on Apple silicon show
-  whether that happens; if it does, the fix is a version constraint, decided then.
+  install dialog or fails. The runtime check on Intel and the Phase 0 run on Apple silicon
+  show whether that happens; if it does, the fix is a version constraint, decided then.
 
 ## Errata
 
-- 2026-10-13, Gate R: the risk above happened. `argon2-cffi-bindings` 26.1.0 (via
+- 2026-10-13, runtime check: the risk above happened. `argon2-cffi-bindings` 26.1.0 (via
   `mitmproxy` → `argon2-cffi`) ships macOS wheels for arm64 only, so Intel Macs built
   it from source. Also, the first doctor run after setup timed out on the iOS check
-  because the Python files had not been compiled to bytecode yet. Approved fix (Gate P):
+  because the Python files had not been compiled to bytecode yet. Fix:
   `setup-mac.sh` installs with `uv pip install --only-binary :all: --compile-bytecode`.
   `uv` then picks the newest version that has a wheel (25.1.0 on Intel), and any
   future dependency that exists only as source stops the install with an error
   instead of starting a build.
-- 2026-10-13, Gate R re-run: `--only-binary :all:` fixed the build (25.1.0 installed
+- 2026-10-13, runtime check re-run: `--only-binary :all:` fixed the build (25.1.0 installed
   from a wheel). `--compile-bytecode` did not fix the iOS timeout: the first
   `pymobiledevice3 usbmux list` after install took 21.5 s wall clock for 1.6 s of
   CPU, and the next run took 3.4 s. That pattern suggests macOS scanning newly
-  installed native libraries on first load (unconfirmed). Approved fix (Gate P,
-  round 2): `setup-mac.sh` runs `pymobiledevice3 usbmux list` once before
+  installed native libraries on first load (unconfirmed). Second fix:
+  `setup-mac.sh` runs `pymobiledevice3 usbmux list` once before
   `doctor`. `--compile-bytecode` stays.
-- 2026-10-13, after a run on the Orchestrator's own home: Astral's `install.sh` failed
+- 2026-10-13, after a run on the maintainer's own home: Astral's `install.sh` failed
   because `~/.config` there is owned by root, so its update receipt could not be
   written (the binary itself was in place). Separately, piping a downloaded script
-  into `sh` runs unverified, unpinned code. Orchestrator decision: `setup-mac.sh`
+  into `sh` runs unverified, unpinned code. Decision: `setup-mac.sh`
   downloads the pinned `uv` 0.13.0 release archive from GitHub and the pinned
   platform-tools r37.0.1 zip from Google, checks each against a SHA-256 stored in the
   script (cross-checked against the vendor's published `.sha256` / SHA-1), and

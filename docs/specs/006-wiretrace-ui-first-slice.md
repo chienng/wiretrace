@@ -1,9 +1,9 @@
 # Spec: Wiretrace UI, first slice (traffic, logs, setup, faults, report)
 
 - **Date**: 2026-10-14
-- **Tier**: L — a local web server that shows captured traffic (tokens included), the
-  phone's WireGuard private key, and can change faults (always-L: auth and tokens,
-  "anything that logs user data"). Gates E, A, B, C, R, P. Gate D does not apply: one repo.
+- **Risk**: high — a local web server that shows captured traffic (tokens included), the
+  phone's WireGuard private key, and can change faults. Needs a UI, code, security and
+  privacy review and a runtime check.
 - **Repo**: wiretrace
 - **Status**: implemented
 - **Branch**: `main` (as specs 003 to 005)
@@ -76,7 +76,7 @@ which is **committed**: QA Macs have no Node, and `scripts/build-release.sh` pac
 tree. `ui/node_modules/` is gitignored. Dependencies: `react`, `react-dom`, `qrcode` (QR
 canvas); dev: `typescript`, `vite`, `@vitejs/plugin-react`, `vitest`. No UI kit: colours,
 spacing, radius and type come from the CSS variables and classes of
-`mockups/wiretrace-mockup.html` (Gate E checks this). Never `dangerouslySetInnerHTML`; the JSON
+`mockups/wiretrace-mockup.html` (the UI review checks this). Never `dangerouslySetInnerHTML`; the JSON
 viewer builds elements.
 
 ### Addon options (set by the launcher)
@@ -107,7 +107,7 @@ The token is `secrets.token_urlsafe(32)`, made in the addon at `running`, never 
   ws://localhost:<port>; frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`,
   `Referrer-Policy: no-referrer`; API responses `Cache-Control: no-store`.
 - The addon prints nothing but the link and errors; no flow content, header or log line is
-  printed or logged (Gate C).
+  printed or logged (the privacy review checks this).
 
 ### API (JSON; `ts` values are Unix seconds, floats)
 
@@ -257,12 +257,12 @@ Decided while building the backend:
 
 Changed after review, before the first commit:
 
-- Gate B: the detail body is decoded at most 2 MiB + 1 byte for gzip, deflate (zlib or raw),
+- Security review: the detail body is decoded at most 2 MiB + 1 byte for gzip, deflate (zlib or raw),
   br and zstd; the rest is counted in 1 MiB steps up to 64 MiB and not kept, so a compression
   bomb cannot exhaust memory. Past 64 MiB the size shown is a lower bound. A body that does not
   decode is shown as it travelled.
-- Gate A: the size of a truncated raw-deflate body is counted with the same raw fallback.
+- Code review: the size of a truncated raw-deflate body is counted with the same raw fallback.
 
-Known limits (Gate R): masking works on field names, so a URL with secrets inside another
+Known limits (found in the runtime check): masking works on field names, so a URL with secrets inside another
 string value of a JSON body is not masked in the report. The Terminal still prints mitmproxy's
 connection lines (`client connect`, `server connect <host>`) in this mode.

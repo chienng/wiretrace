@@ -1,7 +1,6 @@
 # Spec: QA addon — mocks, fault injection, request ID tagging
 
 - **Date**: 2026-10-13
-- **Tier**: M
 - **Repo**: wiretrace
 - **Status**: implemented
 - **Branch**: `feature/qa-addon`
