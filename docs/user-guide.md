@@ -179,8 +179,11 @@ going through mitmproxy"*, or does not load, the tunnel is off or not connected:
 
 **iPhone**
 
-1. On `mitm.it`, tap **Get mitmproxy-ca-cert.pem** under iOS, and allow the download.
-2. Settings → General → VPN & Device Management → install the **mitmproxy** profile.
+1. Open `mitm.it` in **Safari** (other browsers cannot install a profile), tap
+   **Get mitmproxy-ca-cert.pem** under iOS, and allow the download. The profile is only
+   downloaded at this point.
+2. Settings → General → VPN & Device Management → **mitmproxy** under *Downloaded Profile* →
+   **Install**, and enter the passcode. The trust switch in step 3 appears only after this.
 3. Settings → General → About → Certificate Trust Settings → turn on full trust for
    **mitmproxy**. Without this step, HTTPS still fails.
 

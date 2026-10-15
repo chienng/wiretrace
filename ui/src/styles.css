@@ -325,6 +325,10 @@ button:disabled { cursor: default; opacity: .5; }
 ol.instr { margin: 0; padding-left: 20px; }
 ol.instr li { margin-bottom: 10px; }
 ol.instr li b { font-weight: 600; }
+ol.instr .addr { margin: 6px 0 0; }
+ol.instr .kbd { overflow-wrap: anywhere; }
+.wiz-main h5 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+.wiz-main h5.gap-top { margin-top: 16px; }
 .addr { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 .confbox { margin-top: 16px; }
 .confhead { display: flex; align-items: center; justify-content: space-between; }

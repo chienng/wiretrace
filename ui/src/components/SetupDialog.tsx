@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { copyText } from '../clipboard';
+import { certificateSteps } from '../logic/certificate';
 import { useDispatch, useStore } from '../store';
 import { Modal } from './Modal';
 
@@ -127,13 +128,26 @@ export function SetupDialog() {
             <>
               <h4>Install the certificate</h4>
               <p className="lead">Needed once per device, so the phone trusts Wiretrace for HTTPS.</p>
-              <ol className="instr">
-                <li>
-                  While connected, open <span className="kbd">http://mitm.it</span> in the phone's browser.
-                </li>
-                <li>Pick the phone's platform and follow the instructions shown there.</li>
-                <li>On iOS also turn the certificate on in Settings → General → About → Certificate Trust Settings.</li>
-              </ol>
+              {certificateSteps(appState.target, wg).map((group, i, all) => (
+                <div key={group.platform}>
+                  {all.length > 1 && <h5 className={i > 0 ? 'gap-top' : undefined}>{group.platform}</h5>}
+                  <ol className="instr">
+                    {group.steps.map((s) => (
+                      <li key={s.text}>
+                        {s.text}
+                        {s.code && (
+                          <div className="addr">
+                            <span className="kbd">{s.code}</span>
+                            <button type="button" className="btn small" onClick={() => copy(s.code ?? '', 'Command')}>
+                              Copy
+                            </button>
+                          </div>
+                        )}
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ))}
             </>
           )}
           {step === 3 && (

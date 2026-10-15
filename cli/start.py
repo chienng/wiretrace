@@ -59,8 +59,8 @@ RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
 
 _ANDROID = "Android needs the mitmproxy CA installed, and a QA build of the app that trusts user CAs."
-_IOS = ("iOS needs the mitmproxy profile installed and fully trusted "
-        "(Settings > General > About > Certificate Trust Settings).")
+_IOS = ("iOS needs the mitmproxy profile installed (Settings > General > VPN & Device Management) "
+        "and then fully trusted (Settings > General > About > Certificate Trust Settings).")
 TARGET_HINTS = {
     "android": _ANDROID,
     "android-emu": _ANDROID,
