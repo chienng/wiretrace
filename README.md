@@ -142,7 +142,9 @@ uv pip install --python .venv/bin/python -r requirements-dev.txt
 ```
 
 Release files (`.tar.gz` and `.dmg`, with checksums) are built from a commit into `dist/`:
-`scripts/build-release.sh [<commit>]`.
+`make tarball` (the `.tar.gz` only), `make release` (both), with `COMMIT=<ref>` for another
+commit than `HEAD`. They run `scripts/build-release.sh [--tar-only] [<commit>]`. Commit first,
+including `ui/dist/` after `make ui`: uncommitted changes are never in a release.
 
 ## License
 

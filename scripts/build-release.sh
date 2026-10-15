@@ -8,17 +8,20 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: scripts/build-release.sh [<commit>]
+Usage: scripts/build-release.sh [--tar-only] [<commit>]
 
 Builds dist/wiretrace-<version>-macos.tar.gz and .dmg from <commit> (default: HEAD).
-Uncommitted changes are never included.
+--tar-only builds only the .tar.gz. Uncommitted changes are never included.
 EOF
 }
 
+TAR_ONLY=0
 case "${1:-}" in
     -h|--help) usage; exit 0 ;;
+    --tar-only) TAR_ONLY=1; shift ;;
 esac
 [ "$#" -le 1 ] || { usage >&2; exit 2; }
+case "${1:-}" in -*) usage >&2; exit 2 ;; esac
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -47,6 +50,14 @@ trap 'rm -rf "$tmp"' EXIT
 # git archive stores owner 0:0, the commit time and no extended attributes. Its
 # default umask leaves files group-writable.
 git -c tar.umask=022 archive --format=tar.gz --prefix=wiretrace/ -o "dist/$NAME.tar.gz" "$COMMIT"
+
+if [ "$TAR_ONLY" = 1 ]; then
+    cd dist
+    shasum -a 256 "$NAME.tar.gz" > "$NAME.tar.gz.sha256"
+    cat "$NAME.tar.gz.sha256"
+    echo "Built from $COMMIT: dist/$NAME.tar.gz"
+    exit 0
+fi
 
 # macOS tags the staged files with com.apple.provenance, which cannot be removed and
 # ends up in the image. It holds no user or host name.
