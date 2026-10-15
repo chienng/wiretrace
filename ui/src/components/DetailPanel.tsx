@@ -5,7 +5,7 @@ import { buildCurl, mockFilePath } from '../logic/curl';
 import { flowUrl } from '../logic/filters';
 import { formatDuration, formatTime, methodClass, methodLabel, statusClass } from '../logic/format';
 import { matchesRequest } from '../logic/logs';
-import { useDispatch, useStore } from '../store';
+import { useData, useDispatch, useStore } from '../store';
 import type { FlowDetail, FlowSummary, Headers } from '../types';
 import { BodyView } from './BodyView';
 import { LogRow, LOG_ROW_HEIGHT } from './LogRow';
@@ -72,7 +72,7 @@ function Timing({ detail }: { detail: FlowDetail }) {
 }
 
 function FlowLogs({ requestId }: { requestId: string | null }) {
-  const { logs } = useStore();
+  const { logs } = useData();
   const lines = useMemo(() => {
     if (!requestId) return [];
     return [...logs.device, ...logs.app]
@@ -96,12 +96,18 @@ function FlowLogs({ requestId }: { requestId: string | null }) {
   );
 }
 
+/** Methods that repeat no side effect on the backend: replayed without asking (spec 008 decision 5). */
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
   const dispatch = useDispatch();
-  const { logs, appState } = useStore();
+  const { appState } = useStore();
+  const { logs, viewing } = useData();
   const [tab, setTab] = useState<Tab>('response');
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   const [mockNote, setMockNote] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
+  const [replaying, setReplaying] = useState(false);
 
   const id = flow?.id ?? null;
   // Refetch when the flow gains a response, an error or a size.
@@ -109,6 +115,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
 
   useEffect(() => {
     setMockNote(null);
+    setConfirming(false);
   }, [id]);
 
   useEffect(() => {
@@ -118,7 +125,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
     }
     const controller = new AbortController();
     api
-      .flow(id, controller.signal)
+      .flow(id, controller.signal, viewing)
       .then((detail) => setLoaded({ id, detail }))
       .catch((e: unknown) => {
         if (controller.signal.aborted) return;
@@ -126,7 +133,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
         setLoaded({ id, error: message });
       });
     return () => controller.abort();
-  }, [id, version]);
+  }, [id, version, viewing]);
 
   const requestId = flow?.request_id ?? null;
   const logCount = useMemo(() => {
@@ -161,6 +168,27 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
     dispatch({ type: 'toast', text: ok ? 'Response body copied' : 'Copy failed' });
   };
 
+  const replay = async () => {
+    setConfirming(false);
+    setReplaying(true);
+    try {
+      await api.replay(flow.id);
+      dispatch({ type: 'toast', text: 'Replay sent: it is listed as a new request marked REPLAY' });
+    } catch (e) {
+      dispatch({ type: 'toast', text: e instanceof ApiError ? e.message : 'Replay failed' });
+    } finally {
+      setReplaying(false);
+    }
+  };
+  const askReplay = () => (SAFE_METHODS.has(flow.method.toUpperCase()) ? void replay() : setConfirming(true));
+  const replayOff = viewing
+    ? 'Replay is off while a previous session is open'
+    : flow.websocket
+      ? 'WebSocket connections cannot be replayed'
+      : flow.status === null && flow.error === null
+        ? 'This request is still in progress'
+        : null;
+
   const sc = statusClass(flow.status);
 
   return (
@@ -173,6 +201,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           </span>
           {flow.status !== null && <span className={`st ${sc}`}>{flow.status}</span>}
           {flow.status === null && flow.error !== null && <span className="st s5">ERR</span>}
+          {flow.replay_of && <span className="tag replay">Replay</span>}
         </div>
         <div className="meta">
           <span>
@@ -184,6 +213,14 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           <span>
             Request ID <b className="mono">{flow.request_id ?? '—'}</b>
           </span>
+          {flow.replay_of && (
+            <span>
+              Replay of{' '}
+              <button type="button" className="linkbtn" onClick={() => dispatch({ type: 'ui', patch: { selectedFlowId: flow.replay_of } })}>
+                the original request
+              </button>
+            </span>
+          )}
         </div>
         {flow.error && <div className="errtext">{flow.error}</div>}
         <div className="actions">
@@ -193,10 +230,39 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           <button type="button" className="btn small" onClick={copyMock} disabled={!detail}>
             Copy as mock
           </button>
-          <button type="button" className="btn small" onClick={() => dispatch({ type: 'newRuleFrom', flow })} title="A rule for this method, host and path">
+          <button type="button" className="btn small" onClick={askReplay} disabled={replayOff !== null || replaying} title={replayOff ?? 'Send this request again'}>
+            {replaying ? 'Replaying…' : 'Replay'}
+          </button>
+          <button type="button" className="btn small" onClick={() => dispatch({ type: 'ui', patch: { dialog: 'compare' } })}>
+            Compare…
+          </button>
+          <button
+            type="button"
+            className="btn small"
+            onClick={() => dispatch({ type: 'newRuleFrom', flow })}
+            disabled={!!viewing}
+            title={viewing ? 'Rules are off while a previous session is open' : 'A rule for this method, host and path'}
+          >
             New rule
           </button>
+          <button type="button" className="btn small primary" onClick={() => dispatch({ type: 'ui', patch: { dialog: 'report' } })}>
+            Report
+          </button>
         </div>
+        {confirming && (
+          <div className="confirm" role="alertdialog" aria-label="Replay this request?">
+            <span>
+              Replay <b>{flow.method}</b> {flow.path}? It repeats its effect on the backend.
+            </span>
+            <span className="spacer" />
+            <button type="button" className="btn small" onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+            <button type="button" className="btn small danger" onClick={() => void replay()}>
+              Replay
+            </button>
+          </div>
+        )}
         {mockNote && (
           <div className="mocknote">
             Copied. Save it as <span className="kbd">{mockNote}</span>

@@ -274,6 +274,22 @@ def test_delay_then_status_comment_order():
     scenario(body, qa_fault_filter="~all", qa_fault_delay_ms=20, qa_fault_status=502)
 
 
+def test_a_replay_keeps_its_replay_part_and_gets_the_new_ones():
+    async def body(addon, tctx):
+        flow = make_flow(request_headers={"X-Request-ID": "r-2"})
+        flow.comment = "replay: orig-1; request-id: r-1; fault: status 502"
+        flow.is_replay = "request"
+        await addon.request(flow)
+        assert flow.comment == "replay: orig-1; request-id: r-2; fault: status 502"
+
+        plain = make_flow(request_headers={"X-Request-ID": "r-3"})
+        plain.comment = "replay: forged"
+        await addon.request(plain)
+        assert plain.comment == "request-id: r-3; fault: status 502"
+
+    scenario(body, qa_fault_filter="~all", qa_fault_status=502)
+
+
 # Invariant 3: one snapshot per flow
 
 def test_delaying_flow_keeps_its_snapshot_and_new_flows_get_the_new_one():

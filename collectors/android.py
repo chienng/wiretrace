@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 
 from cli.doctor import parse_adb_devices
 
-from . import Record, Status, Stream, Timing, Writer, failure, local_iso, run_capture
+from . import ERROR, SEVERAL, STREAMING, Record, Status, Stream, Timing, Writer, failure, local_iso, run_capture
 
 TOOL = "adb"
 # `-v threadtime -v epoch`: "<sec>.<ms>  <pid>  <tid> <level> <tag padded>: <message>".
@@ -46,6 +46,7 @@ class Android:
     async def run(self) -> None:
         while True:
             await self._wait_device()
+            await self._describe()
             if self.since is None:
                 self.since = await self._device_clock()
                 if self.since is None:
@@ -67,13 +68,23 @@ class Android:
                 self._disconnected = False
                 return
             if count is None:
-                self.status.say(failure(TOOL, code))
+                self.status.say(failure(TOOL, code), state=ERROR)
             elif count == 0:
                 if not self._disconnected:
                     self.status.say("waiting for a device")
             else:
-                self.status.say("more than one device connected; connect only one")
+                self.status.say("more than one device connected; connect only one", state=SEVERAL)
             await asyncio.sleep(self.timing.wait)
+
+    async def _getprop(self, name: str) -> str:
+        code, out = await run_capture([self.adb, "shell", "getprop", name])
+        return out.strip() if code == 0 else ""
+
+    async def _describe(self) -> None:
+        """Model and Android version only: never the serial or the device's name."""
+        model = await self._getprop("ro.product.model")
+        release = await self._getprop("ro.build.version.release")
+        self.status.device(model, f"Android {release}" if release else "")
 
     async def _device_clock(self) -> str | None:
         code, out = await run_capture([self.adb, "shell", "date", "+%s"])
@@ -104,17 +115,17 @@ class Android:
                         await stream.stop()
                     stream = self._logcat(found)
                     if not await stream.start():
-                        self.status.say(failure(TOOL, None))
+                        self.status.say(failure(TOOL, None), state=ERROR)
                         await asyncio.sleep(self.timing.wait)
                         return
                     self.status.say("streaming" if pid is None else "app restarted, following the new process",
-                                    repeat=pid is not None)
+                                    repeat=pid is not None, state=STREAMING)
                     pid = found
                 if stream and stream.exited:
                     code = stream.proc.returncode
                     count, _ = await self._device_count()
                     if count == 1:
-                        self.status.say(failure(TOOL, code))
+                        self.status.say(failure(TOOL, code), state=ERROR)
                         await asyncio.sleep(self.timing.wait)
                     else:
                         self._gone()
@@ -132,4 +143,5 @@ class Android:
 
     def _gone(self) -> None:
         self._disconnected = True
+        self.status.device()
         self.status.say("device disconnected, waiting")

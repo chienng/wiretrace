@@ -1,4 +1,4 @@
-import type { HostCount, QuickFilter } from '../logic/filters';
+import { activeChips, type ChipKind, type HostCount, type QuickFilter } from '../logic/filters';
 import { useDispatch, useStore } from '../store';
 import type { FlowSummary } from '../types';
 import { DetailPanel } from './DetailPanel';
@@ -15,9 +15,15 @@ interface Props {
 }
 
 export function TrafficView({ flows, selected, counts, hosts, filterError }: Props) {
-  const { ui } = useStore();
+  const { ui, appState, view } = useStore();
   const dispatch = useDispatch();
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
+  const chips = activeChips({ quick: ui.quick, host: ui.host, text: ui.search }, appState?.default_filter ?? '');
+  const remove = (kind: ChipKind) => {
+    if (kind === 'host') patch({ host: null });
+    else if (kind === 'quick') patch({ quick: 'all' });
+    else patch({ search: '' });
+  };
 
   return (
     <>
@@ -34,17 +40,17 @@ export function TrafficView({ flows, selected, counts, hosts, filterError }: Pro
                 type="text"
                 value={ui.search}
                 onChange={(e) => patch({ search: e.target.value })}
-                placeholder="Search URL, method, status…  or filter: ~m POST & ~c 500"
+                placeholder="Search URL, headers, bodies…  or filter: ~m POST & ~c 500"
                 aria-label="Search requests"
                 aria-invalid={filterError !== null}
                 spellCheck={false}
               />
             </div>
-            {ui.host && (
-              <button type="button" className="chip" onClick={() => patch({ host: null })} title="Remove host filter">
-                host: {ui.host}
+            {chips.map((c) => (
+              <button key={c.kind} type="button" className={`chip ${c.kind}`} onClick={() => remove(c.kind)} title="Remove this filter">
+                {c.label}
               </button>
-            )}
+            ))}
           </div>
           {filterError && (
             <div className="search-error" role="alert">
@@ -56,7 +62,7 @@ export function TrafficView({ flows, selected, counts, hosts, filterError }: Pro
             selectedId={ui.selectedFlowId}
             onSelect={(id) => patch({ selectedFlowId: id })}
             revealKey={ui.selectedFlowId}
-            paused={ui.frozen !== null}
+            paused={ui.frozen !== null && !view}
           />
         </div>
         <DetailPanel flow={selected} />

@@ -19,6 +19,8 @@ FLOWS = "flows.mitm"
 HAR = "flows.har"
 DEVICE_LOG = "device.log.jsonl"
 APP_LOG = "app.log.jsonl"
+# The collector's state: model and OS version only, never a serial, a UDID or the device's name.
+DEVICE_STATUS = "device.status.json"
 META = "meta.json"
 # The unmasked HAR exists only under this name, and is removed on every exit path.
 HAR_TMP = ".flows.har.tmp"

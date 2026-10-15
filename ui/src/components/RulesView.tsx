@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError } from '../api';
+import { download } from '../download';
 import { methodClass } from '../logic/format';
 import {
   emptyRule,
@@ -59,17 +60,6 @@ function RuleItem({ rule, selected, onSelect, onToggle, busy }: { rule: Rule; se
       </div>
     </div>
   );
-}
-
-function download(name: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export function RulesView() {

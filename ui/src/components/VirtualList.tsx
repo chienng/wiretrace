@@ -14,6 +14,8 @@ interface Props {
   revealKey?: unknown;
   /** Arrow keys move the selection: -1 or +1. */
   onStep?: (delta: number) => void;
+  /** The first and last row on screen, whenever they change; -1, -1 when there are none. */
+  onRange?: (first: number, last: number) => void;
   className?: string;
   label: string;
 }
@@ -28,6 +30,7 @@ export function VirtualList({
   revealIndex = null,
   revealKey,
   onStep,
+  onRange,
   className,
   label,
 }: Props) {
@@ -65,6 +68,12 @@ export function VirtualList({
     el.scrollTop = scrollTopToReveal(revealIndex, rowHeight, el.clientHeight, el.scrollTop);
     // Only a new reveal request moves the view.
   }, [revealKey]);
+
+  const first = count === 0 ? -1 : Math.min(count - 1, Math.floor(scrollTop / rowHeight));
+  const last = count === 0 ? -1 : Math.min(count - 1, Math.max(first, Math.ceil((scrollTop + height) / rowHeight) - 1));
+  useEffect(() => {
+    onRange?.(first, last);
+  }, [first, last, onRange]);
 
   const win = computeWindow({ scrollTop, viewportHeight: height, rowHeight, count, overscan });
   const rows: ReactNode[] = [];

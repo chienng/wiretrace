@@ -42,6 +42,7 @@ const FlowRow = memo(function FlowRow({ flow, selected, onSelect }: RowProps) {
       <span className="c-num">{formatDuration(flow.duration_ms)}</span>
       <span className="c-num">{formatSize(flow.size)}</span>
       <span className="c-badges">
+        {flow.replay_of && <span className="tag replay">Replay</span>}
         {flow.mock && <span className="tag mock">Mock</span>}
         {flow.fault && (
           <span className="tag fault" title={flow.fault}>

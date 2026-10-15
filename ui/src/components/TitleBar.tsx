@@ -1,7 +1,8 @@
+import { devicePill } from '../logic/device';
 import { formatElapsed } from '../logic/format';
 import { isCrash } from '../logic/logs';
 import { useNow } from '../hooks';
-import { useDispatch, useStore } from '../store';
+import { useData, useDispatch, useStore } from '../store';
 import { useMemo } from 'react';
 
 interface Props {
@@ -15,20 +16,22 @@ function Recording({ startedAt, reconnecting }: { startedAt: number; reconnectin
 }
 
 export function TitleBar({ newCount }: Props) {
-  const { appState, ui, phase, flows, logs } = useStore();
+  const { appState, ui, phase, flows } = useStore();
+  const { logs, viewing } = useData();
   const dispatch = useDispatch();
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
-  const crashes = useMemo(
-    () =>
-      logs.device.filter((l) => l.seq > ui.clearedSeq.device && isCrash(l)).length +
-      logs.app.filter((l) => l.seq > ui.clearedSeq.app && isCrash(l)).length,
-    [logs, ui.clearedSeq],
-  );
+  const crashes = useMemo(() => {
+    const shown = (source: 'device' | 'app') => (viewing ? -Infinity : ui.clearedSeq[source]);
+    return (
+      logs.device.filter((l) => l.seq > shown('device') && isCrash(l)).length +
+      logs.app.filter((l) => l.seq > shown('app') && isCrash(l)).length
+    );
+  }, [logs, ui.clearedSeq, viewing]);
+  const offWhileViewing = viewing ? 'Off while a previous session is open' : undefined;
   const paused = ui.frozen !== null;
   const rulesOn = appState?.rules_on ?? 0;
   const seen = !!appState && (appState.flow_count > 0 || flows.length > 0);
-  const deviceLogs = appState?.device_logs ?? null;
-  const deviceOn = !!deviceLogs && !/^off\b/i.test(deviceLogs);
+  const pill = appState ? devicePill(appState) : null;
 
   return (
     <header className="titlebar">
@@ -42,27 +45,27 @@ export function TitleBar({ newCount }: Props) {
         </button>
       </div>
       {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} />}
-      {ui.view === 'traffic' && (
+      {ui.view === 'traffic' && !viewing && (
         <>
           <button type="button" className="btn small" onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })} aria-pressed={paused}>
             {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
           </button>
         </>
       )}
-      {ui.view !== 'rules' && (
+      {ui.view !== 'rules' && !viewing && (
         <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
           Clear
         </button>
       )}
       <span className="spacer" />
-      {appState && (
+      {appState && pill && (
         <>
           <span className="static-select" title="Preset">Preset: {appState.preset}</span>
           <span className={`pill ${seen ? 'ok' : 'wait'}`} title="Target and mode">
             {appState.target} · {appState.mode === 'wireguard' ? 'WireGuard' : 'Proxy'}
           </span>
-          <span className={`pill ${deviceOn ? 'ok' : 'off'}`} title={deviceLogs ?? 'Device logs are off'}>
-            Device logs {deviceOn ? 'on' : 'off'}
+          <span className={`pill ${pill.tone}`} title={pill.title}>
+            {pill.text}
           </span>
         </>
       )}
@@ -70,11 +73,13 @@ export function TitleBar({ newCount }: Props) {
         type="button"
         className={`btn${ui.view === 'rules' ? ' toggled' : ''}`}
         aria-pressed={ui.view === 'rules'}
+        disabled={!!viewing}
+        title={offWhileViewing}
         onClick={() => patch({ view: ui.view === 'rules' ? 'traffic' : 'rules' })}
       >
         Rules{rulesOn > 0 && <span className="count">{rulesOn} active</span>}
       </button>
-      <button type="button" className="btn" onClick={() => patch({ dialog: 'setup' })}>
+      <button type="button" className="btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
         Setup
       </button>
       <button type="button" className="btn primary" onClick={() => patch({ dialog: 'report' })}>

@@ -1,22 +1,23 @@
 import { useCallback, useMemo } from 'react';
 import { LEVELS, LEVEL_NAMES, matchesLogText, matchesMinLevel, matchesRequest, logKey, type Level } from '../logic/logs';
-import { useDispatch, useStore } from '../store';
+import { useData, useDispatch, useStore } from '../store';
 import type { LogLine, LogSource } from '../types';
 import { LogRow, LOG_ROW_HEIGHT } from './LogRow';
 import { VirtualList } from './VirtualList';
 
 export function LogStrip({ requestId }: { requestId: string | null }) {
-  const { logs, ui } = useStore();
+  const { ui } = useStore();
+  const { logs, viewing } = useData();
   const dispatch = useDispatch();
   const patch = useCallback((p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p }), [dispatch]);
 
   const source = ui.stripSource;
   const visible = useMemo(() => {
-    const cleared = ui.clearedSeq[source];
+    const cleared = viewing ? -Infinity : ui.clearedSeq[source];
     return logs[source].filter(
       (l) => l.seq > cleared && matchesMinLevel(l, ui.stripMinLevel) && matchesLogText(l, ui.stripText),
     );
-  }, [logs, source, ui.clearedSeq, ui.stripMinLevel, ui.stripText]);
+  }, [logs, source, viewing, ui.clearedSeq, ui.stripMinLevel, ui.stripText]);
 
   const tabs: { id: LogSource; label: string }[] = [
     { id: 'device', label: 'Device logs' },

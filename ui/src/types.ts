@@ -15,6 +15,28 @@ export interface FlowSummary {
   mock: boolean;
   fault: string | null;
   websocket: boolean;
+  /** The id of the request this one replays; null for a request from the app. */
+  replay_of: string | null;
+}
+
+/** A session folder, from its name and meta.json. Counts are null when meta.json does not have them. */
+export interface SessionInfo {
+  name: string;
+  preset: string;
+  target: string;
+  started_at: number | null;
+  ended_at: number | null;
+  status: string | null;
+  requests: number | null;
+  device_lines: number | null;
+  app_lines: number | null;
+  live: boolean;
+}
+
+export interface ViewResult {
+  viewing: string | null;
+  cut_off?: boolean;
+  requests?: number;
 }
 
 export interface Faults {
@@ -32,6 +54,8 @@ export interface AppState {
   started_at: number;
   session: string;
   device_logs: string | null;
+  /** Why device logs are off, when they are. */
+  device_logs_off: string | null;
   default_filter: string;
   proxy_port: number;
   wireguard_conf: string | null;
@@ -41,6 +65,26 @@ export interface AppState {
   mocks_dir: string;
   flow_count: number;
   rules_on: number;
+  /** When a device last connected to mitmproxy, any host (Unix seconds). */
+  device_seen_at: number | null;
+  /** Failed TLS handshakes of the device with API hosts: the certificate is not trusted yet. */
+  tls_failures: number;
+  /** The collector's device.status.json; null until it wrote one. */
+  device_status: DeviceStatus | null;
+  /** The previous session opened read-only, or null while showing the live one. */
+  viewing: string | null;
+  viewing_cut_off: boolean;
+}
+
+/** Model and OS version only: never a serial, a UDID or the device's name. */
+export interface DeviceStatus {
+  state: 'waiting' | 'streaming' | 'several' | 'stopped' | 'error';
+  message: string;
+  source: string;
+  app: string;
+  model: string;
+  os: string;
+  updated_at: number | null;
 }
 
 export type RuleAction = 'mock' | 'status' | 'delay' | 'drop';
@@ -124,7 +168,8 @@ export type ServerMessage =
   | { type: 'flows'; flows: FlowSummary[] }
   | { type: 'logs'; lines: LogLine[] }
   | { type: 'state'; state: AppState }
-  | { type: 'rules'; revision: string; stats: Record<string, RuleStats>; error: string | null };
+  | { type: 'rules'; revision: string; stats: Record<string, RuleStats>; error: string | null }
+  | { type: 'device'; status: DeviceStatus };
 
 export interface ReportResult {
   ok: boolean;

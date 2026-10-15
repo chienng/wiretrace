@@ -18,6 +18,7 @@ export function flow(over: Partial<FlowSummary> = {}): FlowSummary {
     mock: false,
     fault: null,
     websocket: false,
+    replay_of: null,
     ...over,
   };
 }

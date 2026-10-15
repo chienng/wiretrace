@@ -86,6 +86,13 @@ export function isServerExpr(input: string): boolean {
   return t.startsWith('~') || t.startsWith('!');
 }
 
+export const BODY_SEARCH_MIN = 3;
+
+/** Plain text long enough for the server to search headers and bodies too. */
+export function isBodySearch(input: string): boolean {
+  return !isServerExpr(input) && input.trim().length >= BODY_SEARCH_MIN;
+}
+
 /** Plain text search: every word must appear in method, URL or status. */
 export function matchesText(f: FlowSummary, text: string): boolean {
   const words = text.toLowerCase().split(/\s+/).filter(Boolean);
@@ -98,17 +105,43 @@ export interface FlowFilter {
   quick: QuickFilter;
   host: string | null;
   text: string;
-  /** Ids returned by the server for a `~`/`!` expression; null while unknown. */
+  /**
+   * From the server, null while unknown: for a `~`/`!` expression the ids it matches; for plain
+   * text the ids whose headers or bodies contain it, added to what the text matches here.
+   */
   serverIds: ReadonlySet<string> | null;
 }
 
 export function applyFilters(flows: readonly FlowSummary[], filter: FlowFilter): FlowSummary[] {
   const server = isServerExpr(filter.text);
-  const ids = server ? filter.serverIds : null;
+  const ids = filter.serverIds;
   return flows.filter(
     (f) =>
       matchesQuick(f, filter.quick) &&
       (filter.host === null || f.host === filter.host) &&
-      (server ? ids === null || ids.has(f.id) : matchesText(f, filter.text)),
+      (server ? ids === null || ids.has(f.id) : matchesText(f, filter.text) || (ids !== null && ids.has(f.id))),
   );
+}
+
+export type ChipKind = 'host' | 'quick' | 'default' | 'search';
+
+export interface Chip {
+  kind: ChipKind;
+  label: string;
+}
+
+/** The active filters, each removable: host, quick filter, and the search (marked when it is the preset's default). */
+export function activeChips(filter: Pick<FlowFilter, 'quick' | 'host' | 'text'>, defaultFilter: string): Chip[] {
+  const chips: Chip[] = [];
+  if (filter.host) chips.push({ kind: 'host', label: `host: ${filter.host}` });
+  if (filter.quick !== 'all') {
+    const q = QUICK_FILTERS.find((x) => x.id === filter.quick);
+    chips.push({ kind: 'quick', label: q ? q.label : filter.quick });
+  }
+  const text = filter.text.trim();
+  if (text) {
+    const isDefault = defaultFilter.trim() !== '' && text === defaultFilter.trim();
+    chips.push({ kind: isDefault ? 'default' : 'search', label: isDefault ? `preset filter: ${text}` : `search: ${text}` });
+  }
+  return chips;
 }

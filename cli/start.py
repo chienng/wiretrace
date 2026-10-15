@@ -200,7 +200,7 @@ def collector_command(preset: Preset, target: str, bin_dir: Path, out: Path, *,
     if not found:
         return None, f"{tool} not found"
     return [sys.executable, "-m", "collectors", "--target", target, "--app", app,
-            "--out", str(out), f"--{tool}", found], ""
+            "--out", str(out), "--status", str(out.parent / session.DEVICE_STATUS), f"--{tool}", found], ""
 
 
 def count_mocks(mocks_dir: Path) -> int:
@@ -311,6 +311,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             session.update_meta(folder, device_logs=source)
             device_logs = f"{DEVICE_LOG_NAMES[source]}, {preset.app[APP_KEYS[source]]} → {session.DEVICE_LOG}"
         else:
+            session.update_meta(folder, device_logs_off=problem)
             device_logs = f"off ({problem})"
         say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs))
         return supervise(
@@ -410,7 +411,7 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
         if collector_cmd:
             collector = _Collector.start(collector_cmd)
             if collector is None:
-                session.update_meta(folder, device_logs=None)
+                session.update_meta(folder, device_logs=None, device_logs_off="the collector could not start")
         state = _wait(child, stops, collector)
         ended_at = session.timestamp()
         if state == RUNNING:
@@ -477,12 +478,14 @@ def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stop
     counts = {"device_log_lines": session.count_lines(folder / session.DEVICE_LOG),
               "app_log_lines": session.count_lines(folder / session.APP_LOG)}
     har_error = None
+    # The window's Previous sessions lists it; None when flows.har could not be written.
+    requests: int | None = 0
     if flows:
         say("Writing flows.har…")
-        har_error = write_masked_har(har_cmd, folder, rules, stops)
+        har_error, requests = write_masked_har(har_cmd, folder, rules, stops)
     else:
         say("No traffic was captured; flows.har was not written.")
-    session.update_meta(folder, ended_at=ended_at, status=status, **counts)
+    session.update_meta(folder, ended_at=ended_at, status=status, requests=requests, **counts)
     say(f"Session saved: {folder}")
     say(f"For a bug ticket: ./wiretrace report {folder.name}")
     if har_error:
@@ -490,24 +493,28 @@ def _finalize(folder: Path, har_cmd: list[str], status: str, ended_at: str, stop
     return 0 if status == "stopped" and not har_error else 1
 
 
-def write_masked_har(har_cmd: list[str], folder: Path, rules: redact.Rules, stops: list[int]) -> str | None:
-    """flows.har, masked. The unmasked HAR is `.flows.har.tmp`, removed on every path. Return why it failed."""
+def write_masked_har(har_cmd: list[str], folder: Path, rules: redact.Rules,
+                     stops: list[int]) -> tuple[str | None, int | None]:
+    """flows.har, masked. The unmasked HAR is `.flows.har.tmp`, removed on every path.
+
+    Return why it failed, or None, and the number of requests in it (None when it failed)."""
     tmp, masked = folder / session.HAR_TMP, folder / session.HAR_MASKED
     try:
         error = convert_har(har_cmd, tmp, stops)
         if error:
-            return error
+            return error, None
         try:
             har = json.loads(tmp.read_text(encoding="utf-8"))
             if not isinstance(har, dict):
-                return "could not mask it"
+                return "could not mask it", None
             masked.write_text(json.dumps(redact.redact_har(har, rules)[0], indent=4), encoding="utf-8")
             os.replace(masked, folder / session.HAR)
             os.chmod(folder / session.HAR, 0o600)
+            entries = har.get("log", {}).get("entries") if isinstance(har.get("log"), dict) else None
         except Exception:
             # Whatever went wrong, flows.har must not exist unmasked.
-            return "could not mask it"
-        return None
+            return "could not mask it", None
+        return None, len(entries) if isinstance(entries, list) else None
     finally:
         for leftover in (tmp, masked):
             try:

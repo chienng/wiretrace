@@ -4,7 +4,8 @@ import { useDispatch } from '../store';
 import type { ReportResult } from '../types';
 import { Modal } from './Modal';
 
-export function ReportDialog() {
+/** The report of the live session, or of the previous session that is open (`session`). */
+export function ReportDialog({ session = null }: { session?: string | null }) {
   const dispatch = useDispatch();
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ReportResult | null>(null);
@@ -18,7 +19,7 @@ export function ReportDialog() {
     setResult(null);
     setRevealError(null);
     try {
-      setResult(await api.report());
+      setResult(await api.report(session));
     } catch (e) {
       if (e instanceof ApiError && e.status === 409) setError('A report is already being written');
       else setError(e instanceof ApiError ? e.message : 'The report could not be created.');
@@ -39,7 +40,11 @@ export function ReportDialog() {
   return (
     <Modal
       title="Report bug"
-      lead="Writes a zip with the requests saved so far in this session, plus the device and app logs."
+      lead={
+        session
+          ? `Writes a zip with the requests of ${session}, plus its device and app logs, in that session's folder.`
+          : 'Writes a zip with the requests saved so far in this session, plus the device and app logs.'
+      }
       onClose={close}
     >
       {!result && (

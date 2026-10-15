@@ -1,13 +1,15 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.7.2**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.8.0**, on Intel and Apple silicon Macs.
 
-What 0.7.2 gives you: a one-command install that needs no admin rights, a setup
+What 0.8.0 gives you: a one-command install that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
 next to the traffic (Part 3). `./wiretrace report` turns a session into a zip for the bug
-ticket. The Wiretrace window (`--ui wiretrace`) is a preview.
+ticket. The Wiretrace window (`--ui wiretrace`) is a preview; in 0.8.0 it gains a setup
+wizard, rules that make requests fail or slow, a log timeline with the device's status,
+earlier sessions, saved filters, search in headers and bodies, replay and compare.
 
 New to Wiretrace? Do Part 1 once per Mac, Part 2 once per phone, then Part 3 every time
 you test. Run each command in **Terminal** (Applications → Utilities → Terminal).
@@ -23,8 +25,8 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  `wiretrace-0.7.2-macos.tar.gz` and `wiretrace-0.7.2-macos.tar.gz.sha256`, or
-  `wiretrace-0.7.2-macos.dmg` and `wiretrace-0.7.2-macos.dmg.sha256`. Both contain the same
+  `wiretrace-0.8.0-macos.tar.gz` and `wiretrace-0.8.0-macos.tar.gz.sha256`, or
+  `wiretrace-0.8.0-macos.dmg` and `wiretrace-0.8.0-macos.dmg.sha256`. Both contain the same
   files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -34,8 +36,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.7.2-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.7.2-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.8.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.8.0-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -45,14 +47,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.7.2-macos.tar.gz -C ~
+tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.7.2**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.8.0**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -174,17 +176,22 @@ cd ~/wiretrace
 ./wiretrace start --preset staging --target ios --ui wiretrace
 ```
 
-Use your preset and `--target`. The Wiretrace window opens in your browser. Without
-`--ui wiretrace` you get mitmweb instead, which shows the same QR code. The first time, macOS
-may ask whether to allow incoming connections: click **Allow**.
+Use your preset and `--target`. The Wiretrace window opens in your browser: click **Setup**
+in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick,
+and turns each step green when Wiretrace sees it work. Without `--ui wiretrace` you get mitmweb
+instead, which shows the same QR code. The first time, macOS may ask whether to allow incoming
+connections: click **Allow**.
 
 ### Step 2 — Connect the phone
 
 1. Install the **WireGuard** app (App Store / Google Play).
-2. In WireGuard, add a tunnel by scanning the QR code: **Setup** in the Wiretrace window, or
-   the WireGuard panel in mitmweb.
+2. In WireGuard, add a tunnel by scanning the QR code: step *Connect tunnel* of the setup
+   wizard, or the WireGuard panel in mitmweb.
 3. Turn the tunnel on. In WireGuard, tap the tunnel: *Endpoint* is your Mac's address with
-   port 51820, and *Latest handshake* shows a time a few seconds ago.
+   port 51820, and *Latest handshake* shows a time a few seconds ago. In the wizard,
+   *Waiting for the device…* turns to *Connected* as soon as the phone sends anything through
+   the tunnel. If it still waits after 30 seconds, the Wi-Fi network may block devices from
+   reaching each other (guest networks often do): try another network.
 
 The tunnel keys are stored in `~/.mitmproxy/wireguard.conf` and reused on every start, so
 you only scan the QR code once per device.
@@ -198,7 +205,8 @@ No browser? `mitmdump --mode wireguard` prints the same configuration as text
 With the tunnel on, open `http://mitm.it` on the phone. This page is served by Wiretrace on
 your Mac, not by the internet, and it is not saved in the session. If it says *"traffic is not
 going through mitmproxy"*, or does not load, the tunnel is off or not connected: check
-*Latest handshake* (Step 2).
+*Latest handshake* (Step 2). For the iOS Simulator and the Android emulator, the wizard's
+*Install certificate* step shows the one command to run on your Mac instead, with a copy button.
 
 **iPhone**
 
@@ -232,7 +240,9 @@ going through mitmproxy"*, or does not load, the tunnel is off or not connected:
 ### Step 4 — Check
 
 Open the app on the phone. Its requests to the preset's hosts appear in the Traffic list (or in
-mitmweb). If HTTPS requests show errors, see [Troubleshooting](#part-5--troubleshooting).
+mitmweb), and the wizard's *Verify traffic* step turns green. If the phone refuses Wiretrace's
+certificate for an API host, that step says the certificate is not trusted yet and points back
+to Step 3. If HTTPS requests show errors, see [Troubleshooting](#part-5--troubleshooting).
 
 You can keep this session running and go on with Part 3, or press **Ctrl+C** and start again
 later.
@@ -546,37 +556,66 @@ window shows requests with their tokens, and the phone's WireGuard configuration
 
 **What each area does.**
 
-- **Title bar.** *Traffic* and *Logs* switch between the two views. It shows how long the
-  session has been recording. *Pause* freezes the list while you read it and counts the new
-  requests. *Clear* hides what is in the list now; everything is still saved to the session
-  folder. It also shows the preset, whether device logs are on, and buttons for *Rules*
-  (with the number of rules that are on), *Setup* and *Report bug*.
-- **Sidebar.** Quick filters with live counts: *All*, *Errors* (status 400 or higher, or no
-  answer), *Slow* (over one second), *Mocked*, *Faulted* and *WebSocket*. Below them are the
-  preset's hosts with their counts.
-- **Search box.** Plain text matches the method, the URL and the status. Text that starts with
-  `~` or `!` is a mitmweb filter expression, such as `~u /orders` or `!~t image`, checked by
-  Wiretrace; if it is not valid, the window shows the message. The preset's `default_filter`
-  is typed in for you at the start. It never limits what is saved.
+- **Title bar.** *Traffic* and *Logs* switch between the two views; *Logs* shows the number of
+  crashes. It shows how long the session has been recording. *Pause* freezes the list while
+  you read it and counts the new requests. *Clear* hides what is in the list now; everything is
+  still saved to the session folder. It also shows the preset, the target and mode, and the
+  device pill: the phone's model, OS version and connection (for example *Pixel 8 · Android 15
+  · USB*), green while its logs stream in, or *Device logs off* with the reason when you point
+  at it. Then come the buttons *Rules* (with the number of rules that are on), *Setup* and
+  *Report bug*.
+- **Sidebar.** *Current session* and *Previous sessions* (see *Earlier sessions* below). Quick
+  filters with live counts: *All*, *Errors* (status 400 or higher, or no answer), *Slow* (over
+  one second), *Mocked*, *Faulted* and *WebSocket*. The preset's hosts with their counts.
+  *Saved filters*: type a search, click *+ Save current search* and give it a name; click the
+  name to use it again, or *Rename* and *Delete* next to it. Saved filters belong to the
+  preset and are kept by your browser, not in a file: another browser, a private window or
+  clearing the browser's data starts with none.
+- **Search box.** Plain text matches the method, the URL and the status. From three
+  characters, it also looks in header names and values and in the request and response
+  bodies, ignoring case; those matches appear a moment later. Text that starts with `~` or `!`
+  is a mitmweb filter expression, such as `~u /orders` or `!~t image`, checked by Wiretrace; if
+  it is not valid, the window shows the message. The preset's `default_filter` is typed in for
+  you at the start. It never limits what is saved. The active filters (host, quick filter, the
+  search or the preset's filter) show as chips above the list; click a chip to remove it.
 - **Traffic list.** One row per request to the preset's hosts, as it happens: time, method,
   status (coloured by class, errors in red), path, duration and size. A row can carry the
-  badges *MOCK*, *FAULT* and *SLOW*. The log receiver `qa-logs.internal` is not listed. The
-  window keeps the newest 10,000 requests; older ones are only in `flows.mitm`.
+  badges *MOCK*, *FAULT*, *SLOW* and *REPLAY*. The log receiver `qa-logs.internal` is not
+  listed. The window keeps the newest 10,000 requests; older ones are only in `flows.mitm`.
 - **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
-  that carry this request's ID). *Copy cURL* copies the request as a `curl` command. *Copy as
-  mock* copies the response body and shows the file to create under `mocks/<preset>/` (see
-  *Mock a response*). Wiretrace does not write that file for you. *New rule* opens the Rules
-  view with a rule for this request's method, host and path.
+  that carry this request's ID, with their number). *Copy cURL* copies the request as a `curl`
+  command. *Copy as mock* copies the response body and shows the file to create under
+  `mocks/<preset>/` (see *Mock a response*). Wiretrace does not write that file for you.
+  *Replay* sends the request to the backend again; it appears as a new row with the *REPLAY*
+  badge and a link back to the original. Any method other than GET, HEAD and OPTIONS asks you
+  to confirm first, because the backend does the action again (another order, another
+  payment). *Compare…* shows this request next to another one, by default the previous request
+  with the same method and path: status and headers side by side, and the body as a list of
+  changed JSON keys, or line by line when it is not JSON. *New rule* opens the Rules view with
+  a rule for this request's method, host and path. *Report* runs *Report bug*.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter
-  and auto-scroll. Lines that carry the selected request's ID are highlighted. Click a line to
-  see it in full and the request it belongs to. The window keeps the newest 50,000 lines of each
-  log; the files in the session folder keep all of them.
-- **Setup.** In WireGuard mode, the QR code and the configuration text to import into the
-  WireGuard app on the phone. In proxy mode, the address `<Mac IP>:<port>` for the phone's Wi-Fi
-  proxy. It also lists the certificate steps, and *Traffic received* turns green when the first
-  request arrives. The WireGuard configuration holds the phone's private key; do not share it.
+  and auto-scroll. Lines that carry the selected request's ID are highlighted. The window keeps
+  the newest 50,000 lines of each log; the files in the session folder keep all of them. The
+  full view adds:
+  - the device picker: what is being collected now and its state, the other log sources with
+    the `--target` that collects them (Wiretrace does not switch at run time: stop and start
+    again with that target), and the app logs sent by the QA build;
+  - *Pause logs* (with the number of new lines), *Clear* (hides the lines, the files keep
+    them), *Export .txt* (the lines shown now, **not masked**: check them before you share),
+    a tag filter, and *Only lines linked to requests*;
+  - a timeline: requests as dots coloured by status, log lines as ticks (errors in red),
+    crashes marked, and the part shown in the list shaded. Click it to jump to that time;
+  - a crash's stack trace folded after four lines (*Show N more lines*);
+  - the line detail: *Copy line*, *Copy ±50 lines*, the linked request with *Open in Traffic*,
+    the requests within 5 seconds of the line, and *Show only this tag*.
+- **Setup.** A wizard in five steps, each of which you can open from the list on the left:
+  *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`),
+  *Connect tunnel* (the QR code and steps in WireGuard mode; the address `<Mac IP>:<port>` and
+  the Wi-Fi proxy steps in proxy mode; the command to restart in proxy mode where you need it),
+  *Install certificate*, *Verify traffic* and *Device logs*. See Part 2. The WireGuard
+  configuration holds the phone's private key; do not share it.
 - **Rules.** A list of rules on the left and the selected rule on the right. A rule matches a
   method (or *ANY*), one of the preset's API hosts (or any of them), a path where `*` stands
   for any text (`/api/*`; the query is ignored unless the path has a `?`), and optionally text
@@ -592,14 +631,24 @@ window shows requests with their tokens, and the phone's WireGuard configuration
   previous rules if something is not valid; if the file changed in the meantime, the window
   loads it again instead of overwriting it. A flow changed by a rule carries the comment
   `rule: <name>` and the *FAULT* or *MOCK* badge.
-- **Report bug.** Runs the same report as `./wiretrace report` for the session running now, using
-  the requests saved so far. The window shows the zip's name, the counts and the note to check
-  the log lines before you share, and *Show in Finder* opens the folder with the zip selected.
+- **Report bug.** Runs the same report as `./wiretrace report` for the session shown (the one
+  running now, using the requests saved so far, or the earlier session you opened). The window
+  shows the zip's name, the counts and the note to check the log lines before you share, and
+  *Show in Finder* opens the folder with the zip selected.
+
+**Earlier sessions.** Click *Previous sessions* in the sidebar to list the session folders,
+newest first, with their start time, preset, target and counts. Click one to open it: the
+window shows its traffic and logs, read-only, under the banner *Viewing <session>*. Recording
+of the current session goes on meanwhile. *Report bug* and *Compare…* work on the session you
+opened; Rules, Replay, Setup, Pause and Clear are off. *Back to live* (or *Current session*)
+returns to the session running now. As for the live session, the window shows the newest
+10,000 requests and 50,000 lines of each log. If the session's `flows.mitm` ends early (for
+example because the Mac shut down while recording), the banner says so and shows the requests
+that could be read. Only one earlier session is open at a time, in every tab of the window.
 
 Reloading the page, or a short break in the connection, loses nothing: the window shows
-*Reconnecting…* and loads everything again. The preview does not have a device picker, the
-log timeline, or earlier sessions yet. mitmweb's own Options panel is not part of this window;
-use *Rules* instead. If `qa_fault_*` options are set anyway, the Rules view says so.
+*Reconnecting…* and loads everything again. mitmweb's own Options panel is not part of this
+window; use *Rules* instead. If `qa_fault_*` options are set anyway, the Rules view says so.
 
 ### Without the launcher
 

@@ -390,11 +390,14 @@ def test_meta_has_no_identifiers(launch):
     assert str(Path.home()) not in text
     assert set(json.loads(text)) == {
         "wiretrace_version", "mitmproxy_version", "preset", "api_hosts", "target", "mode", "ui",
-        "device_logs", "device_log_lines", "app_log_lines", "status", "started_at", "ended_at",
-        "redact",
+        "device_logs", "device_logs_off", "device_log_lines", "app_log_lines", "requests", "status",
+        "started_at", "ended_at", "redact",
     }
     meta = json.loads(text)
     assert (meta["device_logs"], meta["device_log_lines"], meta["app_log_lines"]) == (None, 0, 0)
+    assert isinstance(meta["requests"], int)
+    # Why device logs are off, for the window's Setup; never a path.
+    assert meta["device_logs_off"] and "/" not in meta["device_logs_off"]
     # Only the rule names in use, so a report still masks them if the preset changes later.
     assert meta["redact"] == {"headers": list(redact.DEFAULT_HEADERS), "json_fields": list(redact.DEFAULT_FIELDS)}
 
@@ -561,7 +564,9 @@ def test_real_mitmdump_two_sigints(launch):
     assert flows[1].comment == "request-id: req-42; mock: GET/mocked.json"
     har = json.loads((folder / session.HAR).read_text())
     assert len(har["log"]["entries"]) == 2
-    assert session.read_meta(folder)["status"] == "stopped"
+    meta = session.read_meta(folder)
+    # The window's Previous sessions shows this count without reading flows.mitm.
+    assert (meta["status"], meta["requests"]) == ("stopped", 2)
 
 
 # Masking, report hint and old-session cleanup
@@ -629,6 +634,7 @@ def test_a_har_that_cannot_be_masked_is_a_har_failure(launch, har):
     assert (folder / session.FLOWS).is_file()
     assert "flows.har was not written (could not mask it); flows.mitm is kept." in run.output
     assert session.read_meta(folder)["status"] == "stopped"
+    assert session.read_meta(folder)["requests"] is None
 
 
 def test_the_report_command_is_printed_after_the_session_is_saved(launch):
@@ -776,6 +782,7 @@ def test_missing_collector_command_prints_one_line_and_the_session_continues(lau
     [folder] = run.folders()
     meta = session.read_meta(folder)
     assert meta["status"] == "stopped" and meta["device_logs"] is None and meta["device_log_lines"] == 0
+    assert meta["device_logs_off"] == "the collector could not start"
 
 
 def test_collector_does_not_start_when_mitmdump_cannot(launch, tmp_path):
@@ -939,14 +946,18 @@ def test_collector_command_per_target(tmp_path):
     def tail(cmd):
         return cmd[:3], cmd[3:]
 
+    # The state file goes beside the log, in the session folder, for the window.
+    status = ["--status", str(out.parent / "device.status.json")]
     for target in ("android", "android-emu"):
         cmd, reason = command(target)
         assert reason == "" and tail(cmd) == ([sys.executable, "-m", "collectors"], [
-            "--target", target, "--app", "com.example.myapp", "--out", str(out), "--adb", "/x/adb"])
+            "--target", target, "--app", "com.example.myapp", "--out", str(out), *status, "--adb", "/x/adb"])
     cmd, reason = command("ios")
-    assert tail(cmd)[1] == ["--target", "ios", "--app", "MyApp", "--out", str(out), "--pymobiledevice3", str(pmd)]
+    assert tail(cmd)[1] == ["--target", "ios", "--app", "MyApp", "--out", str(out), *status,
+                            "--pymobiledevice3", str(pmd)]
     cmd, reason = command("ios-sim")
-    assert tail(cmd)[1] == ["--target", "ios-sim", "--app", "MyApp", "--out", str(out), "--xcrun", "/usr/bin/xcrun"]
+    assert tail(cmd)[1] == ["--target", "ios-sim", "--app", "MyApp", "--out", str(out), *status,
+                            "--xcrun", "/usr/bin/xcrun"]
     assert command("device") == (None, "--target device has no device log")
 
 
@@ -1172,7 +1183,7 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
 def test_the_version_is_0_7_2():
     from cli import __version__
 
-    assert __version__ == "0.7.2"
+    assert __version__ == "0.8.0"
 
 
 def test_main_sets_a_private_umask(monkeypatch):

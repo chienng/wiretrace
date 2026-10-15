@@ -168,6 +168,10 @@ def _set_comment(flow: http.HTTPFlow, parts: list[str]) -> None:
     flow.comment = "; ".join(parts)
 
 
+def replay_parts(comment: str) -> list[str]:
+    return [part.strip() for part in (comment or "").split("; ") if part.strip().startswith("replay:")]
+
+
 # Rules
 
 class Rule(NamedTuple):
@@ -646,7 +650,8 @@ class QATools:
         # Invariant 1: this request keeps this snapshot, whatever a reload does during its delay.
         rules = self._rules
 
-        parts: list[str] = []
+        # A replay keeps the "replay: <original id>" part the window gave it; anything else starts empty.
+        parts: list[str] = replay_parts(flow.comment) if flow.is_replay == "request" else []
         request_id = header_value(flow.request.headers, snapshot.request_id_header)
         if request_id:
             parts.append(f"request-id: {request_id}")

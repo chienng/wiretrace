@@ -104,11 +104,11 @@ class Client:
         return await tornado.websocket.websocket_connect(request)
 
 
-def scenario(body, *, folder: Path | None = None, **options):
+def scenario(body, *, folder: Path | None = None, extra: tuple = (), **options):
     """Run `body(ui, client, tctx)` with the QA and UI addons loaded and the server listening."""
     async def main():
         ui = wiretrace_ui.WiretraceUI()
-        with taddons.context(qa_tools.QATools(), ui) as tctx:
+        with taddons.context(qa_tools.QATools(), *extra, ui) as tctx:
             tctx.configure(ui, **{"qa_ui_port": 0, "qa_ui_open_browser": False,
                                   "qa_ui_session_dir": str(folder) if folder else "", **options})
             await ui.running()
@@ -172,7 +172,10 @@ def test_the_browser_opens_the_link_only_when_asked(monkeypatch, capsys):
 
 
 PAGES = ["/", "/index.html", f"/assets/{ASSET.name}", "/api/state", "/api/flows", "/api/flows/x",
-         "/api/filter?expr=~u%20x", "/api/logs?source=app", "/api/mocks", "/api/nothing"]
+         "/api/filter?expr=~u%20x", "/api/logs?source=app", "/api/mocks", "/api/nothing", "/api/sessions",
+         "/api/search?q=orders"]
+MUTATIONS = [("/api/rules/test", "POST"), ("/api/rules/abcdef/rearm", "POST"), ("/api/report", "POST"),
+             ("/api/report/reveal", "POST"), ("/api/view", "POST"), ("/api/flows/x/replay", "POST")]
 
 
 @pytest.mark.parametrize("cookie", [False, "wrong", ""])
@@ -183,11 +186,9 @@ def test_every_page_api_and_asset_needs_the_cookie(cookie):
             assert response.code == 403, path
             assert ui.token.encode() not in response.body
         assert (await client.fetch("/api/rules", "PUT", cookie=cookie, body={})).code == 403
-        assert (await client.fetch("/api/rules/test", "POST", cookie=cookie)).code == 403
-        assert (await client.fetch("/api/rules/abcdef/rearm", "POST", cookie=cookie)).code == 403
         assert (await client.fetch("/api/rules", cookie=cookie)).code == 403
-        assert (await client.fetch("/api/report", "POST", cookie=cookie)).code == 403
-        assert (await client.fetch("/api/report/reveal", "POST", cookie=cookie)).code == 403
+        for path, method in MUTATIONS:
+            assert (await client.fetch(path, method, cookie=cookie)).code == 403, path
         with pytest.raises(tornado.httpclient.HTTPClientError) as e:
             await client.socket(cookie=cookie)
         assert e.value.code == 403
@@ -246,10 +247,9 @@ def test_a_mutation_needs_the_x_wiretrace_header(tmp_path):
         good = {"revision": "", "rules": []}
         assert (await client.fetch("/api/rules", "PUT", mutate=False, body=good)).code == 403
         assert (await client.fetch("/api/rules", "PUT", headers={"X-Wiretrace": "0"}, mutate=False, body=good)).code == 403
-        assert (await client.fetch("/api/rules/test", "POST", mutate=False)).code == 403
-        assert (await client.fetch("/api/rules/abcdef/rearm", "POST", mutate=False)).code == 403
-        assert (await client.fetch("/api/report", "POST", mutate=False)).code == 403
-        assert (await client.fetch("/api/report/reveal", "POST", mutate=False)).code == 403
+        for path, method in MUTATIONS:
+            assert (await client.fetch(path, method, mutate=False)).code == 403, path
+            assert (await client.fetch(path, method, headers={"X-Wiretrace": "0"}, mutate=False)).code == 403, path
         assert (await client.fetch("/api/rules", "PUT", body=good)).code == 200
         # A method nothing handles still needs the header before it is told 405.
         assert (await client.fetch("/api/state", "DELETE", mutate=False)).code == 403
@@ -345,7 +345,12 @@ def test_summary_of_a_response():
         "id": flow.id, "ts": 946681200, "method": "POST", "scheme": "http", "host": HOST,
         "port": flow.request.port, "path": "/api/v1/home?page=2", "status": 503, "error": None,
         "duration_ms": 3000, "size": 40, "mime": "application/json", "request_id": "req-7",
-        "mock": False, "fault": None, "websocket": False}
+        "mock": False, "fault": None, "websocket": False, "replay_of": None}
+
+
+def test_summary_says_which_request_a_replay_repeats():
+    flow = make_flow(comment="replay: abc-1; request-id: r1")
+    assert (wiretrace_ui.summary(flow)["replay_of"], wiretrace_ui.summary(flow)["request_id"]) == ("abc-1", "r1")
 
 
 def test_summary_of_a_failed_request_has_the_error_and_no_status():
@@ -840,7 +845,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.7.2"
+        assert state["version"] == "0.8.0"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
@@ -863,6 +868,107 @@ def test_state_without_a_readable_meta_has_defaults(tmp_path):
         assert isinstance(state["started_at"], float)
 
     scenario(body, folder=tmp_path)
+
+
+def tls_data(sni):
+    data = mock.Mock()
+    data.context.client.sni = sni
+    return data
+
+
+def test_setup_state_has_the_first_device_connection_and_nothing_about_the_peer(tmp_path):
+    async def body(ui, client, tctx):
+        state = await client.json("/api/state")
+        assert (state["device_seen_at"], state["tls_failures"]) == (None, 0)
+        socket_ = await client.socket()
+        refused = tflow.tclient_conn()
+        refused.error = "refused by proxy_guard"
+        ui.client_connected(refused)
+        assert (await client.json("/api/state"))["device_seen_at"] is None
+
+        device = tflow.tclient_conn()
+        device.peername = ("192.0.2.88", 50123)
+        ui.client_connected(device)
+        seen = await read_until(socket_, lambda m: m["type"] == "state" and m["state"]["device_seen_at"])
+        state = seen[-1]["state"]
+        assert isinstance(state["device_seen_at"], float)
+        assert "192.0.2.88" not in json.dumps(state) and "50123" not in json.dumps(state)
+        socket_.close()
+
+    rules_scenario(body, tmp_path)
+
+
+def test_setup_counts_failed_tls_handshakes_with_api_hosts_only(tmp_path):
+    async def body(ui, client, tctx):
+        for sni in (HOST, f"cdn.{HOST}", HOST.upper(), "other.example.org", None, ""):
+            ui.tls_failed_client(tls_data(sni))
+        ui.tls_failed_client(object())
+        assert (await client.json("/api/state"))["tls_failures"] == 3
+
+    rules_scenario(body, tmp_path)
+
+
+def test_why_device_logs_are_off_comes_from_the_session(tmp_path):
+    folder = write_session(tmp_path, device_logs=None, device_logs_off="adb not found")
+
+    async def body(ui, client, tctx):
+        state = await client.json("/api/state")
+        assert (state["device_logs"], state["device_logs_off"]) == (None, "adb not found")
+
+    scenario(body, folder=folder)
+
+
+def status_doc(**over) -> bytes:
+    doc = {"state": "streaming", "message": "streaming", "source": "android", "app": "com.example.app",
+           "model": "Pixel 8", "os": "Android 15", "updated_at": "2026-10-14T09:00:01.000+07:00", **over}
+    return json.dumps(doc).encode()
+
+
+def write_status(folder: Path, raw: bytes) -> None:
+    tmp = folder / ".status.tmp"
+    tmp.write_bytes(raw)
+    os.replace(tmp, folder / session.DEVICE_STATUS)
+
+
+def test_device_status_is_in_the_state_and_follows_the_file_over_the_socket(tmp_path):
+    folder = write_session(tmp_path)
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/state"))["device_status"] is None
+        socket_ = await client.socket()
+        write_status(folder, status_doc(state="waiting", message="waiting for a device", model="", os=""))
+        seen = await read_until(socket_, lambda m: m["type"] == "device")
+        assert seen[-1]["status"]["state"] == "waiting"
+        write_status(folder, status_doc())
+        seen = await read_until(socket_, lambda m: m["type"] == "device")
+        assert seen[-1]["status"] == {"state": "streaming", "message": "streaming", "source": "android",
+                                      "app": "com.example.app", "model": "Pixel 8", "os": "Android 15",
+                                      "updated_at": 1791943201.0}
+        assert (await client.json("/api/state"))["device_status"]["model"] == "Pixel 8"
+        socket_.close()
+
+    scenario(body, folder=folder)
+
+
+@pytest.mark.parametrize("raw", [b"{broken", b"[]", status_doc(state="hacked"), status_doc(state=None),
+                                 b" " * (wiretrace_ui.MAX_STATUS_BYTES + 1)])
+def test_a_device_status_that_is_not_one_keeps_the_last_good_one(tmp_path, raw):
+    folder = write_session(tmp_path)
+    write_status(folder, status_doc())
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/state"))["device_status"]["state"] == "streaming"
+        write_status(folder, raw)
+        await settle(ui)
+        assert (await client.json("/api/state"))["device_status"]["state"] == "streaming"
+
+    scenario(body, folder=folder)
+
+
+def test_device_status_fields_are_cleaned_and_cut():
+    status = wiretrace_ui.device_status(status_doc(model="m" * 500, os=7, extra="SECRET", app=None))
+    assert len(status["model"]) == wiretrace_ui.MAX_STATUS_TEXT and status["os"] == "" and status["app"] == ""
+    assert "extra" not in status and "SECRET" not in json.dumps(status)
 
 
 def test_wireguard_configuration_comes_from_the_server_instance(monkeypatch, tmp_path):
@@ -1315,6 +1421,307 @@ def test_done_closes_the_sockets_and_the_port():
     asyncio.run(main())
 
 
+# Previous sessions, search, replay (spec 008 slice D)
+
+LIVE = "2026-10-15_100000_staging_android"
+OLD = "2026-10-14_090000_staging_ios"
+UNLISTED = "2026-10-13_090000_staging_ios"
+
+
+def write_flows(path: Path, flows) -> None:
+    from mitmproxy import io
+    with open(path, "wb") as f:
+        writer = io.FlowWriter(f)
+        for flow in flows:
+            writer.add(flow)
+
+
+def tree(folder: Path) -> dict:
+    return {p.name: (p.stat().st_mtime_ns, p.stat().st_size) for p in folder.iterdir()}
+
+
+@pytest.fixture
+def sessions(tmp_path):
+    """A live session folder and a previous one with two flows and one device log line."""
+    root = tmp_path / "sessions"
+    live = write_session(root / LIVE)
+    old = write_session(root / OLD, target="ios", started_at="2026-10-14T09:00:00+07:00",
+                        ended_at="2026-10-14T09:30:00+07:00", status="stopped", requests=2,
+                        device_log_lines=1, app_log_lines=0)
+    flows = [make_flow("/api/v1/old-a"), make_flow("/api/v1/old-b", status=500)]
+    write_flows(old / session.FLOWS, flows)
+    (old / session.DEVICE_LOG).write_bytes(line(message="old line"))
+    return live, old, flows
+
+
+def test_sessions_lists_the_folders_newest_first_with_counts_from_meta(sessions):
+    live, old, _ = sessions
+    root = live.parent
+    (root / "2026-10-12_090000_staging_ios").symlink_to(old)
+    (root / "notes").mkdir()
+    (root / "2026-10-11_090000_staging_android").write_text("a file")
+
+    async def body(ui, client, tctx):
+        ui.request(make_flow("/live"))
+        listed = (await client.json("/api/sessions"))["sessions"]
+        assert [s["name"] for s in listed] == [LIVE, OLD]
+        assert listed[0]["live"] is True and listed[0]["requests"] == 1
+        assert listed[1] == {"name": OLD, "preset": "staging", "target": "ios", "started_at": 1791943200.0,
+                             "ended_at": 1791945000.0, "status": "stopped", "requests": 2, "device_lines": 1,
+                             "app_lines": 0, "live": False}
+
+    scenario(body, folder=live)
+
+
+def test_a_session_without_meta_is_listed_by_its_name(sessions):
+    live, _, _ = sessions
+    (live.parent / UNLISTED).mkdir()
+
+    async def body(ui, client, tctx):
+        entry = (await client.json("/api/sessions"))["sessions"][-1]
+        assert entry["name"] == UNLISTED and entry["requests"] is None and entry["started_at"]
+
+    scenario(body, folder=live)
+
+
+def test_a_previous_session_opens_read_only_and_the_live_capture_goes_on(sessions):
+    live, old, old_flows = sessions
+    before = tree(old)
+
+    async def body(ui, client, tctx):
+        assert await client.json("/api/view", method="POST", body={"session": OLD}) == {
+            "viewing": OLD, "cut_off": False, "requests": 2}
+        state = await client.json("/api/state")
+        assert (state["viewing"], state["viewing_cut_off"]) == (OLD, False)
+        listed = await client.json(f"/api/flows?session={OLD}")
+        assert [f["path"] for f in listed["flows"]] == ["/api/v1/old-a", "/api/v1/old-b"]
+        assert (await client.json(f"/api/logs?source=device&session={OLD}"))["lines"][0]["message"] == "old line"
+        assert (await client.json(f"/api/flows/{old_flows[1].id}?session={OLD}"))["summary"]["status"] == 500
+        assert (await client.json(f"/api/filter?expr=~c%20500&session={OLD}"))["ids"] == [old_flows[1].id]
+        # The live session goes on, and answers without ?session= or with its own name.
+        new = make_flow("/live-during-view")
+        ui.request(new)
+        assert [f["id"] for f in (await client.json("/api/flows"))["flows"]] == [new.id]
+        assert [f["id"] for f in (await client.json(f"/api/flows?session={LIVE}"))["flows"]] == [new.id]
+        assert (await client.fetch(f"/api/flows/{old_flows[0].id}")).code == 404
+
+        assert await client.json("/api/view", method="POST", body={"session": None}) == {"viewing": None}
+        assert (await client.json("/api/state"))["viewing"] is None
+        closed = await client.fetch(f"/api/flows?session={OLD}")
+        assert closed.code == 409 and "Previous sessions" in json.loads(closed.body)["error"]
+
+    scenario(body, folder=live)
+    assert tree(old) == before
+
+
+@pytest.mark.parametrize("name, code", [
+    ("nope", 400), (5, 400), ("../" + OLD, 400), (OLD + "/..", 400), (UNLISTED, 404),
+    ("2026-10-12_090000_staging_ios", 404),
+])
+def test_only_a_listed_session_name_opens(sessions, name, code):
+    live, old, _ = sessions
+    (live.parent / "2026-10-12_090000_staging_ios").symlink_to(old)
+
+    async def body(ui, client, tctx):
+        response = await client.fetch("/api/view", "POST", body={"session": name})
+        assert response.code == code and json.loads(response.body)["error"]
+        assert ui.viewed is None
+
+    scenario(body, folder=live)
+
+
+def test_view_needs_a_session_key_and_read_endpoints_check_the_name(sessions):
+    live, _, _ = sessions
+
+    async def body(ui, client, tctx):
+        assert (await client.fetch("/api/view", "POST", body={})).code == 400
+        assert (await client.fetch("/api/view", "POST", body="not json")).code == 400
+        for path in ("/api/flows", "/api/flows/x", "/api/logs?source=app", "/api/filter?expr=~a", "/api/search?q=abc"):
+            sep = "&" if "?" in path else "?"
+            assert (await client.fetch(f"{path}{sep}session=..%2F{OLD}")).code == 400, path
+            assert (await client.fetch(f"{path}{sep}session={OLD}")).code == 409, path
+
+    scenario(body, folder=live)
+
+
+def test_symlinked_files_in_a_session_are_not_read(sessions):
+    live, old, _ = sessions
+    linked = write_session(live.parent / UNLISTED)
+    (linked / session.FLOWS).symlink_to(old / session.FLOWS)
+    (linked / session.DEVICE_LOG).symlink_to(old / session.DEVICE_LOG)
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/view", method="POST", body={"session": UNLISTED}))["requests"] == 0
+        assert (await client.json(f"/api/logs?source=device&session={UNLISTED}"))["lines"] == []
+
+    scenario(body, folder=live)
+
+
+def test_a_cut_off_flows_file_is_read_as_far_as_it_goes(sessions):
+    live, old, _ = sessions
+    flows = [make_flow(f"/api/v1/n{i}") for i in range(3)]
+    write_flows(old / session.FLOWS, flows)
+    data = (old / session.FLOWS).read_bytes()
+    (old / session.FLOWS).write_bytes(data[:-40])
+
+    async def body(ui, client, tctx):
+        opened = await client.json("/api/view", method="POST", body={"session": OLD})
+        assert opened["cut_off"] is True and opened["requests"] == 2
+        assert (await client.json("/api/state"))["viewing_cut_off"] is True
+
+    scenario(body, folder=live)
+
+
+def test_a_previous_session_keeps_only_the_newest_flows(sessions):
+    _, old, _ = sessions
+    write_flows(old / session.FLOWS, [make_flow(f"/api/v1/n{i}") for i in range(5)])
+    kept, cut_off = wiretrace_ui.read_flows_file(old / session.FLOWS, cap=3)
+    assert [f.request.path for f in kept.values()] == ["/api/v1/n2", "/api/v1/n3", "/api/v1/n4"] and not cut_off
+
+
+def test_the_last_view_request_wins(sessions, monkeypatch):
+    live, _, _ = sessions
+    release = threading.Event()
+    real = wiretrace_ui.read_session
+
+    def slow(folder):
+        assert release.wait(10)
+        return real(folder)
+
+    monkeypatch.setattr(wiretrace_ui, "read_session", slow)
+
+    async def body(ui, client, tctx):
+        opening = asyncio.ensure_future(client.fetch("/api/view", "POST", body={"session": OLD}))
+        await asyncio.sleep(0.2)
+        assert await client.json("/api/view", method="POST", body={"session": None}) == {"viewing": None}
+        release.set()
+        assert (await opening).code == 409
+        assert ui.viewed is None
+
+    scenario(body, folder=live)
+
+
+def searchable():
+    header = make_flow("/api/v1/a")
+    header.request.headers["X-Trace"] = "Needle-Header"
+    body = make_flow("/api/v1/b", body=gzip.compress(b'{"note": "the needle-body is here"}'))
+    body.response.headers["Content-Encoding"] = "gzip"
+    sent = make_flow("/api/v1/c", method="POST")
+    sent.request.content = b'{"q": "needle-request"}'
+    other = make_flow("/api/v1/d")
+    return [header, body, sent, other]
+
+
+def test_search_matches_headers_and_bodies_ignoring_case(monkeypatch):
+    monkeypatch.setattr(wiretrace_ui, "SEARCH_CHUNK", 1)
+
+    async def body(ui, client, tctx):
+        flows = searchable()
+        for flow in flows:
+            ui.request(flow)
+        search = lambda q: client.json(f"/api/search?q={quote(q)}")  # noqa: E731
+        assert (await search("needle-HEADER"))["ids"] == [flows[0].id]
+        assert (await search("NEEDLE-BODY"))["ids"] == [flows[1].id]
+        assert (await search("needle-request"))["ids"] == [flows[2].id]
+        assert (await search("needle"))["ids"] == [f.id for f in flows[:3]]
+        assert (await search("/api/v1/d"))["ids"] == [flows[3].id]
+        for short in ("ab", "  ab  ", "x" * 201):
+            assert (await client.fetch(f"/api/search?q={quote(short)}")).code == 400
+
+    scenario(body)
+
+
+def test_search_in_an_opened_session(sessions):
+    live, old, _ = sessions
+    write_flows(old / session.FLOWS, searchable())
+
+    async def body(ui, client, tctx):
+        await client.json("/api/view", method="POST", body={"session": OLD})
+        found = await client.json(f"/api/search?q=needle-body&session={OLD}")
+        assert len(found["ids"]) == 1
+        assert (await client.json("/api/search?q=needle-body"))["ids"] == []
+
+    scenario(body, folder=live)
+
+
+def replay_scenario(body, **kwargs):
+    from mitmproxy.addons import clientplayback
+    scenario(body, extra=(clientplayback.ClientPlayback(),), **kwargs)
+
+
+def finished(flow):
+    """tflow's flows are live, like a request still in progress."""
+    flow.live = False
+    return flow
+
+
+def test_replay_sends_a_copy_marked_as_a_replay():
+    async def body(ui, client, tctx):
+        original = finished(make_flow("/api/v1/orders", "POST", comment="request-id: r1; fault: status 500"))
+        original.marked = ":warning:"
+        ui.request(original)
+        result = await client.json(f"/api/flows/{original.id}/replay", method="POST")
+        copy = ui.hub.flows[result["id"]]
+        assert copy is not original and copy.id != original.id
+        assert (copy.comment, copy.marked, copy.is_replay, copy.response) == (f"replay: {original.id}", "", "request", None)
+        assert (original.is_replay, original.response.status_code, original.comment) == (
+            None, 200, "request-id: r1; fault: status 500")
+        listed = {f["id"]: f for f in (await client.json("/api/flows"))["flows"]}
+        assert listed[copy.id]["replay_of"] == original.id and listed[original.id]["replay_of"] is None
+
+    replay_scenario(body)
+
+
+def test_replay_refuses_what_mitmproxy_cannot_replay(sessions):
+    live, _, _ = sessions
+
+    async def body(ui, client, tctx):
+        assert (await client.fetch("/api/flows/unknown/replay", "POST")).code == 404
+        running = make_flow()
+        ui.request(running)
+        assert (await client.fetch(f"/api/flows/{running.id}/replay", "POST")).code == 409
+        socket_flow = finished(tflow.twebsocketflow())
+        ui.websocket_start(socket_flow)
+        assert (await client.fetch(f"/api/flows/{socket_flow.id}/replay", "POST")).code == 400
+        empty = finished(make_flow())
+        empty.request.content = None
+        ui.request(empty)
+        assert (await client.fetch(f"/api/flows/{empty.id}/replay", "POST")).code == 400
+
+        done = finished(make_flow())
+        ui.request(done)
+        await client.json("/api/view", method="POST", body={"session": OLD})
+        viewing = await client.fetch(f"/api/flows/{done.id}/replay", "POST")
+        assert viewing.code == 409 and "previous session" in json.loads(viewing.body)["error"]
+        assert len(ui.hub.flows) == 4
+
+    replay_scenario(body, folder=live)
+
+
+def test_a_report_for_a_viewed_session_is_written_in_its_folder(sessions, monkeypatch):
+    live, old, _ = sessions
+    calls = []
+
+    def create(folder, presets_dir, now=None):
+        calls.append(folder)
+        return report.Created(zip=folder / "r.zip", requests=2, failed=1, mocked=0, faulted=0,
+                              device_lines=1, app_lines=0, cut_off=False)
+
+    monkeypatch.setattr(report, "create", create)
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/report", method="POST", body={"session": OLD}))["requests"] == 2
+        await client.json("/api/report", method="POST", body={"session": LIVE})
+        await client.json("/api/report", method="POST", body={})
+        assert (await client.fetch("/api/report", "POST", body={"session": UNLISTED})).code == 404
+        assert (await client.fetch("/api/report", "POST", body={"session": "../x"})).code == 404
+        assert (await client.fetch("/api/report", "POST", body={"session": 5})).code == 400
+        assert ui.last_report == live.resolve() / "r.zip"
+
+    scenario(body, folder=live)
+    assert calls == [old.resolve(), live.resolve(), live.resolve()]
+
+
 # Privacy (Gate C)
 
 def test_nothing_about_traffic_or_logs_reaches_the_terminal(tmp_path, capsys, caplog):
@@ -1332,6 +1739,11 @@ def test_nothing_about_traffic_or_logs_reaches_the_terminal(tmp_path, capsys, ca
         await client.fetch("/api/filter?expr=~u%20SECRET-FILTER")
         await client.fetch(f"/api/nothing?token={ui.token}")
         await client.fetch("/api/flows/SECRET-MISSING")
+        await client.fetch("/api/search?q=SECRET-SEARCH")
+        await client.fetch("/api/search?q=SECRET-SEARCH&session=SECRET-SESSION")
+        await client.fetch("/api/view", "POST", body={"session": "SECRET-SESSION"})
+        await client.fetch("/api/report", "POST", body={"session": "SECRET-SESSION"})
+        await client.fetch("/api/flows/SECRET-REPLAY/replay", "POST")
         socket_.close()
 
     with caplog.at_level(logging.DEBUG):
@@ -1452,6 +1864,7 @@ def test_real_mitmdump_with_the_launchers_command(tmp_path, default_filter):
             time.sleep(0.1)
         assert [(f["path"], f["status"], f["request_id"]) for f in flows] == [("/hello", 200, "req-9")]
         assert [l["message"] for l in lines] == ["from the device"]
+        assert isinstance(json.loads(get("/api/state")[1])["device_seen_at"], float)
         assert get(f"/api/flows/{flows[0]['id']}")[0] == 200
         assert get("/")[0] == 200
 

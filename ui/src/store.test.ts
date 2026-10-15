@@ -46,4 +46,53 @@ describe('store', () => {
     expect(s.ui.hidden.has('b')).toBe(false);
     expect(s.ui.selectedFlowId).toBe('b');
   });
+
+  it('a device message updates the state, also one buffered while loading', () => {
+    const status = { state: 'streaming', message: 'streaming', source: 'adb logcat', app: 'a', model: 'Pixel 8', os: 'Android 15', updated_at: null } as const;
+    const s = reducer(loaded(), { type: 'message', message: { type: 'device', status } });
+    expect(s.appState?.device_status).toEqual(status);
+    expect(s.appState?.default_filter).toBe('~u /api');
+    const buffered = reducer(initialStore, {
+      type: 'loaded',
+      data: { state: { ...appState, device_status: null }, flows: [], device: [], app: [] },
+      buffered: [{ type: 'device', status }],
+    });
+    expect(buffered.appState?.device_status).toEqual(status);
+    expect(reducer(initialStore, { type: 'message', message: { type: 'device', status } }).appState).toBeNull();
+  });
+
+  it('pausing logs keeps the seq listed, clearing logs leaves the flows', () => {
+    let s = reducer(loaded(), { type: 'logsPause' });
+    expect(s.ui.logsFrozen).toEqual({ device: 2, app: -Infinity });
+    s = reducer(s, { type: 'logsResume' });
+    expect(s.ui.logsFrozen).toBeNull();
+    s = reducer(s, { type: 'logsClear' });
+    expect(s.ui.clearedSeq.device).toBe(2);
+    expect(s.ui.hidden.size).toBe(0);
+  });
+
+  it('opening a previous session leaves the live data alone and the rules view', () => {
+    let s = reducer(loaded(), { type: 'ui', patch: { view: 'rules', selectedFlowId: 'a', host: 'api.example.com', dialog: 'report' } });
+    s = reducer(s, { type: 'viewOpened', view: { ...old, flows: [flow({ id: 'x' })] } });
+    expect(s.view?.flows.map((f) => f.id)).toEqual(['x']);
+    expect(s.flows.map((f) => f.id)).toEqual(['a', 'b', 'c']);
+    expect(s.ui).toMatchObject({ view: 'traffic', selectedFlowId: null, host: null, dialog: null });
+    s = reducer(s, { type: 'message', message: { type: 'flows', flows: [flow({ id: 'd' })] } });
+    expect(s.flows.map((f) => f.id)).toEqual(['a', 'b', 'c', 'd']);
+    expect(s.view?.flows.map((f) => f.id)).toEqual(['x']);
+    s = reducer(s, { type: 'viewClosed' });
+    expect(s.view).toBeNull();
+  });
+
+  it('drops the view when the server is no longer showing that session', () => {
+    let s = reducer(loaded(), { type: 'viewOpened', view: old });
+    s = reducer(s, { type: 'message', message: { type: 'state', state: { ...appState, viewing: old.name } } });
+    expect(s.view?.name).toBe(old.name);
+    s = reducer(s, { type: 'message', message: { type: 'state', state: { ...appState, viewing: '20261015-090000-other' } } });
+    expect(s.view).toBeNull();
+    s = reducer(reducer(s, { type: 'viewOpened', view: old }), { type: 'message', message: { type: 'state', state: { ...appState, viewing: null } } });
+    expect(s.view).toBeNull();
+  });
 });
+
+const old = { name: '20261015-080000-myapp', flows: [], logs: { device: [], app: [] }, cutOff: false };

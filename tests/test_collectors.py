@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from collectors import Stream, Writer, android, ios, local_iso
+from collectors import Status, Stream, Writer, android, describe, ios, local_iso
 
 ROOT = Path(__file__).resolve().parent.parent
 PACKAGE = "com.example.app"
@@ -77,6 +77,9 @@ elif args[:3] == ["shell", "pidof", "-s"]:
         print(scn["pid"])
     else:
         sys.exit(1)
+elif args[:2] == ["shell", "getprop"]:
+    print({"ro.product.model": "Pixel 8", "ro.build.version.release": "15",
+           "ro.serialno": scn["devices"][0] if scn["devices"] else ""}.get(args[2], ""))
 elif args[0] == "logcat":
     pid = next(a.split("=")[1] for a in args if a.startswith("--pid="))
     log(f"logcat start since={args[args.index('-T') + 1]} pid={pid} me={os.getpid()} "
@@ -97,7 +100,9 @@ FAKE_PMD = PRELUDE + """
 args = sys.argv[1:]
 scn = scenario()
 if args[:2] == ["usbmux", "list"]:
-    print(json.dumps([{"Identifier": udid, "ConnectionType": "USB"} for udid in scn["devices"]]))
+    print(json.dumps([{"Identifier": udid, "UniqueDeviceID": udid, "SerialNumber": "FAKESERIAL-IOS",
+                       "DeviceName": "FAKENAME's iPhone", "ConnectionType": "USB", "ProductType": "iPhone15,2",
+                       "ProductVersion": "18.6"} for udid in scn["devices"]]))
 elif args[:2] == ["syslog", "live"]:
     serve_until_terminated("syslog", scn, ["banner line, not JSON", *scn["lines"]], scn.get("exit_code"))
 """
@@ -107,7 +112,8 @@ args = sys.argv[1:]
 scn = scenario()
 if args[:3] == ["simctl", "list", "devices"]:
     print(json.dumps({"devices": {"com.apple.CoreSimulator.SimRuntime.iOS-18-0": [
-        {"udid": udid, "state": "Booted"} for udid in scn["devices"]]}}))
+        {"udid": udid, "state": "Booted", "name": "FAKENAME Simulator",
+         "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16"} for udid in scn["devices"]]}}))
 elif args[:3] == ["simctl", "spawn", "booted"]:
     serve_until_terminated("log", scn, ['Filtering the log data using "process == ..."', *scn["lines"]],
                            scn.get("exit_code"))
@@ -134,6 +140,7 @@ class World:
         self.scenario_file = tmp_path / "scenario.json"
         self.events_file = tmp_path / "events.log"
         self.out = tmp_path / "device.log.jsonl"
+        self.status_file = tmp_path / "device.status.json"
         self.stdout_file = tmp_path / "stdout.log"
         self.events_file.touch()
         self.scenario: dict = {"devices": [], "clock": "1728873000", "pid": "", "lines": {}, "exit_code": None}
@@ -162,7 +169,7 @@ class World:
 
     def start(self, target: str, app: str) -> None:
         args = [sys.executable, "-m", "collectors", "--target", target, "--app", app, "--out", str(self.out),
-                "--adb", self.tools["adb"], "--pymobiledevice3", self.tools["pymobiledevice3"],
+                "--status", str(self.status_file), "--adb", self.tools["adb"], "--pymobiledevice3", self.tools["pymobiledevice3"],
                 "--xcrun", self.tools["xcrun"], "--tick", str(TICK)]
         env = {**os.environ, "PYTHONPATH": str(ROOT), "FAKE_SCENARIO": str(self.scenario_file),
                "FAKE_EVENTS": str(self.events_file), "PYTHONUNBUFFERED": "1"}
@@ -172,6 +179,12 @@ class World:
 
     def status(self) -> list[str]:
         return self.stdout_file.read_text().splitlines()
+
+    def device_status(self) -> dict | None:
+        try:
+            return json.loads(self.status_file.read_text())
+        except (OSError, ValueError):
+            return None
 
     def records(self) -> list[dict]:
         if not self.out.exists():
@@ -587,6 +600,104 @@ elif args[0] == "logcat":
     wait_for(lambda: world.events("logcat start"))
     assert world.stop() < 2
     assert all(pid_gone(pid) for pid in tool_pids(world))
+
+
+# Device status file (spec 008 slice C)
+
+STATUS_KEYS = {"state", "message", "source", "app", "model", "os", "updated_at"}
+
+
+def test_status_file_is_replaced_whole_on_every_change_only(tmp_path):
+    path = tmp_path / "device.status.json"
+    status = Status(path, "android", PACKAGE)
+    status.say("waiting for a device")
+    first = json.loads(path.read_text())
+    assert set(first) == STATUS_KEYS
+    assert (first["state"], first["message"], first["source"], first["app"], first["model"], first["os"]) == (
+        "waiting", "waiting for a device", "android", PACKAGE, "", "")
+    assert datetime.fromisoformat(first["updated_at"]).tzinfo is not None
+
+    mtime = path.stat().st_mtime_ns
+    time.sleep(0.01)
+    status.say("waiting for a device")
+    assert path.stat().st_mtime_ns == mtime
+    status.device("Pixel 8", "Android 15")
+    status.say("streaming", state="streaming")
+    status.stopped()
+    assert json.loads(path.read_text())["state"] == "stopped"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["device.status.json"]
+
+
+def test_status_without_a_path_writes_nothing(tmp_path, capsys):
+    Status().say("streaming", state="streaming")
+    assert capsys.readouterr().out == "Device logs: streaming\n"
+    assert not list(tmp_path.iterdir())
+
+
+def test_status_file_that_cannot_be_written_is_skipped(tmp_path, capsys):
+    status = Status(tmp_path / "missing" / "device.status.json")
+    status.say("waiting for a device")
+    assert capsys.readouterr().out == "Device logs: waiting for a device\n"
+
+
+def test_device_description_is_one_short_printable_line():
+    assert describe("  Pixel\n8\t Pro ") == "Pixel 8 Pro"
+    assert describe("x" * 200) == "x" * 64
+    assert describe("\x1b[31mred") == "[31mred"
+    assert describe(None) == describe(7) == ""
+
+
+def test_iphone_model_and_os_without_name_serial_or_udid():
+    out = 'banner\n[{"DeviceName": "FAKENAME", "SerialNumber": "S1", "UniqueDeviceID": "U1", ' \
+          '"ProductType": "iPhone15,2", "ProductVersion": "18.6"}]'
+    assert ios.describe_usbmux(out) == ("iPhone15,2", "iOS 18.6")
+    assert ios.describe_usbmux("[]") == ("", "")
+    assert ios.describe_usbmux('[{"ProductType": "a"}, {"ProductType": "b"}]') == ("", "")
+
+
+def test_simulator_type_and_runtime_without_its_name():
+    out = json.dumps({"devices": {
+        "com.apple.CoreSimulator.SimRuntime.watchOS-11-0": [{"state": "Shutdown", "name": "W"}],
+        "com.apple.CoreSimulator.SimRuntime.iOS-18-0": [
+            {"state": "Booted", "name": "My renamed sim",
+             "deviceTypeIdentifier": "com.apple.CoreSimulator.SimDeviceType.iPhone-16-Pro"}]}})
+    assert ios.describe_booted(out) == ("iPhone 16 Pro", "iOS 18.0")
+    assert ios.runtime_name("com.apple.CoreSimulator.SimRuntime.iOS-17-5") == "iOS 17.5"
+    assert ios.runtime_name("garbage") == ""
+
+
+def test_android_status_file_follows_the_states_with_model_and_os(world):
+    world.start("android", PACKAGE)
+    wait_for(lambda: (world.device_status() or {}).get("state") == "waiting")
+    world.set(devices=[SERIAL, "FAKESERIAL0002"])
+    wait_for(lambda: (world.device_status() or {}).get("state") == "several")
+    world.set(devices=[SERIAL], pid="1234", lines={"1234": [logcat_line(1728873005, "I", "T", SECRET)]})
+    wait_for(lambda: (world.device_status() or {}).get("state") == "streaming")
+    streaming = world.device_status()
+    assert (streaming["model"], streaming["os"], streaming["source"], streaming["app"]) == (
+        "Pixel 8", "Android 15", "android", PACKAGE)
+    world.set(devices=[])
+    wait_for(lambda: (world.device_status() or {}).get("message") == "device disconnected, waiting")
+    assert (world.device_status()["model"], world.device_status()["os"]) == ("", "")
+    world.stop()
+    assert world.device_status()["state"] == "stopped"
+    text = world.status_file.read_text()
+    assert SERIAL not in text and "FAKESERIAL" not in text and SECRET not in text
+
+
+def test_ios_status_file_has_model_and_os_and_no_identifier(ios_case):
+    target, case, world = ios_case
+    world.set(devices=[case["ident"]], lines=case["lines"])
+    world.start(target, case["app"])
+    wait_for(lambda: (world.device_status() or {}).get("state") == "streaming")
+    status = world.device_status()
+    expected = ("iPhone15,2", "iOS 18.6") if target == "ios" else ("iPhone 16", "iOS 18.0")
+    assert (status["model"], status["os"], status["source"]) == (*expected, case["source"])
+    world.stop()
+    text = world.status_file.read_text()
+    assert json.loads(text)["state"] == "stopped"
+    for secret in (case["ident"], "FAKENAME", "FAKESERIAL", SECRET):
+        assert secret not in text
 
 
 def test_cli_requires_the_tool_of_its_target(tmp_path):

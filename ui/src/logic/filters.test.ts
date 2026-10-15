@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import {
+  activeChips,
   applyFilters,
   flowUrl,
   hostCounts,
+  isBodySearch,
   isServerExpr,
   matchesQuick,
   matchesText,
@@ -79,6 +81,30 @@ describe('applyFilters', () => {
   it('uses the server result for expressions and shows everything while it is unknown', () => {
     expect(ids(applyFilters(flows, { ...base, text: '~c 500', serverIds: new Set(['c']) }))).toEqual(['c']);
     expect(ids(applyFilters(flows, { ...base, text: '~c 500', serverIds: null }))).toEqual(['a', 'b', 'c']);
+  });
+  it('adds the server body matches to the plain text matches', () => {
+    expect(ids(applyFilters(flows, { ...base, text: 'token', serverIds: new Set(['c']) }))).toEqual(['c']);
+    expect(ids(applyFilters(flows, { ...base, text: '/b', serverIds: new Set(['c']) }))).toEqual(['b', 'c']);
+    expect(ids(applyFilters(flows, { ...base, text: 'token', serverIds: null }))).toEqual([]);
+  });
+});
+
+describe('body search and chips', () => {
+  it('asks the server for plain text of 3 characters or more only', () => {
+    expect(isBodySearch('ab')).toBe(false);
+    expect(isBodySearch(' abc ')).toBe(true);
+    expect(isBodySearch('~c 500')).toBe(false);
+  });
+  it('lists host, quick filter and search, marking the preset filter', () => {
+    expect(activeChips({ quick: 'all', host: null, text: '' }, '')).toEqual([]);
+    expect(activeChips({ quick: 'errors', host: 'api.example.com', text: 'orders' }, '~d example.com')).toEqual([
+      { kind: 'host', label: 'host: api.example.com' },
+      { kind: 'quick', label: 'Errors 4xx / 5xx' },
+      { kind: 'search', label: 'search: orders' },
+    ]);
+    expect(activeChips({ quick: 'all', host: null, text: ' ~d example.com ' }, '~d example.com')).toEqual([
+      { kind: 'default', label: 'preset filter: ~d example.com' },
+    ]);
   });
 });
 

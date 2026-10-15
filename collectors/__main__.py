@@ -8,11 +8,12 @@ import signal
 import sys
 from pathlib import Path
 
-from . import Status, Timing, Writer
+from . import ERROR, Status, Timing, Writer
 from .android import Android
 from .ios import ios_device, ios_simulator
 
 TARGETS = ("android", "android-emu", "ios", "ios-sim")
+SOURCES = {"android": "android", "android-emu": "android", "ios": "ios", "ios-sim": "ios-sim"}
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 
 
@@ -21,6 +22,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser.add_argument("--target", choices=TARGETS, required=True)
     parser.add_argument("--app", required=True, help="Android package name or iOS process name")
     parser.add_argument("--out", required=True, type=Path, help="log file, opened in append mode on the first line")
+    parser.add_argument("--status", type=Path, help="state file (device.status.json), replaced on every change")
     parser.add_argument("--adb", help="path of adb")
     parser.add_argument("--pymobiledevice3", help="path of pymobiledevice3")
     parser.add_argument("--xcrun", help="path of xcrun")
@@ -59,17 +61,19 @@ async def serve(collector, status: Status) -> int:
     try:
         await work
     except asyncio.CancelledError:
+        status.stopped()
         return 0
     except Exception as e:
         # The class name only: a message or traceback could carry paths or log content.
-        status.say(f"stopped after an internal error ({type(e).__name__})")
+        status.say(f"stopped after an internal error ({type(e).__name__})", state=ERROR)
         return 1
+    status.stopped()
     return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    writer, status = Writer(args.out), Status()
+    writer, status = Writer(args.out), Status(args.status, SOURCES[args.target], args.app)
     try:
         return asyncio.run(serve(build(args, writer, status), status))
     finally:

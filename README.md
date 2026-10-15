@@ -3,7 +3,7 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.7.2**.
+Current version: **0.8.0**.
 
 ## Features
 
@@ -35,7 +35,9 @@ Current version: **0.7.2**.
 - **Bug report zip.** `./wiretrace report` packs a session into one zip: a summary with the
   failed requests, the masked HAR, and the masked logs.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
-  and logs on one screen and the Rules view. It is only reachable from the same Mac, with a new
+  and logs on one screen, a log timeline with the device's status, earlier sessions, search in
+  headers and bodies, replay and compare, the setup wizard and the Rules view. It is only
+  reachable from the same Mac, with a new
   token at every start. mitmweb stays the default, so without `--ui wiretrace` you get mitmweb
   and no Rules view; `--no-ui` runs in the Terminal only.
 - **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
@@ -66,15 +68,15 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 Run every command below in **Terminal**, one block at a time. The
 [user guide](docs/user-guide.md) explains each step in more detail.
 
-**1. Download.** From the Releases page, download `wiretrace-0.7.2-macos.tar.gz` and
-`wiretrace-0.7.2-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
+**1. Download.** From the Releases page, download `wiretrace-0.8.0-macos.tar.gz` and
+`wiretrace-0.8.0-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
 
 **2. Check and unpack** into your home folder. The first line must print `OK`:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.7.2-macos.tar.gz.sha256
-tar -xzf wiretrace-0.7.2-macos.tar.gz -C ~
+shasum -a 256 -c wiretrace-0.8.0-macos.tar.gz.sha256
+tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
 ```
 
 **3. Install** (a few minutes, no password needed, never use `sudo`):
@@ -116,8 +118,8 @@ not changed or not saved.
 Use `--target ios` for an iPhone. The Wiretrace window opens in your browser. Without
 `--ui wiretrace` you get mitmweb instead.
 
-**6. The first time only, connect the phone:** install the WireGuard app, scan the QR code
-under *Setup* in the window, turn the tunnel on, then open `http://mitm.it` on the phone
+**6. The first time only, connect the phone:** click *Setup* in the window and follow the
+wizard: install the WireGuard app, scan the QR code, turn the tunnel on, then open `http://mitm.it` on the phone
 and install the certificate. On an iPhone, also turn on full trust for it in Settings →
 General → About → Certificate Trust Settings. Details:
 [Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
@@ -133,14 +135,14 @@ General → About → Certificate Trust Settings. Details:
 
 The images below are **design mockups**, not screenshots of the current product. All data
 in them is illustrative. They show where Wiretrace is going; the Wiretrace window (preview)
-already covers part of screens 1 to 3. Source and notes: [`mockups/`](mockups/README.md).
+builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 | Mockup | Status |
 |---|---|
-| 1. Main window | Partly built in the preview window: traffic list, filters, detail panel, log strip. |
-| 2. Device and app logs | Partly built: log tabs, levels and search. Not yet: device picker, timeline. |
-| 3. Device setup wizard | Partly built: the preview's Setup panel shows the QR code and certificate steps. |
-| 4. Mock and fault rules editor | Built in the preview window: rule list, editor, test against a request, live counters, import and export. |
+| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
+| 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
+| 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
+| 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
 | 5. Send a bug report to YouTrack or Jira | Not built yet. Today: `./wiretrace report` writes a zip. |
 | 6. Menu-bar app | Not built yet. |
 

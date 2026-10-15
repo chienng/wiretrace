@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -16,6 +17,9 @@ from datetime import datetime
 from pathlib import Path
 
 PREFIX = "Device logs: "
+WAITING, STREAMING, SEVERAL, STOPPED, ERROR = "waiting", "streaming", "several", "stopped", "error"
+# Model and OS version come from the device's tools; anything longer is cut.
+DESCRIPTION_LIMIT = 64
 TERM_GRACE_S = 1.0
 DRAIN_S = 0.3
 TOOL_TIMEOUT_S = 10
@@ -32,19 +36,65 @@ class Timing:
     wait: float = 2.0  # device count while waiting, and the delay before a retry
 
 
+def describe(text: object) -> str:
+    """A model or OS version as one short printable line; "" for anything else."""
+    if not isinstance(text, str):
+        return ""
+    return "".join(c for c in " ".join(text.split()) if c.isprintable())[:DESCRIPTION_LIMIT]
+
+
 class Status:
-    """Collector state lines, printed on a change only."""
+    """Collector state lines, printed on a change only, and `device.status.json` for the window.
 
-    def __init__(self) -> None:
+    The file says the state, the message, the source, the app and the device's model and OS
+    version, never a serial, a UDID or the device's name. It is replaced whole on every change.
+    """
+
+    def __init__(self, path: Path | None = None, source: str = "", app: str = "") -> None:
         self._last: str | None = None
+        self.path = path
+        self.source = source
+        self.app = app
+        self.state = WAITING
+        self.message = ""
+        self.model = ""
+        self.os_version = ""
 
-    def say(self, message: str, repeat: bool = False) -> None:
+    def say(self, message: str, repeat: bool = False, state: str = WAITING) -> None:
+        self._update(state=state, message=message)
         if message == self._last and not repeat:
             return
         self._last = message
         # The Terminal window may be gone; the log matters more than the message.
         try:
             print(PREFIX + message, flush=True)
+        except OSError:
+            pass
+
+    def device(self, model: object = "", os_version: object = "") -> None:
+        """The connected device, or none ("", "")."""
+        self._update(model=describe(model), os_version=describe(os_version))
+
+    def stopped(self) -> None:
+        """The collector ends: only the file says so, the Terminal line stays the last state."""
+        self._update(state=STOPPED, message="stopped")
+
+    def _update(self, **changes: str) -> None:
+        if all(getattr(self, name) == value for name, value in changes.items()):
+            return
+        for name, value in changes.items():
+            setattr(self, name, value)
+        self._write()
+
+    def _write(self) -> None:
+        if self.path is None:
+            return
+        document = {"state": self.state, "message": self.message, "source": self.source, "app": self.app,
+                    "model": self.model, "os": self.os_version, "updated_at": local_iso(datetime.now())}
+        tmp = self.path.with_name(f".{self.path.name}.tmp")
+        try:
+            tmp.write_text(json.dumps(document, ensure_ascii=False) + "\n", encoding="utf-8")
+            os.replace(tmp, self.path)
         except OSError:
             pass
 

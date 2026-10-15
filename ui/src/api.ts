@@ -1,4 +1,16 @@
-import type { AppState, FlowDetail, FlowSummary, LogLine, LogSource, ReportResult, Rule, RulesPayload, RuleTestResult } from './types';
+import type {
+  AppState,
+  FlowDetail,
+  FlowSummary,
+  LogLine,
+  LogSource,
+  ReportResult,
+  Rule,
+  RulesPayload,
+  RuleTestResult,
+  SessionInfo,
+  ViewResult,
+} from './types';
 
 export class ForbiddenError extends Error {
   constructor() {
@@ -52,15 +64,25 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
   return body as T;
 }
 
+/** `path` with the query, and `session` when a previous session is open. */
+export function withSession(path: string, query: Record<string, string>, session?: string | null): string {
+  const params = new URLSearchParams(query);
+  if (session) params.set('session', session);
+  const text = params.toString();
+  return text ? `${path}?${text}` : path;
+}
+
 export const api = {
   state: () => request<AppState>('/api/state'),
-  flows: async () => (await request<{ flows: FlowSummary[] }>('/api/flows')).flows,
-  flow: (id: string, signal?: AbortSignal) =>
-    request<FlowDetail>(`/api/flows/${encodeURIComponent(id)}`, {}, signal),
-  filter: async (expr: string, signal?: AbortSignal) =>
-    (await request<{ ids: string[] }>(`/api/filter?expr=${encodeURIComponent(expr)}`, {}, signal)).ids,
-  logs: async (source: LogSource) =>
-    (await request<{ lines: LogLine[] }>(`/api/logs?source=${source}`)).lines,
+  flows: async (session?: string | null) => (await request<{ flows: FlowSummary[] }>(withSession('/api/flows', {}, session))).flows,
+  flow: (id: string, signal?: AbortSignal, session?: string | null) =>
+    request<FlowDetail>(withSession(`/api/flows/${encodeURIComponent(id)}`, {}, session), {}, signal),
+  filter: async (expr: string, signal?: AbortSignal, session?: string | null) =>
+    (await request<{ ids: string[] }>(withSession('/api/filter', { expr }, session), {}, signal)).ids,
+  search: async (q: string, signal?: AbortSignal, session?: string | null) =>
+    (await request<{ ids: string[] }>(withSession('/api/search', { q }, session), {}, signal)).ids,
+  logs: async (source: LogSource, session?: string | null) =>
+    (await request<{ lines: LogLine[] }>(withSession('/api/logs', { source }, session))).lines,
   mocks: async () => (await request<{ files: string[] }>('/api/mocks')).files,
   rules: () => request<RulesPayload>('/api/rules'),
   putRules: (revision: string, rules: Rule[]) =>
@@ -69,7 +91,11 @@ export const api = {
     request<RuleTestResult>('/api/rules/test', { method: 'POST', body: JSON.stringify({ rule, flow_id: flowId }) }),
   rearm: (id: string) =>
     request<RulesPayload>(`/api/rules/${encodeURIComponent(id)}/rearm`, { method: 'POST', body: '{}' }),
-  report: () => request<ReportResult>('/api/report', { method: 'POST', body: '{}' }),
+  sessions: async () => (await request<{ sessions: SessionInfo[] }>('/api/sessions')).sessions,
+  view: (session: string | null) => request<ViewResult>('/api/view', { method: 'POST', body: JSON.stringify({ session }) }),
+  replay: (id: string) => request<{ id: string }>(`/api/flows/${encodeURIComponent(id)}/replay`, { method: 'POST', body: '{}' }),
+  report: (session?: string | null) =>
+    request<ReportResult>('/api/report', { method: 'POST', body: JSON.stringify(session ? { session } : {}) }),
   reveal: () => request<unknown>('/api/report/reveal', { method: 'POST', body: '{}' }),
 };
 

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { api, ApiError } from './api';
-import { isServerExpr } from './logic/filters';
+import { isBodySearch, isServerExpr } from './logic/filters';
 import type { FlowSummary } from './types';
 
 export function useNow(intervalMs: number): number {
@@ -12,26 +12,33 @@ export function useNow(intervalMs: number): number {
   return now;
 }
 
-interface ServerFilterResult {
-  expr: string;
+interface ServerResult {
+  key: string;
   ids: ReadonlySet<string> | null;
   error: string | null;
 }
 
+const EMPTY: ServerResult = { key: '', ids: null, error: null };
+
 /**
- * Evaluates a `~`/`!` expression on the server: debounced while typing, then refreshed
- * every 1.5 s while new or changed flows have arrived.
+ * Asks the server: a `~`/`!` expression for the ids it matches, plain text of three or more
+ * characters for the ids whose headers or bodies contain it. Debounced while typing, then
+ * refreshed while new or changed flows arrive (every 1.5 s for an expression, 3 s for text).
  */
-export function useServerFilter(search: string, flows: FlowSummary[]) {
-  const active = isServerExpr(search);
-  const expr = search.trim();
-  const [result, setResult] = useState<ServerFilterResult>({ expr: '', ids: null, error: null });
+export function useServerFilter(search: string, flows: FlowSummary[], session: string | null = null) {
+  const expr = isServerExpr(search);
+  const text = !expr && isBodySearch(search);
+  const active = expr || text;
+  const query = search.trim();
+  const mode = `${expr ? 'expr' : 'text'}|${session ?? ''}|`;
+  const key = mode + query;
+  const [result, setResult] = useState<ServerResult>(EMPTY);
   const flowsRef = useRef(flows);
   flowsRef.current = flows;
 
   useEffect(() => {
     if (!active) {
-      setResult((r) => (r.ids === null && r.error === null ? r : { expr: '', ids: null, error: null }));
+      setResult((r) => (r.ids === null && r.error === null ? r : EMPTY));
       return;
     }
     let cancelled = false;
@@ -43,31 +50,36 @@ export function useServerFilter(search: string, flows: FlowSummary[]) {
       const mine = new AbortController();
       controller = mine;
       try {
-        const ids = await api.filter(expr, mine.signal);
-        if (!cancelled && !mine.signal.aborted) setResult({ expr, ids: new Set(ids), error: null });
+        const ids = expr ? await api.filter(query, mine.signal, session) : await api.search(query, mine.signal, session);
+        if (!cancelled && !mine.signal.aborted) setResult({ key, ids: new Set(ids), error: null });
       } catch (e) {
         if (cancelled || mine.signal.aborted) return;
-        if (e instanceof ApiError && e.status === 400) setResult({ expr, ids: null, error: e.message });
+        if (e instanceof ApiError && e.status === 400 && expr) setResult({ key, ids: null, error: e.message });
       }
     };
 
     const first = setTimeout(() => void run(), 300);
-    const poll = setInterval(() => {
-      if (flowsRef.current !== seen) {
-        seen = flowsRef.current;
-        void run();
-      }
-    }, 1500);
+    const poll = setInterval(
+      () => {
+        if (flowsRef.current !== seen) {
+          seen = flowsRef.current;
+          void run();
+        }
+      },
+      expr ? 1500 : 3000,
+    );
     return () => {
       cancelled = true;
       controller?.abort();
       clearTimeout(first);
       clearInterval(poll);
     };
-  }, [active, expr]);
+  }, [active, expr, query, session, key]);
 
+  // While an expression is typed, its last answer stays shown; text ids would add stale matches.
+  const usable = expr ? result.key.startsWith(mode) : result.key === key;
   return {
-    ids: active ? result.ids : null,
-    error: active && result.expr === expr ? result.error : null,
+    ids: active && usable ? result.ids : null,
+    error: expr && result.key === key ? result.error : null,
   };
 }
