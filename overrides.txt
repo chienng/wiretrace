@@ -1,7 +1,10 @@
-# Versions mitmproxy 12.2.3 refuses, and that its main branch already allows (2026-10-15).
-# msgpack is the exception: 12.2.3 never imports it, and main no longer depends on it.
-# uv applies this file with `pip install --overrides` and so can widen those pins.
-cryptography>=50.0.0,<50.1
-h2==4.4.1
+# Ceilings are the ones mitmproxy's main branch already tests (2026-10-15).
+# Floors are the first releases that close the advisories. Without them, an existing
+# install of 12.2.3's pins still satisfies the ceiling and uv will not upgrade it.
+# Remove this file once a mitmproxy release carries these limits.
+cryptography>=50.0.0,<=50.0.2
+h2>=4.4.1,<=4.4.1
 tornado>=6.5.9,<=6.5.10
+# Declared by mitmproxy 12.2.3 (msgpack<=1.1.2) and imported by neither mitmproxy nor
+# pymobiledevice3. main dropped the dependency. The pin still blocks 1.2.1.
 msgpack>=1.2.1

@@ -81,10 +81,13 @@ fixed versions of four dependencies, before the repo is published. Version 0.7.2
 
 ### 6. Dependencies with known vulnerabilities
 
-- [ ] `scripts/setup-mac.sh` installs with `--overrides overrides.txt`, which allows
-      `cryptography` 50.0.x, `h2` 4.4.1, `tornado` 6.5.9–6.5.10 and `msgpack` ≥ 1.2.1 under
-      mitmproxy 12.2.3. These are the limits on mitmproxy's `main` branch (2026-10-15), except
-      msgpack, which `main` no longer depends on and 12.2.3 never imports.
+- [ ] `scripts/setup-mac.sh` installs with `--overrides overrides.txt` under mitmproxy
+      12.2.3. The ceilings are the limits its `main` branch already tests (2026-10-15):
+      `cryptography` ≤ 50.0.2, `h2` ≤ 4.4.1, `tornado` ≤ 6.5.10. The floors are the first
+      releases that close the advisories (`cryptography` ≥ 50.0.0, `h2` ≥ 4.4.1,
+      `tornado` ≥ 6.5.9), so an existing install is upgraded. `msgpack` ≥ 1.2.1 stays in
+      that file: 12.2.3 declares `msgpack` ≤ 1.1.2 and neither mitmproxy nor pymobiledevice3
+      imports it; `main` dropped the dependency.
 - [ ] `uvx pip-audit` on the installed environment reports none of the 15 advisories found
       on 2026-10-15.
 
