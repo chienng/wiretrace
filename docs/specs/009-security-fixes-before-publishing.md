@@ -5,7 +5,7 @@
   network, and which secrets leave the Mac in bug reports. Needs a code, security and privacy
   review and a runtime check.
 - **Repo**: wiretrace
-- **Status**: approved (2026-10-15)
+- **Status**: implemented
 - **Branch**: `fix/security-findings`
 - **Related**: spec 002 (launcher, sessions), spec 003 (mocks), spec 005 (redaction, report),
   spec 006 (the window's server and its bounded body decoding)
