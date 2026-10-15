@@ -35,9 +35,11 @@ Current version: **0.7.1**.
 - **Bug report zip.** `./wiretrace report` packs a session into one zip: a summary with the
   failed requests, the masked HAR, and the masked logs.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
-  and logs on one screen. It is only reachable from the same Mac, with a new token at every
-  start. mitmweb stays the default; `--no-ui` runs in the Terminal only.
-- **Release files.** `scripts/build-release.sh` builds a `.tar.gz` and a `.dmg`, each with a
+  and logs on one screen and the Rules view. It is only reachable from the same Mac, with a new
+  token at every start. mitmweb stays the default, so without `--ui wiretrace` you get mitmweb
+  and no Rules view; `--no-ui` runs in the Terminal only.
+- **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
+  `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
   SHA-256 checksum, from one commit.
 
 Masking has limits (for example, bodies that are neither JSON nor forms are not changed).
@@ -75,6 +77,12 @@ Create a preset with your API hosts, then capture a session:
 ```bash
 cp presets/example.yaml presets/staging.yaml     # set name: staging and api_hosts
 ./wiretrace start --preset staging --target android
+```
+
+This opens mitmweb. For Wiretrace's own window, with the Rules view, add `--ui wiretrace`:
+
+```bash
+./wiretrace start --preset staging --target android --ui wiretrace
 ```
 
 Use the app, then press Ctrl+C. Wiretrace writes `flows.har` (secrets masked) into the

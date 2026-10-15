@@ -238,7 +238,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   device log is collected (Step 2).
 - `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
 - `--ui wiretrace` opens Wiretrace's own window instead of mitmweb (a preview; see *Wiretrace
-  window (preview)* below). It cannot be combined with `--no-ui`.
+  window (preview)* below). The Rules view is only in that window. It cannot be combined with
+  `--no-ui`.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
   Wi-Fi proxy to `<Mac IP>:8080`.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
@@ -475,8 +476,9 @@ name with `request_id_header`.
 
 ### Wiretrace window (preview)
 
-Wiretrace has its own window, which shows the traffic and the app's logs on one screen. It is a
-preview. mitmweb stays the default, so nothing changes unless you ask for the new window.
+Wiretrace has its own window, which shows the traffic and the app's logs on one screen, and
+where you edit rules (*Rules* in its title bar). It is a preview. mitmweb stays the default, so
+nothing changes unless you ask for the new window: a plain `./wiretrace start` opens mitmweb.
 
 To open it, start Wiretrace with `--ui wiretrace`:
 
@@ -713,6 +715,8 @@ Rules for the app:
 | `Could not write the report: …` | The zip could not be saved, for example because the disk is full. No partial zip is left. Free some space and run the command again. |
 | `Deleted … old session(s) (older than 14 days).` | Normal, when you start Wiretrace. It removed old session folders. To keep a session, move its folder out of `sessions/` before then (Part 4). |
 | `redact.… is not a known key`, or `'redact.headers' entry …` (in `presets/<name>.yaml: …`) | The `redact:` section of the preset has an unknown key or an invalid name. Use only `headers` and `json_fields`, each a list (Part 1, Step 6). |
+| mitmweb opens instead of the Wiretrace window, or there is no *Rules* button | Start with `--ui wiretrace`; without it you get mitmweb. If the Terminal banner has no `Rules:` line, the `wiretrace` folder is from before rules: update it (see *Updating and removing*). |
+| The Rules view shows a red message about the rules file | `rules/<preset>.json` was edited by hand and has a mistake; the message says which rule and field. The previous rules stay in effect. Fix the file, or save from the window, which writes a valid file. |
 | The Wiretrace window says "Open the link printed in the Terminal." | The page was opened without the token, or from an earlier start. Copy the newest `Wiretrace UI:` link from the Terminal and open it. |
 | `Port TCP 8081 (Wiretrace UI): in use by another program` when starting with `--ui wiretrace` | Another Wiretrace or mitmweb window is still open. Quit it (Ctrl+C in its window) and start again. |
 | The Wiretrace window stays on "Reconnecting…" | Wiretrace is no longer running, or the Mac was asleep. Look at the Terminal. If it is still running, reload the page; if not, start it again and open the new link. |
@@ -736,8 +740,13 @@ cd ~/wiretrace && scripts/setup-mac.sh
 ```
 
 Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
-files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, and any sessions you want to keep from
+files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
+`~/wiretrace-old/rules/` to `~/wiretrace/rules/`, and any sessions you want to keep from
 `~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
+
+Stop Wiretrace (Ctrl+C) before you update: it reloads its add-on files when they change. Two
+builds can carry the same version number, so to check which one you run, look at the Terminal
+banner: a build with rules prints a `Rules:` line.
 
 **Remove Wiretrace completely:**
 
