@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "rules": [
+    {
+      "id": "ex0rders500",
+      "name": "Order creation fails with server error",
+      "enabled": false,
+      "match": {"method": "POST", "host": "api-staging.example.com", "path": "/api/v1/orders", "body_contains": ""},
+      "action": {"type": "status", "status": 500, "body": "{\"error\": {\"code\": \"ORDER_CREATE_FAILED\", \"message\": \"Injected by Wiretrace\"}}", "mock_file": "", "delay_ms": 800},
+      "apply": {"mode": "once", "n": 0}
+    },
+    {
+      "id": "exslowpay",
+      "name": "Payments are slow",
+      "enabled": false,
+      "match": {"method": "POST", "host": "", "path": "/api/v1/payments*", "body_contains": ""},
+      "action": {"type": "delay", "status": 200, "body": "", "mock_file": "", "delay_ms": 8000},
+      "apply": {"mode": "always", "n": 0}
+    },
+    {
+      "id": "exrefresh401",
+      "name": "Token refresh fails every 3rd call",
+      "enabled": false,
+      "match": {"method": "POST", "host": "auth-staging.example.com", "path": "/auth/v2/token/refresh", "body_contains": ""},
+      "action": {"type": "status", "status": 401, "body": "", "mock_file": "", "delay_ms": 0},
+      "apply": {"mode": "every_nth", "n": 3}
+    },
+    {
+      "id": "excartdrop",
+      "name": "Cart: network loss",
+      "enabled": false,
+      "match": {"method": "ANY", "host": "", "path": "/api/v1/cart*", "body_contains": ""},
+      "action": {"type": "drop", "status": 200, "body": "", "mock_file": "", "delay_ms": 0},
+      "apply": {"mode": "always", "n": 0}
+    }
+  ]
+}

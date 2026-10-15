@@ -1,4 +1,3 @@
-import { activeFaultCount } from '../logic/faults';
 import { formatElapsed } from '../logic/format';
 import { isCrash } from '../logic/logs';
 import { useNow } from '../hooks';
@@ -26,7 +25,7 @@ export function TitleBar({ newCount }: Props) {
     [logs, ui.clearedSeq],
   );
   const paused = ui.frozen !== null;
-  const faultCount = appState ? activeFaultCount(appState.faults, appState.faults_on) : 0;
+  const rulesOn = appState?.rules_on ?? 0;
   const seen = !!appState && (appState.flow_count > 0 || flows.length > 0);
   const deviceLogs = appState?.device_logs ?? null;
   const deviceOn = !!deviceLogs && !/^off\b/i.test(deviceLogs);
@@ -50,9 +49,11 @@ export function TitleBar({ newCount }: Props) {
           </button>
         </>
       )}
-      <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
-        Clear
-      </button>
+      {ui.view !== 'rules' && (
+        <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
+          Clear
+        </button>
+      )}
       <span className="spacer" />
       {appState && (
         <>
@@ -65,8 +66,13 @@ export function TitleBar({ newCount }: Props) {
           </span>
         </>
       )}
-      <button type="button" className="btn" onClick={() => patch({ dialog: 'faults' })}>
-        Faults{faultCount > 0 && <span className="count">{faultCount} active</span>}
+      <button
+        type="button"
+        className={`btn${ui.view === 'rules' ? ' toggled' : ''}`}
+        aria-pressed={ui.view === 'rules'}
+        onClick={() => patch({ view: ui.view === 'rules' ? 'traffic' : 'rules' })}
+      >
+        Rules{rulesOn > 0 && <span className="count">{rulesOn} active</span>}
       </button>
       <button type="button" className="btn" onClick={() => patch({ dialog: 'setup' })}>
         Setup

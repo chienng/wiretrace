@@ -1,13 +1,12 @@
 import { createContext, useContext, useReducer, type Dispatch, type ReactNode } from 'react';
 import type { InitialData } from './connection';
-import { isFaultsOn } from './logic/faults';
 import type { QuickFilter } from './logic/filters';
 import { LEVELS, type Level } from './logic/logs';
 import { applyMessages, mergeFlows, mergeLogSets, type LogSets } from './logic/merge';
-import type { AppState, Faults, FlowSummary, LogSource, Phase, ServerMessage } from './types';
+import type { AppState, FlowSummary, LogSource, Phase, RulesPayload, ServerMessage } from './types';
 
-export type View = 'traffic' | 'logs';
-export type Dialog = null | 'setup' | 'faults' | 'report';
+export type View = 'traffic' | 'logs' | 'rules';
+export type Dialog = null | 'setup' | 'report';
 export type LogsViewSource = LogSource | 'crashes';
 
 export interface UiState {
@@ -34,6 +33,8 @@ export interface UiState {
   logsAutoscroll: boolean;
   dialog: Dialog;
   toast: { id: number; text: string } | null;
+  /** A request to pre-fill a new rule from (Traffic > New rule). */
+  ruleSeed: FlowSummary | null;
 }
 
 export interface Store {
@@ -42,6 +43,10 @@ export interface Store {
   appState: AppState | null;
   flows: FlowSummary[];
   logs: LogSets;
+  /** Loaded when the Rules view opens; counters then follow the socket. */
+  rules: RulesPayload | null;
+  /** The rules changed on the server since `rules` was loaded. */
+  rulesStale: boolean;
   ui: UiState;
 }
 
@@ -50,7 +55,8 @@ export type Action =
   | { type: 'loaded'; data: InitialData; buffered: ServerMessage[] }
   | { type: 'message'; message: ServerMessage }
   | { type: 'ui'; patch: Partial<UiState> }
-  | { type: 'faults'; faults: Faults }
+  | { type: 'rules'; rules: RulesPayload }
+  | { type: 'newRuleFrom'; flow: FlowSummary }
   | { type: 'pause' }
   | { type: 'resume' }
   | { type: 'clear' }
@@ -63,6 +69,8 @@ export const initialStore: Store = {
   appState: null,
   flows: [],
   logs: { device: [], app: [] },
+  rules: null,
+  rulesStale: false,
   ui: {
     view: 'traffic',
     selectedFlowId: null,
@@ -84,6 +92,7 @@ export const initialStore: Store = {
     logsAutoscroll: true,
     dialog: null,
     toast: null,
+    ruleSeed: null,
   },
 };
 
@@ -108,14 +117,18 @@ export function reducer(store: Store, action: Action): Store {
       const m = action.message;
       if (m.type === 'flows') return { ...store, flows: mergeFlows(store.flows, m.flows) };
       if (m.type === 'logs') return { ...store, logs: mergeLogSets(store.logs, m.lines) };
+      if (m.type === 'rules') return applyRulesMessage(store, m);
       return { ...store, appState: m.state };
     }
     case 'ui':
       return { ...store, ui: { ...store.ui, ...action.patch } };
-    case 'faults':
-      return store.appState
-        ? { ...store, appState: { ...store.appState, faults: action.faults, faults_on: isFaultsOn(action.faults) } }
-        : store;
+    case 'rules': {
+      const rulesOn = action.rules.rules.filter((r) => r.enabled).length;
+      const appState = store.appState ? { ...store.appState, rules_on: rulesOn } : store.appState;
+      return { ...store, rules: action.rules, rulesStale: false, appState };
+    }
+    case 'newRuleFrom':
+      return { ...store, ui: { ...store.ui, view: 'rules', ruleSeed: action.flow } };
     case 'pause':
       return { ...store, ui: { ...store.ui, frozen: new Set(store.flows.map((f) => f.id)) } };
     case 'resume':
@@ -150,6 +163,13 @@ export function reducer(store: Store, action: Action): Store {
     case 'toast':
       return { ...store, ui: { ...store.ui, toast: { id: ++toastId, text: action.text } } };
   }
+}
+
+/** Counters always follow; a new revision or file error means the list must be reloaded. */
+export function applyRulesMessage(store: Store, m: Extract<ServerMessage, { type: 'rules' }>): Store {
+  if (!store.rules) return store;
+  const stale = m.revision !== store.rules.revision || m.error !== store.rules.error;
+  return { ...store, rules: { ...store.rules, stats: m.stats }, rulesStale: store.rulesStale || stale };
 }
 
 function latestState(initial: AppState, buffered: ServerMessage[]): AppState {

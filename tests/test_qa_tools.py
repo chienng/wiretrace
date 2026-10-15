@@ -1,5 +1,7 @@
 import asyncio
+import gzip
 import http.client
+import json
 import http.server
 import logging
 import os
@@ -485,8 +487,9 @@ def test_addon_options_have_the_documented_defaults():
         o = tctx.options
         assert list(o.qa_api_hosts) == [] and o.qa_mocks_dir == "" and o.qa_request_id_header == "X-Request-ID"
         assert o.qa_fault_filter == "" and o.qa_fault_status == 0 and o.qa_fault_delay_ms == 0
-        assert o.qa_fault_drop is False
+        assert o.qa_fault_drop is False and o.qa_rules_file == ""
         assert addon._snapshot == qa_tools.Snapshot()
+        assert addon.rules == qa_tools.Rules()
 
     async def main():
         addon = qa_tools.QATools()
@@ -581,6 +584,277 @@ def test_request_id_header_is_configurable():
     scenario(body, qa_request_id_header="X-Trace-Id")
 
 
+# Rules (spec 008 slice A)
+
+RULE = {"id": "orders500", "name": "Orders fail", "enabled": True,
+        "match": {"method": "POST", "host": "", "path": "/api/v1/orders", "body_contains": ""},
+        "action": {"type": "status", "status": 500, "body": "", "mock_file": "", "delay_ms": 0},
+        "apply": {"mode": "always", "n": 0}}
+
+
+def rule(**over) -> dict:
+    out = json.loads(json.dumps(RULE))
+    for key, value in over.items():
+        if isinstance(value, dict):
+            out[key].update(value)
+        else:
+            out[key] = value
+    return out
+
+
+def parse(*rules, hosts=(HOST,), mocks_dir=""):
+    return qa_tools.parse_rules({"version": 1, "rules": list(rules)}, hosts, mocks_dir)
+
+
+def write_rules(path: Path, *rules) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"version": 1, "rules": list(rules)}))
+    os.replace(tmp, path)
+
+
+def post(path="/api/v1/orders", body=b"", headers=None):
+    flow = make_flow(path=path, method="POST", request_headers=headers)
+    flow.request.raw_content = body
+    return flow
+
+
+def test_a_valid_rules_document_parses_in_order():
+    parsed = parse(rule(), rule(id="second1", name="Two", enabled=False))
+    assert isinstance(parsed, qa_tools.Rules)
+    assert [r.id for r in parsed.rules] == ["orders500", "second1"] and parsed.revision
+    assert parsed.rules[0].data == rule()
+
+
+@pytest.mark.parametrize("bad, field", [
+    ({"id": "abc"}, "id"), ({"id": "a" * 33}, "id"), ({"id": "Upper1"}, "id"),
+    ({"name": ""}, "name"), ({"name": "x" * 81}, "name"), ({"name": "a\nb"}, "name"),
+    ({"enabled": "yes"}, "enabled"),
+    ({"match": {"method": "post"}}, "match.method"), ({"match": {"host": "other.example.com"}}, "match.host"),
+    ({"match": {"path": ""}}, "match.path"), ({"match": {"path": "/" + "x" * 512}}, "match.path"),
+    ({"match": {"path": "api"}}, "match.path"), ({"match": {"body_contains": "x" * 257}}, "match.body_contains"),
+    ({"action": {"type": "teapot"}}, "action.type"), ({"action": {"status": 600}}, "action.status"),
+    ({"action": {"status": True}}, "action.status"), ({"action": {"body": "x" * ((1 << 20) + 1)}}, "action.body"),
+    ({"action": {"delay_ms": -1}}, "action.delay_ms"), ({"action": {"delay_ms": 120_001}}, "action.delay_ms"),
+    ({"action": {"type": "delay", "delay_ms": 0}}, "action.delay_ms"),
+    ({"apply": {"mode": "sometimes"}}, "apply.mode"), ({"apply": {"mode": "every_nth", "n": 1}}, "apply.n"),
+    ({"apply": {"mode": "every_nth", "n": 1001}}, "apply.n"),
+    ({"extra": 1}, "extra"), ({"match": {"method": "GET", "query": "x"}}, "match.query"),
+])
+def test_each_limit_and_field_is_checked(bad, field):
+    got = parse(rule(id="okrule1"), rule(**bad))
+    assert isinstance(got, qa_tools.RuleError)
+    assert (got.index, got.field) == (1, field)
+
+
+def test_duplicate_ids_too_many_rules_and_bad_documents_are_refused():
+    assert parse(rule(), rule()).field == "id"
+    assert parse(*[rule(id=f"rule{i:04d}") for i in range(201)]).field == "rules"
+    for document in (None, [], {"version": 2, "rules": []}, {"version": 1}, {"version": 1, "rules": [], "x": 1}):
+        assert isinstance(qa_tools.parse_rules(document, (HOST,), ""), qa_tools.RuleError)
+
+
+def test_mock_file_must_be_inside_the_mocks_dir(tmp_path, mocks):
+    (tmp_path / "outside.json").write_text("{}")
+    ok = parse(rule(action={"type": "mock", "status": 200, "mock_file": "GET/api/v1/profile.json"}), mocks_dir=str(mocks))
+    assert isinstance(ok, qa_tools.Rules)
+    for label in ("../outside.json", "/etc/passwd", "GET/missing.json", "GET/api/v1"):
+        got = parse(rule(action={"type": "mock", "status": 200, "mock_file": label}), mocks_dir=str(mocks))
+        assert getattr(got, "field", None) == "action.mock_file", label
+
+
+@pytest.mark.parametrize("method, path, request_path, matches", [
+    ("ANY", "/api/v1/orders", "/api/v1/orders", True),
+    ("GET", "/api/v1/orders", "/api/v1/orders", False),
+    ("POST", "/api/*", "/api/v1/orders/7", True),
+    ("POST", "*/orders", "/api/v1/orders", True),
+    ("POST", "/api/v1/orders", "/api/v1/orders?page=2", True),
+    ("POST", "/api/v1/orders?page=*", "/api/v1/orders?page=2", True),
+    ("POST", "/api/v1/orders?page=*", "/api/v1/orders", False),
+    ("POST", "/api/v1/order", "/api/v1/orders", False),
+    ("POST", "/API/v1/orders", "/api/v1/orders", False),
+])
+def test_matching_method_and_wildcard_paths(method, path, request_path, matches):
+    parsed = parse(rule(match={"method": method, "path": path}))
+    assert (qa_tools.mismatch(parsed.rules[0], post(request_path).request) is None) is matches
+
+
+def test_host_empty_matches_any_api_host_and_a_set_host_its_subdomains():
+    parsed = parse(rule(match={"host": HOST}), hosts=(HOST, "auth.example.com"))
+    assert qa_tools.mismatch(parsed.rules[0], make_flow("v2.api.example.com", method="POST", path="/api/v1/orders").request) is None
+    assert qa_tools.mismatch(parsed.rules[0], make_flow("auth.example.com", method="POST", path="/api/v1/orders").request)
+
+
+def test_body_contains_reads_a_gzip_body():
+    parsed = parse(rule(match={"body_contains": '"promoCode":"SUMMER25"'}))
+    flow = post(body=gzip.compress(b'{"promoCode":"SUMMER25"}'), headers={"Content-Encoding": "gzip"})
+    assert qa_tools.mismatch(parsed.rules[0], flow.request) is None
+    assert qa_tools.mismatch(parsed.rules[0], post(body=b'{"promoCode":"OTHER"}').request)
+
+
+@pytest.mark.parametrize("mode, n, expected", [
+    ("always", 0, [True, True, True, True]),
+    ("once", 0, [True, False, False, False]),
+    ("every_nth", 3, [False, False, True, False]),
+])
+def test_apply_modes_and_counters(tmp_path, mode, n, expected):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(apply={"mode": mode, "n": n}))
+
+    async def body(addon, tctx):
+        got = []
+        for _ in expected:
+            flow = post()
+            await addon.request(flow)
+            got.append(flow.response is not None)
+        assert got == expected
+        stats = addon.rule_stats()["orders500"]
+        assert stats["matches"] == 4 and stats["applied"] == expected.count(True) and stats["last_ts"]
+        assert addon.rearm("orders500") and addon.rule_stats()["orders500"]["matches"] == 0
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_first_applying_rule_wins_and_a_matching_one_that_does_not_apply_passes_on(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(id="oncefirst", apply={"mode": "once"}, action={"status": 501}),
+                rule(id="always2", action={"status": 502}), rule(id="never33", action={"status": 503}))
+
+    async def body(addon, tctx):
+        statuses = []
+        for _ in range(2):
+            flow = post()
+            await addon.request(flow)
+            statuses.append(flow.response.status_code)
+        assert statuses == [501, 502]
+        stats = addon.rule_stats()
+        assert (stats["oncefirst"]["matches"], stats["always2"]["matches"], stats["never33"]["matches"]) == (2, 1, 0)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_order_is_rules_then_faults_then_mocks(tmp_path, mocks):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(match={"method": "GET", "path": "/api/v1/profile"}, apply={"mode": "once"}))
+
+    async def body(addon, tctx):
+        statuses = []
+        for _ in range(2):
+            flow = make_flow()
+            await addon.request(flow)
+            statuses.append(flow.response.status_code)
+        tctx.configure(addon, qa_fault_status=0)
+        flow = make_flow()
+        await addon.request(flow)
+        statuses.append(flow.response.status_code)
+        assert statuses == [500, 418, 200]
+
+    scenario(body, qa_rules_file=str(file), qa_mocks_dir=str(mocks), qa_fault_filter="~u /profile",
+             qa_fault_status=418)
+
+
+def test_comment_parts_name_the_rule_and_its_effect(tmp_path, mocks):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(name="Orders; fail"),
+                rule(id="mockrule", match={"method": "GET", "path": "/api/v1/profile"},
+                     action={"type": "mock", "status": 200, "mock_file": "GET/api/v1/profile.json"}),
+                rule(id="droprule", match={"method": "ANY", "path": "/drop"}, action={"type": "drop"}))
+
+    async def body(addon, tctx):
+        status = post(headers={"X-Request-ID": "abc"})
+        await addon.request(status)
+        assert status.comment == "request-id: abc; rule: Orders, fail; fault: status 500"
+        assert status.marked == qa_tools.FAULT_MARK
+        mocked = make_flow()
+        await addon.request(mocked)
+        assert mocked.comment == "rule: Orders fail; mock: GET/api/v1/profile.json"
+        assert mocked.response.content == PROFILE and mocked.marked == qa_tools.MOCK_MARK
+        dropped = make_flow(path="/drop")
+        await addon.request(dropped)
+        assert "fault: dropped" in dropped.comment and dropped.error is not None
+
+    scenario(body, qa_rules_file=str(file), qa_mocks_dir=str(mocks))
+
+
+def test_rules_reload_when_the_file_changes_and_an_invalid_file_keeps_the_old_ones(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule())
+
+    async def body(addon, tctx):
+        assert [r.id for r in addon.rules.rules] == ["orders500"]
+        write_rules(file, rule(id="newrule1", action={"status": 503}))
+        addon._rules_checked -= qa_tools.RELOAD_CHECK_S
+        flow = post()
+        await addon.request(flow)
+        assert flow.response.status_code == 503
+        file.write_text('{"version": 1, "rules": [{"id": "x"}]}')
+        addon._rules_checked -= qa_tools.RELOAD_CHECK_S
+        flow = post()
+        await addon.request(flow)
+        assert flow.response.status_code == 503 and addon.rules_error
+        file.write_text("{not json")
+        assert addon.reload_rules() == "The rules file is not valid JSON"
+        assert [r.id for r in addon.rules.rules] == ["newrule1"]
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_a_request_keeps_its_rules_snapshot_across_a_delay(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(action={"delay_ms": 200}))
+
+    async def body(addon, tctx):
+        flow = post()
+        task = asyncio.create_task(addon.request(flow))
+        await asyncio.sleep(0.05)
+        write_rules(file, rule(action={"status": 503}))
+        assert addon.reload_rules() == ""
+        await task
+        assert flow.response.status_code == 500
+        assert "fault: delay 200 ms" in flow.comment
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_saving_new_content_resets_its_counters(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule())
+
+    async def body(addon, tctx):
+        await addon.request(post())
+        assert addon.rule_stats()["orders500"]["matches"] == 1
+        write_rules(file, rule(enabled=True, name="Renamed"))
+        addon.reload_rules()
+        assert addon.rule_stats()["orders500"]["matches"] == 0
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_testing_a_rule_changes_no_counter(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule())
+
+    async def body(addon, tctx):
+        flow = post()
+        got = addon.test_rule(rule(), flow)
+        assert got["matches"] is True and "500" in got["result"]
+        assert addon.rule_stats()["orders500"]["matches"] == 0 and flow.response is None
+        assert addon.test_rule(rule(match={"method": "GET"}), flow)["matches"] is False
+        assert "error" in addon.test_rule(rule(name=""), flow)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_a_missing_rules_file_means_no_rules(tmp_path):
+    async def body(addon, tctx):
+        assert addon.rules.rules == () and addon.rules_error == ""
+        flow = post()
+        await addon.request(flow)
+        assert flow.response is None
+
+    scenario(body, qa_rules_file=str(tmp_path / "missing.json"))
+
+
 # Logging and files
 
 def test_addon_logs_only_counts_and_states(caplog, mocks):
@@ -593,8 +867,8 @@ def test_addon_logs_only_counts_and_states(caplog, mocks):
         scenario(body, qa_mocks_dir=str(mocks), qa_fault_filter="~u /orders", qa_fault_status=500)
 
     messages = [r.getMessage() for r in caplog.records if r.name == qa_tools.__name__]
-    assert "Wiretrace QA: 1 API hosts, mocks on, faults on" in messages
-    assert "Wiretrace QA: 1 API hosts, mocks on, faults off" in messages
+    assert "Wiretrace QA: 1 API hosts, mocks on, faults on, 0 rules on" in messages
+    assert "Wiretrace QA: 1 API hosts, mocks on, faults off, 0 rules on" in messages
     text = " ".join(messages)
     for secret in (HOST, "secret-id", "orders", "profile", str(mocks)):
         assert secret not in text
@@ -708,6 +982,22 @@ def test_real_mitmdump_mocks_and_faults(tmp_path, mocks):
 
         assert proxy.get("/plain")[:2] == (200, b"backend")
         assert _Backend.hits == ["/plain"]
+    finally:
+        proxy.close()
+
+
+@needs_mitmdump
+def test_real_mitmdump_applies_a_rule_from_the_rules_file(tmp_path, mocks):
+    # Incident 2026-10-14: the rule value types must load in a `-s` script, not only in an import.
+    file = tmp_path / "rules" / "staging.json"
+    write_rules(file, rule(match={"method": "GET", "path": "/ruled*"}, apply={"mode": "once"},
+                           action={"status": 503, "body": '{"error": "ruled"}'}))
+    proxy = Proxy(tmp_path, mocks, f"qa_rules_file={file}")
+    try:
+        assert proxy.get("/ruled?x=1") == (503, b'{"error": "ruled"}', "application/json")
+        assert _Backend.hits == []
+        assert proxy.get("/ruled")[:2] == (200, b"backend")
+        assert _Backend.hits == ["/ruled"]
     finally:
         proxy.close()
 

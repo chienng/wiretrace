@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
 import { setForbiddenListener } from './api';
-import { FaultsDialog } from './components/FaultsDialog';
 import { LogsView } from './components/LogsView';
 import { ReportDialog } from './components/ReportDialog';
+import { RulesView } from './components/RulesView';
 import { SetupDialog } from './components/SetupDialog';
 import { TitleBar } from './components/TitleBar';
 import { Toast } from './components/Toast';
@@ -79,14 +79,11 @@ export function App() {
     <div className="app">
       <TitleBar newCount={newCount} />
       <main className="main">
-        {ui.view === 'traffic' ? (
-          <TrafficView flows={filtered} selected={selected} counts={counts} hosts={hosts} filterError={server.error} />
-        ) : (
-          <LogsView />
-        )}
+        {ui.view === 'traffic' && <TrafficView flows={filtered} selected={selected} counts={counts} hosts={hosts} filterError={server.error} />}
+        {ui.view === 'logs' && <LogsView />}
+        {ui.view === 'rules' && <RulesView />}
       </main>
       {ui.dialog === 'setup' && <SetupDialog />}
-      {ui.dialog === 'faults' && <FaultsDialog />}
       {ui.dialog === 'report' && <ReportDialog />}
       <Toast />
     </div>

@@ -42,6 +42,7 @@ QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
 APP_LOGS_ADDON = WIRETRACE_DIR / "addons" / "app_logs.py"
 UI_ADDON = WIRETRACE_DIR / "addons" / "wiretrace_ui.py"
 UI_PORT = 8081
+RULES_DIR = "rules"
 MITMWEB, WIRETRACE, NO_UI = "mitmweb", "wiretrace", "none"
 RECEIVER_HOST = "qa-logs.internal"
 RECEIVER_ALLOW_HOSTS = r"^qa-logs\.internal(:\d+)?$"
@@ -121,6 +122,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     for host in preset.api_hosts:
         cmd += ["--set", f"qa_api_hosts={host}"]
     cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
+    cmd += ["--set", f"qa_rules_file={rules_file(preset, wiretrace_dir).absolute()}"]
     cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
     cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
     # Receiver flows stay visible in mitmweb but are not saved: they would duplicate app.log.jsonl.
@@ -136,6 +138,11 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         option = "view_filter" if kind == MITMWEB else "dumper_filter"
         cmd += ["--set", f"{option}={preset.default_filter}"]
     return cmd
+
+
+def rules_file(preset: Preset, wiretrace_dir: Path = WIRETRACE_DIR) -> Path:
+    """`rules/<preset>.json`; it need not exist yet. The Wiretrace window writes it."""
+    return wiretrace_dir / RULES_DIR / f"{preset.name}.json"
 
 
 def har_command(bin_dir: Path, flows: Path, har: Path) -> list[str]:
@@ -189,8 +196,10 @@ def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
         lines.append(f"Mocks: none (add files under {shown_dir}<METHOD>/…)")
     if kind == MITMWEB:
         lines.append("Faults: mitmweb > Options > qa_fault_*")
-    elif kind == WIRETRACE:
-        lines.append("Faults: Wiretrace > Faults")
+    if kind == WIRETRACE:
+        lines.append(f"Rules: Wiretrace > Rules ({RULES_DIR}/{preset.name}.json)")
+    else:
+        lines.append(f"Rules: {RULES_DIR}/{preset.name}.json (edit it, or use --ui wiretrace)")
     lines.append(f"Device logs: {device_logs}")
     lines.append(f"App logs: POST https://{RECEIVER_HOST}/log → {session.APP_LOG}")
     if mode == "wireguard":

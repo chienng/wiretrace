@@ -193,6 +193,9 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           <button type="button" className="btn small" onClick={copyMock} disabled={!detail}>
             Copy as mock
           </button>
+          <button type="button" className="btn small" onClick={() => dispatch({ type: 'newRuleFrom', flow })} title="A rule for this method, host and path">
+            New rule
+          </button>
         </div>
         {mockNote && (
           <div className="mocknote">

@@ -40,6 +40,42 @@ export interface AppState {
   faults_on: boolean;
   mocks_dir: string;
   flow_count: number;
+  rules_on: number;
+}
+
+export type RuleAction = 'mock' | 'status' | 'delay' | 'drop';
+export type ApplyMode = 'always' | 'once' | 'every_nth';
+
+/** The rules file format (`version: 1`) of addons/qa_tools.py. */
+export interface Rule {
+  id: string;
+  name: string;
+  enabled: boolean;
+  match: { method: string; host: string; path: string; body_contains: string };
+  action: { type: RuleAction; status: number; body: string; mock_file: string; delay_ms: number };
+  apply: { mode: ApplyMode; n: number };
+}
+
+export interface RuleStats {
+  matches: number;
+  applied: number;
+  last_ts: number | null;
+}
+
+export interface RulesPayload {
+  revision: string;
+  rules: Rule[];
+  stats: Record<string, RuleStats>;
+  legacy_faults_on: boolean;
+  file: string;
+  error: string | null;
+  api_hosts: string[];
+}
+
+export interface RuleTestResult {
+  matches: boolean;
+  reason: string;
+  result: string | null;
 }
 
 export type LogSource = 'device' | 'app';
@@ -87,7 +123,8 @@ export interface FlowDetail {
 export type ServerMessage =
   | { type: 'flows'; flows: FlowSummary[] }
   | { type: 'logs'; lines: LogLine[] }
-  | { type: 'state'; state: AppState };
+  | { type: 'state'; state: AppState }
+  | { type: 'rules'; revision: string; stats: Record<string, RuleStats>; error: string | null };
 
 export interface ReportResult {
   ok: boolean;

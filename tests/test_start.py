@@ -449,12 +449,22 @@ def test_command_uses_the_preset_mocks_dir_and_header():
     assert "qa_request_id_header=X-Trace-Id" in cmd
 
 
+@pytest.mark.parametrize("ui", ["mitmweb", "wiretrace", "none"])
+def test_command_passes_the_preset_rules_file_for_every_ui(ui):
+    cmd = start.build_command(PRESET_WITH_FILTER, "proxy", ui, Path("/s/flows.mitm"), Path("/v/bin"),
+                              wiretrace_dir=Path("/d"))
+    assert [a for a in cmd if a.startswith("qa_rules_file=")] == ["qa_rules_file=/d/rules/staging.json"]
+    assert cmd[cmd.index("qa_rules_file=/d/rules/staging.json") - 1] == "--set"
+    assert start.rules_file(PRESET_WITH_FILTER, Path("/d")) == Path("/d/rules/staging.json")
+
+
 # Banner
 
 def test_banner_counts_mock_files_and_shows_a_relative_path():
     text = start.banner(PRESET_WITH_FILTER, "android", "proxy", True, Path("/s"), mock_count=3)
     assert "Mocks: 3 files in mocks/staging/" in text
     assert "Faults: mitmweb > Options > qa_fault_*" in text
+    assert "Rules: rules/staging.json (edit it, or use --ui wiretrace)" in text
     assert "/d/" not in text
 
 
@@ -462,6 +472,7 @@ def test_banner_without_mocks_or_mitmweb():
     text = start.banner(PRESET_WITH_FILTER, "android", "proxy", False, Path("/s"))
     assert "Mocks: none (add files under mocks/staging/<METHOD>/…)" in text
     assert "Faults:" not in text
+    assert "Rules: rules/staging.json (edit it, or use --ui wiretrace)" in text
 
 
 def test_count_mocks_counts_json_files_in_nested_folders(tmp_path):
@@ -1029,10 +1040,11 @@ def test_wiretrace_port_check_is_labelled_wiretrace_ui():
     assert checks("wireguard", "none") == [(51820, "WireGuard")]
 
 
-def test_wiretrace_banner_points_to_the_link_and_the_faults_dialog():
+def test_wiretrace_banner_points_to_the_link_and_the_rules_view():
     text = start.banner(PRESET_WITH_FILTER, "android", "wireguard", "wiretrace", Path("/s"), mock_count=2)
     assert "UI: Wiretrace (link below)" in text
-    assert "Faults: Wiretrace > Faults" in text
+    assert "Rules: Wiretrace > Rules (rules/staging.json)" in text
+    assert "Faults:" not in text
     assert "mitmweb" not in text
     assert "scan the QR code in Wiretrace > Setup" in text
     assert "Search: !~t image (every flow is still saved)" in text

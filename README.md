@@ -19,8 +19,10 @@ Current version: **0.7.1**.
   names to mask.
 - **Mocks from files.** A file `mocks/<preset>/<METHOD>/<path>.json` answers that request
   instead of the backend. Changes apply to the next request, without a restart.
-- **Fault injection.** Make matching requests fail with a status code, wait a number of
-  milliseconds, or drop the connection (`qa_fault_*` options).
+- **Rules.** Per request: answer with a mock or a status code, wait a number of
+  milliseconds, or drop the connection, always, once, or every Nth call. Edited in the
+  Wiretrace window's *Rules* view and saved in `rules/<preset>.json`. The older
+  `qa_fault_*` options still work in mitmweb.
 - **Device logs.** The app's own process log, collected next to the traffic: `adb logcat`
   for Android devices and emulators, `pymobiledevice3` for iPhones, `simctl` for the iOS
   Simulator. The log follows the app across restarts and reconnects.
@@ -96,7 +98,7 @@ already covers part of screens 1 to 3. Source and notes: [`mockups/`](mockups/RE
 | 1. Main window | Partly built in the preview window: traffic list, filters, detail panel, log strip. |
 | 2. Device and app logs | Partly built: log tabs, levels and search. Not yet: device picker, timeline. |
 | 3. Device setup wizard | Partly built: the preview's Setup panel shows the QR code and certificate steps. |
-| 4. Mock and fault rules editor | Not built yet. Today: mock files and `qa_fault_*` options. |
+| 4. Mock and fault rules editor | Built in the preview window: rule list, editor, test against a request, live counters, import and export. |
 | 5. Send a bug report to YouTrack or Jira | Not built yet. Today: `./wiretrace report` writes a zip. |
 | 6. Menu-bar app | Not built yet. |
 
@@ -112,7 +114,7 @@ already covers part of screens 1 to 3. Source and notes: [`mockups/`](mockups/RE
 
 ![Design mockup: device setup wizard](mockups/screens/03-device-setup-wizard.png)
 
-**4. Mock and fault rules editor** (design mockup, not built yet)
+**4. Mock and fault rules editor** (design mockup)
 
 ![Design mockup: mock and fault rules editor](mockups/screens/04-mock-fault-rules.png)
 

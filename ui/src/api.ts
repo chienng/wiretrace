@@ -1,4 +1,4 @@
-import type { AppState, FlowDetail, FlowSummary, Faults, LogLine, LogSource, ReportResult } from './types';
+import type { AppState, FlowDetail, FlowSummary, LogLine, LogSource, ReportResult, Rule, RulesPayload, RuleTestResult } from './types';
 
 export class ForbiddenError extends Error {
   constructor() {
@@ -8,9 +8,12 @@ export class ForbiddenError extends Error {
 
 export class ApiError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** The JSON error body, e.g. `{error, index, field}` from a rejected rules save. */
+  data: unknown;
+  constructor(status: number, message: string, data: unknown = null) {
     super(message);
     this.status = status;
+    this.data = data;
   }
 }
 
@@ -44,7 +47,7 @@ async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSi
       body && typeof body === 'object' && 'error' in body
         ? String((body as { error: unknown }).error)
         : `Request failed (${res.status})`;
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, body);
   }
   return body as T;
 }
@@ -59,8 +62,13 @@ export const api = {
   logs: async (source: LogSource) =>
     (await request<{ lines: LogLine[] }>(`/api/logs?source=${source}`)).lines,
   mocks: async () => (await request<{ files: string[] }>('/api/mocks')).files,
-  putFaults: (faults: Faults) =>
-    request<Faults>('/api/faults', { method: 'PUT', body: JSON.stringify(faults) }),
+  rules: () => request<RulesPayload>('/api/rules'),
+  putRules: (revision: string, rules: Rule[]) =>
+    request<RulesPayload>('/api/rules', { method: 'PUT', body: JSON.stringify({ revision, rules }) }),
+  testRule: (rule: Rule, flowId: string) =>
+    request<RuleTestResult>('/api/rules/test', { method: 'POST', body: JSON.stringify({ rule, flow_id: flowId }) }),
+  rearm: (id: string) =>
+    request<RulesPayload>(`/api/rules/${encodeURIComponent(id)}/rearm`, { method: 'POST', body: '{}' }),
   report: () => request<ReportResult>('/api/report', { method: 'POST', body: '{}' }),
   reveal: () => request<unknown>('/api/report/reveal', { method: 'POST', body: '{}' }),
 };

@@ -1,9 +1,9 @@
-"""Wiretrace window: a local web page with the traffic, the app's logs, setup, faults and the report.
+"""Wiretrace window: a local web page with the traffic, the app's logs, setup, rules and the report.
 
 A Tornado application on mitmproxy's own asyncio loop, so every hook and every request runs
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
-Spec: docs/specs/006-wiretrace-ui-first-slice.md.
+Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -17,6 +17,7 @@ import hmac
 import io
 import json
 import logging
+import os
 import re
 import secrets
 import subprocess
@@ -55,6 +56,8 @@ MAX_BODY_BYTES = 2 << 20
 MAX_COUNT_BYTES = 64 << 20
 CHUNK_BYTES = 1 << 20
 MAX_REQUEST_BYTES = 64 << 10
+# Rules carry bodies up to 1 MiB each; this larger limit is set only after the request passed the checks.
+MAX_RULES_REQUEST_BYTES = 32 << 20
 MAX_MOCK_FILES = 5_000
 BATCH_S = 0.1
 TAIL_S = 0.25
@@ -65,6 +68,8 @@ SNIFF_BYTES = 8192
 SOURCES = {"device": session.DEVICE_LOG, "app": session.APP_LOG}
 FAULT_OPTIONS = {"filter": "qa_fault_filter", "status": "qa_fault_status",
                  "delay_ms": "qa_fault_delay_ms", "drop": "qa_fault_drop"}
+NO_QA = "The QA addon is not loaded"
+NOT_JSON = object()
 FORBIDDEN_PAGE = ("<!doctype html><meta charset=utf-8><title>Wiretrace</title>"
                   "<p>Open the link printed in the Terminal.</p>")
 TEXT_TYPES = {"application/json", "application/xml", "application/javascript", "application/x-www-form-urlencoded",
@@ -322,6 +327,11 @@ def list_mocks(root: str) -> list[str]:
         return []
 
 
+def qa_rules_document(rules: list) -> dict:
+    """The rules file format of addons/qa_tools.py (`version: 1`)."""
+    return {"version": 1, "rules": list(rules)}
+
+
 def display_dir(path: str) -> str:
     """The folder relative to the wiretrace folder when it is inside it, else as given."""
     if not path:
@@ -421,6 +431,9 @@ class Hub:
             messages.append({"type": "logs", "lines": lines[i:i + CHUNK]})
         if changed:
             messages.append({"type": "state", "state": state()})
+        self.broadcast(messages)
+
+    def broadcast(self, messages: list[dict]) -> None:
         for message in messages:
             text = json_encode(message)
             for client in list(self.clients):
@@ -544,20 +557,81 @@ class Mocks(Guarded):
         self.write({"files": list_mocks(self.addon.mocks_dir())})
 
 
-class Faults(Guarded):
-    def put(self) -> None:
+@tornado.web.stream_request_body
+class LargeBody(Guarded):
+    """A JSON body up to MAX_RULES_REQUEST_BYTES; the limit is raised only once `Guarded.prepare` passed."""
+
+    def initialize(self, addon: WiretraceUI) -> None:
+        super().initialize(addon)
+        self._chunks: list[bytes] = []
+
+    def prepare(self) -> None:
+        Guarded.prepare(self)
+        if not self._finished and self.request.method in ("PUT", "POST"):
+            self.request.connection.set_max_body_size(MAX_RULES_REQUEST_BYTES)
+
+    def data_received(self, chunk: bytes) -> None:
+        if not self._finished:
+            self._chunks.append(chunk)
+
+    def json_body(self) -> object:
         try:
-            body = json.loads(self.request.body or b"null")
+            return json.loads(b"".join(self._chunks) or b"null")
         except ValueError:
+            return NOT_JSON
+
+
+class RulesApi(LargeBody):
+    def get(self) -> None:
+        self.write(self.addon.rules_payload())
+
+    def put(self) -> None:
+        body = self.json_body()
+        if body is NOT_JSON:
             return self.fail(400, "The body is not JSON")
-        problem = self.addon.faults_problem(body)
-        if problem:
-            return self.fail(400, problem)
-        try:
-            faults = self.addon.set_faults(body)
-        except exceptions.OptionsError as e:
-            return self.fail(400, str(e))
-        self.write(faults)
+        if not isinstance(body, dict) or not isinstance(body.get("revision"), str) or not isinstance(body.get("rules"), list):
+            return self.fail(400, "The body must be {revision, rules}")
+        status, payload = self.addon.save_rules(body["revision"], body["rules"])
+        self.set_status(status)
+        self.finish(payload)
+
+
+class RuleTest(LargeBody):
+    def post(self) -> None:
+        body = self.json_body()
+        if body is NOT_JSON:
+            return self.fail(400, "The body is not JSON")
+        if not isinstance(body, dict) or not isinstance(body.get("flow_id"), str):
+            return self.fail(400, "The body must be {rule, flow_id}")
+        live = self.addon.qatools()
+        if live is None:
+            return self.fail(503, NO_QA)
+        flow = self.addon.hub.flows.get(body["flow_id"])
+        if flow is None:
+            return self.fail(404, "Unknown request: it was never listed or has been dropped from memory.")
+        result = live.test_rule(body.get("rule"), flow)
+        if "error" in result:
+            self.set_status(400)
+        self.finish(result)
+
+
+class UnknownApi(Guarded):
+    """Any other /api/ path: 404 after the usual checks, rather than the static files' 405."""
+
+    def prepare(self) -> None:
+        Guarded.prepare(self)
+        if not self._finished:
+            self.fail(404, "Unknown API endpoint")
+
+
+class RuleRearm(Guarded):
+    def post(self, rule_id: str) -> None:
+        live = self.addon.qatools()
+        if live is None:
+            return self.fail(503, NO_QA)
+        if not live.rearm(rule_id):
+            return self.fail(404, "Unknown rule")
+        self.write(self.addon.rules_payload())
 
 
 class Report(Guarded):
@@ -612,6 +686,7 @@ class WiretraceUI:
         self.report_running = False
         self.last_report: Path | None = None
         self.started_at = time.time()
+        self._rules_sent: tuple = ()
         self._server: httpserver.HTTPServer | None = None
         self._tasks: list[asyncio.Task] = []
 
@@ -692,10 +767,13 @@ class WiretraceUI:
                 (r"/api/filter", Filter, handler_args),
                 (r"/api/logs", Logs, handler_args),
                 (r"/api/mocks", Mocks, handler_args),
-                (r"/api/faults", Faults, handler_args),
+                (r"/api/rules", RulesApi, handler_args),
+                (r"/api/rules/test", RuleTest, handler_args),
+                (r"/api/rules/([a-z0-9]{6,32})/rearm", RuleRearm, handler_args),
                 (r"/api/report", Report, handler_args),
                 (r"/api/report/reveal", Reveal, handler_args),
                 (r"/api/updates", Updates, handler_args),
+                (r"/api/.*", UnknownApi, handler_args),
                 (r"/(.*)", Assets, {**handler_args, "path": str(self.static_dir), "default_filename": "index.html"}),
             ],
             log_function=lambda handler: None,
@@ -734,6 +812,7 @@ class WiretraceUI:
         while True:
             await asyncio.sleep(BATCH_S)
             try:
+                self.flush_rules()
                 self.hub.flush(self.state)
             except Exception as e:
                 logger.error("Wiretrace UI: could not send updates (%s)", type(e).__name__)
@@ -777,6 +856,7 @@ class WiretraceUI:
         meta = self.meta()
         mode = meta.get("mode") if isinstance(meta.get("mode"), str) else ""
         faults = self.faults()
+        live = self.qatools()
         started = parse_ts(meta.get("started_at"))
         device_logs = meta.get("device_logs")
         return {
@@ -792,33 +872,81 @@ class WiretraceUI:
             "wireguard_conf": self.wireguard_conf() if mode != "proxy" else None,
             "mac_ip": local_ip.get_local_ip() if mode == "proxy" else None,
             "faults": faults,
-            "faults_on": bool(faults["filter"].strip()) and bool(faults["status"] or faults["delay_ms"] or faults["drop"]),
+            "faults_on": self.faults_on(faults),
             "mocks_dir": display_dir(self.mocks_dir()),
             "flow_count": len(self.hub.flows),
+            "rules_on": sum(1 for r in live.rules.rules if r.enabled) if live is not None else 0,
         }
 
-    @staticmethod
-    def faults_problem(body: object) -> str | None:
-        if not isinstance(body, dict):
-            return "The body must be a JSON object"
-        if not isinstance(body.get("filter"), str):
-            return "filter must be a string"
-        for key in ("status", "delay_ms"):
-            if not isinstance(body.get(key), int) or isinstance(body.get(key), bool):
-                return f"{key} must be a whole number"
-        if not isinstance(body.get("drop"), bool):
-            return "drop must be true or false"
-        return None
+    # Rules: the live QA addon validates and applies them; the window writes the file.
 
-    def set_faults(self, body: dict) -> dict:
-        """All four values at once: mitmproxy keeps the old ones if any is invalid (OptionsError)."""
-        if FAULT_OPTIONS["filter"] not in ctx.options:
-            raise exceptions.OptionsError("The fault options are not available: the QA addon is not loaded")
-        ctx.options.update(**{
-            "qa_fault_filter": body["filter"].strip(), "qa_fault_status": body["status"],
-            "qa_fault_delay_ms": body["delay_ms"], "qa_fault_drop": body["drop"]})
+    def qatools(self) -> Any:
+        try:
+            return ctx.master.addons.get("qatools")
+        except Exception:
+            return None
+
+    @staticmethod
+    def faults_on(faults: dict) -> bool:
+        return bool(faults["filter"].strip()) and bool(faults["status"] or faults["delay_ms"] or faults["drop"])
+
+    def rules_payload(self) -> dict:
+        live = self.qatools()
+        legacy = self.faults_on(self.faults())
+        if live is None:
+            return {"revision": "", "rules": [], "stats": {}, "legacy_faults_on": legacy, "file": "",
+                    "error": NO_QA, "api_hosts": []}
+        return {"revision": live.rules.revision, "rules": [r.data for r in live.rules.rules],
+                "stats": live.rule_stats(), "legacy_faults_on": legacy, "file": display_dir(live.rules_file),
+                "error": live.rules_error or None, "api_hosts": list(live.api_hosts)}
+
+    def save_rules(self, revision: str, rules: list) -> tuple[int, dict]:
+        """Invariants 2 and 3: validate first, then replace the file whole, then reload. Return status and body."""
+        live = self.qatools()
+        if live is None:
+            return 503, {"error": NO_QA}
+        if not live.rules_file:
+            return 409, {"error": "No rules file: start Wiretrace with ./wiretrace start"}
+        if revision != live.rules.revision:
+            return 409, {"error": "The rules changed since they were loaded. They have been reloaded; save again."}
+        checked = live.validate_rules(qa_rules_document(rules))
+        if "error" in checked:
+            return 400, checked
+        path = Path(live.rules_file)
+        tmp = path.with_name(f".{path.name}.{secrets.token_hex(4)}.tmp")
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            text = json.dumps(qa_rules_document(checked["rules"]), indent=2, ensure_ascii=True) + "\n"
+            tmp.write_text(text, encoding="utf-8")
+            os.replace(tmp, path)
+        except OSError:
+            return 500, {"error": "Could not write the rules file"}
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        error = live.reload_rules()
+        if error:
+            return 500, {"error": error}
         self.hub.state_changed()
-        return self.faults()
+        return 200, self.rules_payload()
+
+    def flush_rules(self) -> None:
+        """Tell the pages when counters, the rules or the file error changed; also picks up hand edits."""
+        live = self.qatools()
+        if live is None:
+            return
+        live.maybe_reload_rules()
+        marker = (live.stats_version, live.rules.revision, live.rules_error)
+        if marker == self._rules_sent:
+            return
+        if self._rules_sent and self._rules_sent[1] != marker[1]:
+            self.hub.state_changed()
+        self._rules_sent = marker
+        if self.hub.clients:
+            self.hub.broadcast([{"type": "rules", "revision": live.rules.revision, "stats": live.rule_stats(),
+                                 "error": live.rules_error or None}])
 
     async def make_report(self) -> dict:
         self.report_running = True

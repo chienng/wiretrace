@@ -434,9 +434,14 @@ mocks/staging/GET/index.json             answers GET /
 
 ### Make requests fail or slow
 
-To see how the app handles a failing or slow backend, start with mitmweb (the default, not
-`--no-ui`; faults are set in mitmweb's **Options** panel, which `--no-ui` does not have).
-Open **Options** and search for `qa_fault`:
+The easiest way is a rule in the Wiretrace window (`--ui wiretrace`): open *Rules* in the
+title bar, see *Rules* under *The Wiretrace window (preview)*. Rules are saved in
+`rules/<preset>.json` and apply with every UI, including mitmweb and `--no-ui`; you can also
+edit that file by hand, and Wiretrace picks up the change within a second. Rules are checked
+first, then the `qa_fault_*` options below, then mock files.
+
+With mitmweb (the default) you can still use its **Options** panel instead. Open
+**Options** and search for `qa_fault`:
 
 | Option | What it does |
 |---|---|
@@ -499,8 +504,8 @@ window shows requests with their tokens, and the phone's WireGuard configuration
 - **Title bar.** *Traffic* and *Logs* switch between the two views. It shows how long the
   session has been recording. *Pause* freezes the list while you read it and counts the new
   requests. *Clear* hides what is in the list now; everything is still saved to the session
-  folder. It also shows the preset, whether device logs are on, and buttons for *Faults*
-  (with the number of active faults), *Setup* and *Report bug*.
+  folder. It also shows the preset, whether device logs are on, and buttons for *Rules*
+  (with the number of rules that are on), *Setup* and *Report bug*.
 - **Sidebar.** Quick filters with live counts: *All*, *Errors* (status 400 or higher, or no
   answer), *Slow* (over one second), *Mocked*, *Faulted* and *WebSocket*. Below them are the
   preset's hosts with their counts.
@@ -516,7 +521,8 @@ window shows requests with their tokens, and the phone's WireGuard configuration
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
   that carry this request's ID). *Copy cURL* copies the request as a `curl` command. *Copy as
   mock* copies the response body and shows the file to create under `mocks/<preset>/` (see
-  *Mock a response*). Wiretrace does not write that file for you.
+  *Mock a response*). Wiretrace does not write that file for you. *New rule* opens the Rules
+  view with a rule for this request's method, host and path.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter
   and auto-scroll. Lines that carry the selected request's ID are highlighted. Click a line to
@@ -526,9 +532,21 @@ window shows requests with their tokens, and the phone's WireGuard configuration
   WireGuard app on the phone. In proxy mode, the address `<Mac IP>:<port>` for the phone's Wi-Fi
   proxy. It also lists the certificate steps, and *Traffic received* turns green when the first
   request arrives. The WireGuard configuration holds the phone's private key; do not share it.
-- **Faults.** The four `qa_fault_*` settings from *Make requests fail or slow*, in a form. If a
-  value is not valid, the window shows mitmproxy's message and keeps the previous settings. It
-  also lists your mock files, read only.
+- **Rules.** A list of rules on the left and the selected rule on the right. A rule matches a
+  method (or *ANY*), one of the preset's API hosts (or any of them), a path where `*` stands
+  for any text (`/api/*`; the query is ignored unless the path has a `?`), and optionally text
+  the request body contains. It then answers with a mock (a file from `mocks/<preset>/` or a
+  body you type in), answers with a status code, adds a delay, or drops the connection; a mock,
+  status or drop can also wait first. *Apply* is *Always*, *Once* (until it has applied; then
+  *Re-arm*) or *Every Nth* matching request. Rules are checked top to bottom: every rule that
+  is on and matches counts the request, and the first one that applies decides. The switch on
+  each row turns a rule on or off. *Test* checks the rule against the request selected in
+  Traffic without counting it. Each rule shows how often it matched and applied, and when it
+  last matched; the counters start again at zero when Wiretrace restarts or the rule changes.
+  *Import…* and *Export…* read and write a rules file. Saving checks every field and keeps the
+  previous rules if something is not valid; if the file changed in the meantime, the window
+  loads it again instead of overwriting it. A flow changed by a rule carries the comment
+  `rule: <name>` and the *FAULT* or *MOCK* badge.
 - **Report bug.** Runs the same report as `./wiretrace report` for the session running now, using
   the requests saved so far. The window shows the zip's name, the counts and the note to check
   the log lines before you share, and *Show in Finder* opens the folder with the zip selected.
@@ -536,7 +554,7 @@ window shows requests with their tokens, and the phone's WireGuard configuration
 Reloading the page, or a short break in the connection, loses nothing: the window shows
 *Reconnecting…* and loads everything again. The preview does not have a device picker, the
 log timeline, or earlier sessions yet. mitmweb's own Options panel is not part of this window;
-use *Faults* instead.
+use *Rules* instead. If `qa_fault_*` options are set anyway, the Rules view says so.
 
 ### Without the launcher
 

@@ -182,7 +182,10 @@ def test_every_page_api_and_asset_needs_the_cookie(cookie):
             response = await client.fetch(path, cookie=cookie)
             assert response.code == 403, path
             assert ui.token.encode() not in response.body
-        assert (await client.fetch("/api/faults", "PUT", cookie=cookie, body={})).code == 403
+        assert (await client.fetch("/api/rules", "PUT", cookie=cookie, body={})).code == 403
+        assert (await client.fetch("/api/rules/test", "POST", cookie=cookie)).code == 403
+        assert (await client.fetch("/api/rules/abcdef/rearm", "POST", cookie=cookie)).code == 403
+        assert (await client.fetch("/api/rules", cookie=cookie)).code == 403
         assert (await client.fetch("/api/report", "POST", cookie=cookie)).code == 403
         assert (await client.fetch("/api/report/reveal", "POST", cookie=cookie)).code == 403
         with pytest.raises(tornado.httpclient.HTTPClientError) as e:
@@ -238,18 +241,20 @@ def test_the_websocket_needs_the_right_origin(origin):
     scenario(body)
 
 
-def test_a_mutation_needs_the_x_wiretrace_header():
+def test_a_mutation_needs_the_x_wiretrace_header(tmp_path):
     async def body(ui, client, tctx):
-        good = {"filter": "", "status": 0, "delay_ms": 0, "drop": False}
-        assert (await client.fetch("/api/faults", "PUT", mutate=False, body=good)).code == 403
-        assert (await client.fetch("/api/faults", "PUT", headers={"X-Wiretrace": "0"}, mutate=False, body=good)).code == 403
+        good = {"revision": "", "rules": []}
+        assert (await client.fetch("/api/rules", "PUT", mutate=False, body=good)).code == 403
+        assert (await client.fetch("/api/rules", "PUT", headers={"X-Wiretrace": "0"}, mutate=False, body=good)).code == 403
+        assert (await client.fetch("/api/rules/test", "POST", mutate=False)).code == 403
+        assert (await client.fetch("/api/rules/abcdef/rearm", "POST", mutate=False)).code == 403
         assert (await client.fetch("/api/report", "POST", mutate=False)).code == 403
         assert (await client.fetch("/api/report/reveal", "POST", mutate=False)).code == 403
-        assert (await client.fetch("/api/faults", "PUT", body=good)).code == 200
+        assert (await client.fetch("/api/rules", "PUT", body=good)).code == 200
         # A method nothing handles still needs the header before it is told 405.
         assert (await client.fetch("/api/state", "DELETE", mutate=False)).code == 403
 
-    scenario(body)
+    rules_scenario(body, tmp_path)
 
 
 def test_security_headers_are_on_every_response():
@@ -629,84 +634,180 @@ def test_the_filter_message_is_the_parsers():
     scenario(body)
 
 
-# Faults
+# Rules (spec 008 slice A)
 
-GOOD = {"filter": "~u /api/v1/orders", "status": 500, "delay_ms": 0, "drop": False}
+RULE = {"id": "orders500", "name": "Orders fail", "enabled": True,
+        "match": {"method": "POST", "host": "", "path": "/api/v1/orders", "body_contains": ""},
+        "action": {"type": "status", "status": 500, "body": "", "mock_file": "", "delay_ms": 0},
+        "apply": {"mode": "always", "n": 0}}
 
 
-def test_a_valid_fault_change_is_applied_to_the_qa_addon_and_returned():
+def rule(**over) -> dict:
+    out = json.loads(json.dumps(RULE))
+    for key, value in over.items():
+        if isinstance(value, dict):
+            out[key].update(value)
+        else:
+            out[key] = value
+    return out
+
+
+def rules_scenario(body, tmp_path, **options):
+    scenario(body, qa_api_hosts=[HOST], qa_rules_file=str(tmp_path / "rules" / "staging.json"), **options)
+
+
+async def put_rules(client, rules, revision=None):
+    if revision is None:
+        revision = (await client.json("/api/rules"))["revision"]
+    return await client.fetch("/api/rules", "PUT", body={"revision": revision, "rules": rules})
+
+
+def test_rules_start_empty_and_say_where_the_file_is(tmp_path):
+    async def body(ui, client, tctx):
+        got = await client.json("/api/rules")
+        assert got == {"revision": "", "rules": [], "stats": {}, "legacy_faults_on": False,
+                       "file": str(tmp_path / "rules" / "staging.json"), "error": None, "api_hosts": [HOST]}
+        assert (await client.json("/api/state"))["rules_on"] == 0
+
+    rules_scenario(body, tmp_path)
+
+
+def test_a_valid_save_writes_the_file_whole_and_applies_at_once(tmp_path):
     async def body(ui, client, tctx):
         qa = tctx.master.addons.get("qatools")
-        response = await client.json("/api/faults", method="PUT", body={**GOOD, "filter": "  ~u /x  "})
-        assert response == {"filter": "~u /x", "status": 500, "delay_ms": 0, "drop": False}
-        assert (ctx.options.qa_fault_filter, ctx.options.qa_fault_status) == ("~u /x", 500)
-        assert qa._snapshot.faults.on
-        state = await client.json("/api/state")
-        assert state["faults"] == response and state["faults_on"] is True
-        await client.json("/api/faults", method="PUT", body={"filter": "", "status": 0, "delay_ms": 0, "drop": False})
-        assert (await client.json("/api/state"))["faults_on"] is False
-        assert not qa._snapshot.faults.on
+        response = await put_rules(client, [rule(), rule(id="second1", enabled=False)])
+        assert response.code == 200, response.body
+        saved = json.loads(response.body)
+        assert [r["id"] for r in saved["rules"]] == ["orders500", "second1"] and saved["revision"]
+        file = tmp_path / "rules" / "staging.json"
+        assert json.loads(file.read_text())["rules"] == saved["rules"]
+        assert sorted(p.name for p in file.parent.iterdir()) == ["staging.json"]
+        assert [r.id for r in qa.rules.rules] == ["orders500", "second1"]
+        assert (await client.json("/api/state"))["rules_on"] == 1
 
-    scenario(body)
+    rules_scenario(body, tmp_path)
 
 
-@pytest.mark.parametrize("bad, message", [
-    ({"status": 700}, "qa_fault_status must be 0 (off) or 100 to 599"),
-    ({"status": 99}, "qa_fault_status must be 0 (off) or 100 to 599"),
-    ({"delay_ms": -1}, "qa_fault_delay_ms must not be negative"),
-    ({"filter": "~~bad("}, "qa_fault_filter: Invalid filter expression"),
+@pytest.mark.parametrize("bad, field", [
+    ({"match": {"path": ""}}, "match.path"),
+    ({"match": {"host": "other.example.com"}}, "match.host"),
+    ({"action": {"status": 99}}, "action.status"),
+    ({"apply": {"mode": "every_nth", "n": 1}}, "apply.n"),
+    ({"id": "UPPER"}, "id"),
 ])
-def test_an_invalid_fault_change_is_a_400_and_changes_nothing(bad, message):
+def test_an_invalid_save_is_a_400_and_changes_neither_file_nor_engine(tmp_path, bad, field):
     async def body(ui, client, tctx):
         qa = tctx.master.addons.get("qatools")
-        await client.json("/api/faults", method="PUT", body={**GOOD, "delay_ms": 20, "drop": True})
-        before = await client.json("/api/state")
-        response = await client.fetch("/api/faults", "PUT", body={**GOOD, "delay_ms": 5, **bad})
-        assert response.code == 400 and message in json.loads(response.body)["error"]
-        after = await client.json("/api/state")
-        assert after["faults"] == before["faults"] == {**GOOD, "delay_ms": 20, "drop": True}
-        assert qa._snapshot.faults.delay_ms == 20 and qa._snapshot.faults.drop
+        assert (await put_rules(client, [rule()])).code == 200
+        before = (tmp_path / "rules" / "staging.json").read_bytes()
+        response = await put_rules(client, [rule(id="keep01"), rule(**bad)])
+        assert response.code == 400
+        assert json.loads(response.body)["index"] == 1 and json.loads(response.body)["field"] == field
+        assert (tmp_path / "rules" / "staging.json").read_bytes() == before
+        assert [r.id for r in qa.rules.rules] == ["orders500"]
 
-    scenario(body)
+    rules_scenario(body, tmp_path)
 
 
-@pytest.mark.parametrize("body_", [
-    None, [], "text", {}, {**GOOD, "filter": 3}, {**GOOD, "status": "500"}, {**GOOD, "status": 5.5},
-    {**GOOD, "status": True}, {**GOOD, "delay_ms": None}, {**GOOD, "drop": "yes"},
-    {k: v for k, v in GOOD.items() if k != "drop"},
-])
-def test_a_malformed_fault_body_is_a_400(body_):
+def test_a_save_with_a_stale_revision_is_a_409(tmp_path):
     async def body(ui, client, tctx):
-        response = await client.fetch("/api/faults", "PUT", body=json.dumps(body_))
-        assert response.code == 400 and json.loads(response.body)["error"]
-        assert ctx.options.qa_fault_status == 0
+        assert (await put_rules(client, [rule()])).code == 200
+        assert (await put_rules(client, [], revision="stale")).code == 409
+        assert len((await client.json("/api/rules"))["rules"]) == 1
 
-    scenario(body)
+    rules_scenario(body, tmp_path)
 
 
-def test_a_fault_body_that_is_not_json_is_a_400():
+@pytest.mark.parametrize("body_", ["{not json", "null", "[]", '{"rules": []}', '{"revision": "", "rules": {}}'])
+def test_a_malformed_rules_body_is_a_400(tmp_path, body_):
     async def body(ui, client, tctx):
-        assert (await client.fetch("/api/faults", "PUT", body="{not json")).code == 400
+        assert (await client.fetch("/api/rules", "PUT", body=body_)).code == 400
+        assert not (tmp_path / "rules").exists()
+
+    rules_scenario(body, tmp_path)
+
+
+def test_without_a_rules_file_a_save_is_refused():
+    async def body(ui, client, tctx):
+        assert (await client.fetch("/api/rules", "PUT", body={"revision": "", "rules": []})).code == 409
+
+    scenario(body, qa_api_hosts=[HOST])
+
+
+def test_testing_a_rule_says_what_the_app_gets_and_leaves_the_counters(tmp_path):
+    async def body(ui, client, tctx):
+        qa = tctx.master.addons.get("qatools")
+        assert (await put_rules(client, [rule()])).code == 200
+        flow = make_flow("/api/v1/orders", method="POST")
+        await qa.request(flow)
+        ui.request(flow)
+        stats = (await client.json("/api/rules"))["stats"]
+        assert stats["orders500"]["matches"] == 1
+        got = await client.json("/api/rules/test", method="POST", body={"rule": rule(), "flow_id": flow.id})
+        assert got["matches"] is True and "500" in got["result"]
+        miss = await client.json("/api/rules/test", method="POST",
+                                 body={"rule": rule(match={"method": "GET"}), "flow_id": flow.id})
+        assert miss["matches"] is False and miss["result"] is None
+        assert (await client.json("/api/rules"))["stats"] == stats
+        assert (await client.fetch("/api/rules/test", "POST", body={"rule": rule(), "flow_id": "nope"})).code == 404
+        assert (await client.fetch("/api/rules/test", "POST", body={"rule": rule(name=""), "flow_id": flow.id})).code == 400
+
+    rules_scenario(body, tmp_path)
+
+
+def test_rearm_resets_the_counters(tmp_path):
+    async def body(ui, client, tctx):
+        qa = tctx.master.addons.get("qatools")
+        assert (await put_rules(client, [rule(apply={"mode": "once"})])).code == 200
+        for _ in range(2):
+            await qa.request(make_flow("/api/v1/orders", method="POST"))
+        assert (await client.json("/api/rules"))["stats"]["orders500"]["applied"] == 1
+        got = await client.json("/api/rules/orders500/rearm", method="POST")
+        assert got["stats"]["orders500"] == {"matches": 0, "applied": 0, "last_ts": None}
+        assert (await client.fetch("/api/rules/unknown1/rearm", "POST")).code == 404
+
+    rules_scenario(body, tmp_path)
+
+
+def test_the_faults_endpoint_is_gone():
+    async def body(ui, client, tctx):
+        assert (await client.fetch("/api/faults", "PUT", body={})).code == 404
 
     scenario(body)
+
+
+def test_a_rule_body_near_1_mib_is_accepted_but_only_after_the_checks(tmp_path):
+    async def body(ui, client, tctx):
+        big = {"revision": "", "rules": [rule(action={"body": "x" * 900_000})]}
+        assert (await client.fetch("/api/rules", "PUT", cookie=False, body=big)).code in (403, 599)
+        assert (await client.fetch("/api/rules", "PUT", mutate=False, body=big)).code in (403, 599)
+        assert not (tmp_path / "rules").exists()
+        assert (await client.fetch("/api/rules", "PUT", body=big)).code == 200
+
+    rules_scenario(body, tmp_path)
 
 
 def test_a_body_over_the_limit_is_refused():
     async def body(ui, client, tctx):
-        response = await client.fetch("/api/faults", "PUT", body="x" * (wiretrace_ui.MAX_REQUEST_BYTES + 1))
+        response = await client.fetch("/api/report", "POST", body="x" * (wiretrace_ui.MAX_REQUEST_BYTES + 1))
         assert response.code in (400, 413, 599)
         assert (await client.fetch("/api/state")).code == 200
 
     scenario(body)
 
 
-def test_options_rollback_keeps_the_old_values_in_mitmproxy_itself():
+def test_a_hand_edited_invalid_file_keeps_the_rules_and_shows_the_error(tmp_path):
     async def body(ui, client, tctx):
-        await client.json("/api/faults", method="PUT", body=GOOD)
-        await client.fetch("/api/faults", "PUT", body={**GOOD, "status": 700, "filter": "~u /other"})
-        assert (ctx.options.qa_fault_filter, ctx.options.qa_fault_status) == (GOOD["filter"], 500)
+        assert (await put_rules(client, [rule()])).code == 200
+        file = tmp_path / "rules" / "staging.json"
+        tmp = file.with_suffix(".tmp")
+        tmp.write_text('{"version": 1, "rules": [{"id": "x"}]}')
+        os.replace(tmp, file)
+        await asyncio.sleep(qa_tools.RELOAD_CHECK_S + 0.3)
+        got = await client.json("/api/rules")
+        assert got["error"] and [r["id"] for r in got["rules"]] == ["orders500"]
 
-    scenario(body)
+    rules_scenario(body, tmp_path)
 
 
 # Mocks, state
@@ -1135,23 +1236,36 @@ def test_new_log_lines_arrive_on_the_socket(tmp_path):
     scenario(body, folder=folder)
 
 
-def test_a_fault_change_and_a_report_send_the_state(tmp_path, monkeypatch):
+def test_a_rules_save_and_a_report_send_the_state(tmp_path, monkeypatch):
     folder = write_session(tmp_path / "2026-10-14_090000_staging_android")
     monkeypatch.setattr(report, "create", lambda *a, **k: report.Created(folder / "r.zip", 1, 0, 0, 0, 0, 0, False))
 
     async def body(ui, client, tctx):
         socket_ = await client.socket()
-        await client.json("/api/faults", method="PUT", body=GOOD)
+        assert (await put_rules(client, [rule()])).code == 200
         state = (await read_until(socket_, lambda m: m["type"] == "state"))[-1]["state"]
-        assert state["faults"] == GOOD and state["faults_on"] is True
+        assert state["rules_on"] == 1
         await client.json("/api/report", method="POST")
         assert (await read_until(socket_, lambda m: m["type"] == "state"))[-1]["state"]["preset"] == "staging"
-        # A refused change sends nothing.
-        await client.fetch("/api/faults", "PUT", body={**GOOD, "status": 999})
-        await asyncio.sleep(0.3)
         socket_.close()
 
-    scenario(body, folder=folder)
+    rules_scenario(body, tmp_path, qa_ui_session_dir=str(folder))
+
+
+def test_rule_counters_reach_the_page_over_the_socket(tmp_path):
+    async def body(ui, client, tctx):
+        qa = tctx.master.addons.get("qatools")
+        assert (await put_rules(client, [rule()])).code == 200
+        socket_ = await client.socket()
+        while not ui.hub.clients:
+            await asyncio.sleep(0.01)
+        await qa.request(make_flow("/api/v1/orders", method="POST"))
+        message = (await read_until(
+            socket_, lambda m: m["type"] == "rules" and m["stats"]["orders500"]["matches"]))[-1]
+        assert message["stats"]["orders500"]["applied"] == 1 and message["error"] is None
+        socket_.close()
+
+    rules_scenario(body, tmp_path)
 
 
 def test_a_closed_socket_is_forgotten_and_nothing_is_kept_for_nobody():
