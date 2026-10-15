@@ -408,7 +408,7 @@ PRESET_WITH_FILTER = Preset(name="staging", api_hosts=("a.example.com", "b.examp
 def test_mitmweb_command_wireguard():
     cmd = start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"))
     assert cmd[:3] == ["/v/bin/mitmweb", "--mode", "wireguard"]
-    assert cmd.count("--allow-hosts") == 3
+    assert cmd.count("--allow-hosts") == 4
     assert cmd[cmd.index("--save-stream-file") + 1] == "/s/flows.mitm"
     assert "view_filter=!~t image" in cmd
     assert not any("dumper_filter" in arg for arg in cmd)
@@ -861,12 +861,32 @@ def test_command_loads_the_receiver_and_keeps_its_flows_out_of_the_session():
     scripts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-s"]
     assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON)] and start.APP_LOGS_ADDON.is_file()
     assert "qa_app_log_file=/s/app.log.jsonl" in cmd
-    assert r"save_stream_filter=!~d ^qa-logs\.internal$" in cmd
+    assert r"save_stream_filter=!~d ^qa-logs\.internal$ & !~d ^mitm\.it$" in cmd
     assert r"^qa-logs\.internal(:\d+)?$" in cmd
     assert all(cmd[i - 1] in ("--set", "--allow-hosts") for i, a in enumerate(cmd)
-               if a.startswith(("qa_app_log_file", "save_stream_filter")) or a == start.RECEIVER_ALLOW_HOSTS)
-    # The receiver is never an API host.
-    assert not any(a.startswith("qa_api_hosts=") and "qa-logs" in a for a in cmd)
+               if a.startswith(("qa_app_log_file", "save_stream_filter"))
+               or a in (start.RECEIVER_ALLOW_HOSTS, start.ONBOARDING_ALLOW_HOSTS))
+    # Neither the receiver nor the certificate page is ever an API host.
+    assert not any(a.startswith("qa_api_hosts=") and ("qa-logs" in a or "mitm.it" in a) for a in cmd)
+
+
+@pytest.mark.parametrize("mode", ["wireguard", "proxy"])
+@pytest.mark.parametrize("ui", [True, False, start.WIRETRACE])
+def test_command_lets_the_certificate_page_load_for_every_mode_and_ui(mode, ui):
+    # Regression: mitm.it was not in --allow-hosts, so the phone's browser reached the real site
+    # instead of mitmproxy's certificate page, and Part 2 needed a separate plain mitmweb.
+    cmd = start.build_command(PRESET_WITH_FILTER, mode, ui, Path("/s/flows.mitm"), Path("/v/bin"))
+    hosts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "--allow-hosts"]
+    assert start.ONBOARDING_ALLOW_HOSTS in hosts
+    assert not any(a.startswith(("onboarding=", "onboarding_host=")) for a in cmd)
+
+
+@pytest.mark.parametrize("authority, matches", [
+    ("mitm.it:80", True), ("mitm.it", True), ("MITM.IT:80", True), ("mitm.it:443", True),
+    ("www.mitm.it:80", False), ("xmitm.it:80", False), ("mitm.it.evil.io:80", False), ("mitm.itx:80", False),
+])
+def test_onboarding_allow_hosts_matches_that_host_only(authority, matches):
+    assert bool(re.search(start.ONBOARDING_ALLOW_HOSTS, authority, re.IGNORECASE)) is matches
     assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
 
 
@@ -882,15 +902,16 @@ def test_receiver_allow_hosts_matches_that_host_only(authority, matches):
 @pytest.mark.parametrize("host, saved", [
     ("qa-logs.internal", False), ("api.example.com", True), ("sub.qa-logs.internal", True),
     ("qa-logs.internal.evil.io", True), ("127.0.0.1", True),
+    ("mitm.it", False), ("www.mitm.it", True), ("mitm.it.evil.io", True),
 ])
-def test_save_filter_leaves_receiver_flows_out(host, saved):
+def test_save_filter_leaves_receiver_and_certificate_page_flows_out(host, saved):
     from mitmproxy import flowfilter
     from mitmproxy.test import tflow
 
     flow = tflow.tflow()
     flow.request.host = host
     flow.request.headers["Host"] = host
-    assert bool(flowfilter.parse(start.RECEIVER_SAVE_FILTER)(flow)) is saved
+    assert bool(flowfilter.parse(start.SAVE_FILTER)(flow)) is saved
 
 
 def app_preset(**app) -> Preset:

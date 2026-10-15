@@ -144,27 +144,24 @@ You need a **QA build** of the app: certificate pinning off, and on Android, use
 trusted (requirements R1 and R2 in [`PLAN.md`](../PLAN.md#7-requirements-for-the-mobile-development-team)).
 With a store or release build, HTTPS traffic cannot be decrypted.
 
-### Step 1 — Start Wiretrace with its web UI
+### Step 1 — Start Wiretrace
 
 ```bash
-cd ~/wiretrace && source .venv/bin/activate
-mitmweb --mode wireguard
+cd ~/wiretrace
+./wiretrace start --preset staging --target ios --ui wiretrace
 ```
 
-Use this plain command here, not `./wiretrace start`: the launcher decrypts only your
-preset's hosts, so the `mitm.it` page in Step 3 would not load through the tunnel.
-
-A browser tab opens with mitmweb. The first time, macOS may ask whether to allow
-incoming connections: click **Allow**.
-
-`source .venv/bin/activate` puts `mitmweb`, `mitmdump`, `mitmproxy` and
-`pymobiledevice3` on your `PATH` for that Terminal window. Do it in every new window.
+Use your preset and `--target`. The Wiretrace window opens in your browser. Without
+`--ui wiretrace` you get mitmweb instead, which shows the same QR code. The first time, macOS
+may ask whether to allow incoming connections: click **Allow**.
 
 ### Step 2 — Connect the phone
 
 1. Install the **WireGuard** app (App Store / Google Play).
-2. In WireGuard, add a tunnel by scanning the QR code that mitmweb shows.
-3. Turn the tunnel on.
+2. In WireGuard, add a tunnel by scanning the QR code: **Setup** in the Wiretrace window, or
+   the WireGuard panel in mitmweb.
+3. Turn the tunnel on. In WireGuard, tap the tunnel: *Endpoint* is your Mac's address with
+   port 51820, and *Latest handshake* shows a time a few seconds ago.
 
 The tunnel keys are stored in `~/.mitmproxy/wireguard.conf` and reused on every start, so
 you only scan the QR code once per device.
@@ -176,8 +173,9 @@ No browser? `mitmdump --mode wireguard` prints the same configuration as text
 ### Step 3 — Install and trust the Wiretrace certificate
 
 With the tunnel on, open `http://mitm.it` on the phone. This page is served by Wiretrace on
-your Mac, not by the internet. If it says *"traffic is not going through mitmproxy"*, the
-tunnel is off or not connected.
+your Mac, not by the internet, and it is not saved in the session. If it says *"traffic is not
+going through mitmproxy"*, or does not load, the tunnel is off or not connected: check
+*Latest handshake* (Step 2).
 
 **iPhone**
 
@@ -207,11 +205,11 @@ tunnel is off or not connected.
 
 ### Step 4 — Check
 
-Open the app on the phone. Its requests appear in mitmweb. If HTTPS requests show
-errors, see [Troubleshooting](#part-5--troubleshooting).
+Open the app on the phone. Its requests to the preset's hosts appear in the Traffic list (or in
+mitmweb). If HTTPS requests show errors, see [Troubleshooting](#part-5--troubleshooting).
 
-Then press **Ctrl+C** in the mitmweb window. `./wiretrace start` needs the same ports and
-does not start while this mitmweb is still running.
+You can keep this session running and go on with Part 3, or press **Ctrl+C** and start again
+later.
 
 ---
 
@@ -682,7 +680,7 @@ Rules for the app:
 | Symptom | Likely cause and fix |
 |---|---|
 | No requests appear at all | Tunnel off, or the phone cannot reach the Mac. Check WireGuard shows a recent handshake. Corporate or guest Wi-Fi often blocks device-to-device traffic: try a QA Wi-Fi or the Mac's hotspot. Check the firewall line in `./wiretrace doctor`. |
-| `mitm.it` says traffic is not going through mitmproxy | The tunnel is off or not connected, or Wiretrace was started with `./wiretrace start`, which does not serve `mitm.it` through the tunnel. Use the plain `mitmweb` command from Part 2, Step 1. |
+| `mitm.it` says traffic is not going through mitmproxy, or does not load | The tunnel is off or not connected. In WireGuard, tap the tunnel: *Endpoint* must be the Mac's current address with port 51820 (it changes when the Mac joins another network; scan the QR code again), and *Latest handshake* must be recent. An older `wiretrace` folder serves `mitm.it` only with a plain `mitmweb --mode wireguard`, not with `./wiretrace start`; update it. |
 | App shows "network error" or HTTPS requests fail, other apps work | The certificate is not trusted (iPhone: full trust step), the app pins certificates, or the Android build does not trust user CAs. Ask for a QA build (R1, R2). |
 | Requests show up but are not decrypted | The host is not in the preset's `api_hosts` (or, without the launcher, in `--allow-hosts`). Check the spelling. |
 | Some app's traffic is missing | That app ignores the phone's proxy settings: WireGuard mode normally catches it; if not, ask the mobile team (R7). |
@@ -701,7 +699,7 @@ Rules for the app:
 | `device.log.jsonl` is empty, or missing | The app wrote nothing while Wiretrace ran, or the process name or package in the preset is wrong. A file is created with the first line only. |
 | iOS logs show `<private>` | The app logs with `print()` or private values. Ask the mobile team (R4). |
 | `app.log.jsonl` is missing | The app sent nothing. Check in mitmweb whether requests to `qa-logs.internal` appear, and with which answer (`400`: the body is wrong). Check that Private DNS is off (WireGuard mode). The QA build must implement R6. |
-| `Port … in use by another program` when starting | Another Wiretrace or mitmproxy is still running, often the `mitmweb` from Part 2. Quit it (Ctrl+C in its window). |
+| `Port … in use by another program` when starting | Another Wiretrace or mitmproxy is still running, for example a session from Part 2 or a `mitmweb` you started yourself. Quit it (Ctrl+C in its window). |
 | `Unknown preset '…'. Available presets: …` | Check the spelling; the name is the file name in `presets/` without `.yaml`. To add one, see Part 1, Step 6. |
 | `presets/<name>.yaml: …` | The preset file has a mistake; the message says which field. Fix the file and start again. |
 | `Nothing was captured; the session folder was removed.` | No request and no log line reached Wiretrace before you stopped. See *No requests appear at all*. |

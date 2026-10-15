@@ -46,7 +46,10 @@ RULES_DIR = "rules"
 MITMWEB, WIRETRACE, NO_UI = "mitmweb", "wiretrace", "none"
 RECEIVER_HOST = "qa-logs.internal"
 RECEIVER_ALLOW_HOSTS = r"^qa-logs\.internal(:\d+)?$"
-RECEIVER_SAVE_FILTER = r"!~d ^qa-logs\.internal$"
+# mitmproxy's own certificate page; it is served only when the connection is intercepted.
+ONBOARDING_HOST = "mitm.it"
+ONBOARDING_ALLOW_HOSTS = r"^mitm\.it(:\d+)?$"
+SAVE_FILTER = r"!~d ^qa-logs\.internal$ & !~d ^mitm\.it$"
 # Which log source each target runs, and how the banner names it.
 DEVICE_LOGS = {"android": "android", "android-emu": "android", "ios": "ios", "ios-sim": "ios-sim"}
 DEVICE_LOG_NAMES = {"android": "Android", "ios": "iPhone", "ios-sim": "iOS Simulator"}
@@ -115,6 +118,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         cmd += ["--allow-hosts", regex]
     # Only the receiver host, no subdomains, so its HTTPS request is decrypted.
     cmd += ["--allow-hosts", RECEIVER_ALLOW_HOSTS]
+    cmd += ["--allow-hosts", ONBOARDING_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
     cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
     if kind == WIRETRACE:
@@ -125,8 +129,9 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     cmd += ["--set", f"qa_rules_file={rules_file(preset, wiretrace_dir).absolute()}"]
     cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
     cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
-    # Receiver flows stay visible in mitmweb but are not saved: they would duplicate app.log.jsonl.
-    cmd += ["--set", f"save_stream_filter={RECEIVER_SAVE_FILTER}"]
+    # Receiver and certificate-page flows stay visible in mitmweb but are not saved: the first would
+    # duplicate app.log.jsonl, the second is not app traffic.
+    cmd += ["--set", f"save_stream_filter={SAVE_FILTER}"]
     if kind == WIRETRACE:
         # The window is the only output; the token is made by the addon and never goes on a command line.
         cmd += ["--set", "flow_detail=0", "--set", f"qa_ui_port={ui_port}",
