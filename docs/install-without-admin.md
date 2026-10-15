@@ -50,39 +50,22 @@ The main thing to avoid is **Homebrew**: its standard installation requires an a
 
 ## Installation steps (Phase 1, standard user)
 
-### 1. Install `uv` and Python
+### 1. Get Wiretrace
+
+Follow steps 1 and 2 of the [README quick start](../README.md#quick-start): download the release `.tar.gz` and its `.sha256` from the Releases page, check the checksum, and unpack it into your home folder. This gives you `~/wiretrace`. It needs neither `git` nor the Xcode Command Line Tools (which need admin).
+
+### 2. Run the setup
 
 ```bash
-curl -LsSf https://astral.sh/uv/install.sh | sh
-exec zsh
-uv python install 3.12
-```
-
-`exec zsh` reloads the shell so `~/.local/bin` is on `PATH`.
-
-### 2. Get Wiretrace and install its dependencies
-
-```bash
-git clone https://gitlab.mycompany.com/qa/wiretrace.git ~/wiretrace
 cd ~/wiretrace
-uv venv --python 3.12
-uv pip install -r requirements.txt
+scripts/setup-mac.sh                 # add --skip-android if you only test iOS
 ```
 
-If `git` is not available (it is installed by the Xcode Command Line Tools, which need admin), download the repository as a zip from GitLab and unzip it into `~/wiretrace` instead.
+All inside your home folder, it installs `uv` into `~/.local/bin`, Python 3.12, the Python packages into `~/wiretrace/.venv`, and Android platform-tools into `~/tools/platform-tools`, then adds the `PATH` lines to `~/.zshrc`. It installs fixed versions of `uv` and platform-tools, downloaded from their GitHub / Google release URLs, and checks each file against a SHA-256 checksum stored in the script before installing it; no downloaded script is executed. It can be run again safely. It never asks for a password; do not run it with `sudo`. Open a new Terminal window afterwards so the `PATH` changes apply.
 
-### 3. Install Android platform-tools (only for Android testing)
+Do not install the Python packages by hand with `uv pip install -r requirements.txt`. The setup also applies `overrides.txt`, which installs fixed versions of `cryptography`, `h2`, `tornado` and `msgpack` in place of releases with known vulnerabilities.
 
-```bash
-mkdir -p ~/tools && cd ~/tools
-curl -LO https://dl.google.com/android/repository/platform-tools-latest-darwin.zip
-unzip -q platform-tools-latest-darwin.zip && rm platform-tools-latest-darwin.zip
-echo 'export PATH="$HOME/tools/platform-tools:$PATH"' >> ~/.zshrc
-exec zsh
-adb version
-```
-
-### 4. Check the setup
+### 3. Check the setup
 
 ```bash
 cd ~/wiretrace
@@ -98,7 +81,7 @@ cd ~/wiretrace
 - Whether the macOS firewall is on, blocks all incoming connections, or blocks Wiretrace's Python.
 - How many phones are visible over USB (`adb devices`, `pymobiledevice3 usbmux list`). Only counts are shown, never serial numbers or UDIDs.
 
-`scripts/setup-mac.sh` in the repo runs steps 1–4 automatically and can be run again safely. Unlike the manual steps above, it installs fixed versions of `uv` and platform-tools, downloaded from their GitHub / Google release URLs, and checks each file against a SHA-256 checksum stored in the script before installing it; no downloaded script is executed. Use `--skip-android` to skip step 3. It never asks for a password; do not run it with `sudo`.
+The setup runs this check at the end; run `./wiretrace doctor` again after fixing a `FAIL` line.
 
 ### Gatekeeper ("app can't be opened")
 
@@ -147,7 +130,7 @@ Recommended request to IT:
 
 Before rolling out, test the complete flow on a **standard (non-admin) account** on a company Mac:
 
-- [ ] Steps 1–4 complete without any password prompt.
+- [ ] Steps 1–3 complete without any password prompt.
 - [ ] `mitmweb --mode wireguard` starts and the macOS firewall does not block it (or IT rule works).
 - [ ] An iPhone and an Android phone connect via WireGuard and show decrypted API traffic.
 - [ ] `adb logcat` streams Android app logs.
