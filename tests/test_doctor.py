@@ -185,7 +185,8 @@ def test_setup_installs_with_the_dependency_overrides():
     script = (root / "scripts" / "setup-mac.sh").read_text()
     assert "--overrides overrides.txt" in script
     overrides = (root / "overrides.txt").read_text()
-    assert "cryptography>=50.0.0,<=50.0.2" in overrides
+    assert 'cryptography>=50.0.0,<=50.0.2; platform_machine == "arm64"' in overrides
+    assert 'cryptography>=48.0.1,<49; platform_machine == "x86_64"' in overrides
     assert "h2>=4.4.1,<=4.4.1" in overrides
     assert "tornado>=6.5.9,<=6.5.10" in overrides
     assert "msgpack>=1.2.1" in overrides

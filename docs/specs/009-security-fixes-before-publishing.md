@@ -88,8 +88,10 @@ fixed versions of four dependencies, before the repo is published. Version 0.7.2
       `tornado` ≥ 6.5.9), so an existing install is upgraded. `msgpack` ≥ 1.2.1 stays in
       that file: 12.2.3 declares `msgpack` ≤ 1.1.2 and neither mitmproxy nor pymobiledevice3
       imports it; `main` dropped the dependency.
+- [ ] On an Intel Mac, `cryptography` stays at 48.0.1: 49.0.0 and later publish no Intel
+      macOS wheel, and setup installs wheels only. The README says so.
 - [ ] `uvx pip-audit` on the installed environment reports none of the 15 advisories found
-      on 2026-10-15.
+      on 2026-10-15 on Apple silicon; on an Intel Mac, only the three `cryptography` ones.
 
 ### All
 
@@ -103,9 +105,9 @@ fixed versions of four dependencies, before the repo is published. Version 0.7.2
    it starts create private files. `session.create` makes folders with mode `0o700` and
    sets `sessions/` to `0o700`.
 2. A new `-s` addon, `addons/proxy_guard.py`, loaded only in proxy mode, with options
-   `qa_proxy_clients` (addresses always accepted) and `qa_proxy_pin` (pin the first other
-   client). The launcher passes `127.0.0.1`, `::1` and any `--client` addresses, and pins
-   only when no `--client` is given.
+   `qa_proxy_clients` (addresses or ranges always accepted) and `qa_proxy_pin` (pin the first
+   other client). The launcher passes `127.0.0.0/8`, `::1` and any `--client` addresses, and
+   pins only when no `--client` is given.
 3. `mocks_dir` is checked with `resolve()` against the wiretrace folder, in the preset and
    again in the addon. Methods come from a fixed set.
 4. The bounded decoding now in `addons/wiretrace_ui.py` moves to `cli/bodies.py`, with a new
@@ -135,7 +137,7 @@ Rejected:
 State: `pinned: str | None`, set at most once per process; `refused: int`.
 
 1. `client_connected(client)`: `ip = normalize(client.peername[0])` (IPv4-mapped IPv6 to
-   IPv4). If `ip` is in `qa_proxy_clients`, or `ip == pinned`: accept. Else if
+   IPv4). If `ip` is in an address or range of `qa_proxy_clients`, or `ip == pinned`: accept. Else if
    `qa_proxy_pin` and `pinned is None`: `pinned = ip`, accept. Else: set `client.error`
    (mitmproxy closes the connection), `refused += 1`, print the line once when `refused == 1`.
 2. `server_connect(data)`: if the client's address is loopback, allow. Else resolve
@@ -226,3 +228,16 @@ Value types are `NamedTuple`, not `@dataclass` (a dataclass in a `-s` script fai
 `.venv/bin/python -m pytest` (the list above plus the existing tests), `npm --prefix ui test`.
 Runtime check: the manual test steps 2–6 on a real device, and a real start with the
 `mitmdump -r` HAR on a session containing a gzip bomb.
+
+## Errata
+
+2026-10-15, after implementation:
+
+- **Loopback.** The launcher passed only `127.0.0.1` and `::1`, so another `127.0.0.0/8`
+  address could take the pin. `qa_proxy_clients` now takes ranges and the launcher passes
+  `127.0.0.0/8`. Loopback stays an option rather than a rule inside the guard, so the
+  real-mitmdump test can still prove a refusal from `127.0.0.1`. Tests: every loopback
+  address is accepted and never pinned; a bad entry is an options error.
+- **Intel Macs.** `cryptography` 49.0.0 and later publish no Intel macOS wheel, so the
+  overrides now choose by `platform_machine`: 50.0.x on `arm64`, 48.0.1 on `x86_64`. The three
+  `cryptography` advisories stay open on Intel Macs; the README says so.

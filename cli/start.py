@@ -45,7 +45,7 @@ UI_ADDON = WIRETRACE_DIR / "addons" / "wiretrace_ui.py"
 PROXY_GUARD = WIRETRACE_DIR / "addons" / "proxy_guard.py"
 HAR_GUARD = WIRETRACE_DIR / "addons" / "har_guard.py"
 # The simulator and the emulator connect from the Mac itself. Always accepted in proxy mode.
-LOOPBACK_CLIENTS = ("127.0.0.1", "::1")
+LOOPBACK_CLIENTS = ("127.0.0.0/8", "::1")
 UI_PORT = 8081
 RULES_DIR = "rules"
 MITMWEB, WIRETRACE, NO_UI = "mitmweb", "wiretrace", "none"

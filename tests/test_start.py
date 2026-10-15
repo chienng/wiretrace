@@ -1190,7 +1190,7 @@ def test_main_sets_a_private_umask(monkeypatch):
 def test_proxy_guard_is_loaded_only_in_proxy_mode_and_pins_without_a_client():
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"))
     assert str(start.PROXY_GUARD) in cmd
-    assert "qa_proxy_clients=127.0.0.1" in cmd and "qa_proxy_clients=::1" in cmd
+    assert "qa_proxy_clients=127.0.0.0/8" in cmd and "qa_proxy_clients=::1" in cmd
     assert "qa_proxy_pin=true" in cmd
     wireguard = start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"))
     assert "proxy_guard" not in " ".join(wireguard) and "qa_proxy_" not in " ".join(wireguard)
@@ -1201,7 +1201,7 @@ def test_client_addresses_are_accepted_and_pinning_is_off():
                               clients=("192.168.1.20", "192.168.1.21"))
     assert "qa_proxy_clients=192.168.1.20" in cmd and "qa_proxy_clients=192.168.1.21" in cmd
     assert "qa_proxy_pin=false" in cmd
-    assert "qa_proxy_clients=127.0.0.1" in cmd
+    assert "qa_proxy_clients=127.0.0.0/8" in cmd
 
 
 def test_an_invalid_client_address_is_refused(tmp_path, capsys):

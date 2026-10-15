@@ -89,7 +89,7 @@ describe('rules', () => {
   });
 
   it('filters by text and type', () => {
-    const rules = [rule(), rule({ id: 'slowpay1', name: 'Slow pay', action: { type: 'delay', delay_ms: 10 } })];
+    const rules = [rule(), rule({ id: 'slowpay1', name: 'Slow pay', match: { path: '/api/v1/pay' }, action: { type: 'delay', delay_ms: 10 } })];
     expect(filterRules(rules, 'ORDERS', 'all').map((r) => r.id)).toEqual(['orders500']);
     expect(filterRules(rules, '', 'delay').map((r) => r.id)).toEqual(['slowpay1']);
     expect(filterRules(rules, 'orders', 'delay')).toEqual([]);

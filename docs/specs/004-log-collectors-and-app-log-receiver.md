@@ -163,8 +163,8 @@ redact). They remain visible in mitmweb, which shows whether the app is sending.
 Rejected: `--set connection_strategy=lazy` (one line, but for **all** traffic it turns an
 unreachable backend into a `502` from mitmproxy instead of a failed connection, and an
 invalid backend certificate into a later error — the app under test would see different
-failures than in production); a path on an API host such as `/__wiretrace/log` (without DV
-Lens running, the QA build would send its logs to the real backend).
+failures than in production); a path on an API host such as `/__wiretrace/log` (without
+Wiretrace running, the QA build would send its logs to the real backend).
 
 **Options** (registered in `load`):
 

@@ -2,7 +2,10 @@
 # Floors are the first releases that close the advisories. Without them, an existing
 # install of 12.2.3's pins still satisfies the ceiling and uv will not upgrade it.
 # Remove this file once a mitmproxy release carries these limits.
-cryptography>=50.0.0,<=50.0.2
+cryptography>=50.0.0,<=50.0.2; platform_machine == "arm64"
+# cryptography 49 and later publish no Intel macOS wheel, and setup installs wheels only.
+# 48.0.1 is the last one; its three advisories stay open on Intel Macs (README).
+cryptography>=48.0.1,<49; platform_machine == "x86_64"
 h2>=4.4.1,<=4.4.1
 tornado>=6.5.9,<=6.5.10
 # Declared by mitmproxy 12.2.3 (msgpack<=1.1.2) and imported by neither mitmproxy nor

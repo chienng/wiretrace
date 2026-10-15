@@ -49,6 +49,9 @@ before you share a report.
 ## Requirements
 
 - A Mac with macOS, Intel or Apple silicon. A standard (non-admin) account is enough.
+  On an Intel Mac, setup installs `cryptography` 48.0.1, the last release with an Intel
+  wheel, so its three advisories of 2026 (fixed in 49.0.0 and 50.0.0) stay open there. Apple
+  silicon gets the fixed release.
 - Internet access to `github.com`, `pypi.org` and `dl.google.com` during setup.
 - A test build of the app that trusts user-installed CA certificates and has certificate
   pinning turned off. Store builds cannot be decrypted.

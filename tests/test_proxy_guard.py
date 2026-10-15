@@ -43,7 +43,7 @@ class _Data:
 
 def guard(*clients: str, pin: bool = True) -> ProxyGuard:
     addon = ProxyGuard()
-    addon._clients = frozenset(proxy_guard.normalize(ip) for ip in clients)
+    addon._clients = proxy_guard.parse_clients(clients)
     addon._pin = pin
     return addon
 
@@ -90,6 +90,28 @@ def test_ipv4_mapped_ipv6_matches_the_ipv4_form():
     client = connect(addon, "::ffff:192.0.2.10")
     assert client.error is None
     assert proxy_guard.normalize("::ffff:192.0.2.10") == "192.0.2.10"
+
+
+@pytest.mark.parametrize("ip", ["127.0.0.1", "127.0.0.2", "127.255.255.254", "::1", "::ffff:127.0.0.5"])
+def test_every_loopback_address_is_accepted_and_never_pinned(ip):
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    client = connect(addon, ip)
+    assert client.error is None and addon.pinned is None and addon.refused == 0
+    phone = connect(addon, "192.0.2.10")
+    assert phone.error is None and addon.pinned == "192.0.2.10"
+
+
+def test_a_bad_client_entry_is_an_options_error():
+    from mitmproxy import exceptions
+    from mitmproxy.test import taddons
+
+    addon = ProxyGuard()
+    with taddons.context(addon) as tctx:
+        with pytest.raises(exceptions.OptionsError):
+            tctx.configure(addon, qa_proxy_clients=["not-an-ip"])
+        tctx.configure(addon, qa_proxy_clients=["127.0.0.0/8", "::1", "192.168.1.20"])
+        assert addon._listed("127.0.0.9") and addon._listed("192.168.1.20")
+        assert not addon._listed("192.168.1.21")
 
 
 # server_connect

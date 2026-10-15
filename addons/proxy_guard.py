@@ -1,9 +1,10 @@
 """Proxy mode: accept only this Mac and the device under test.
 
-Loaded only in proxy mode. Loopback (`127.0.0.1`, `::1`) is always passed in
-`qa_proxy_clients`, because that is how the iOS Simulator and the Android
-emulator connect. With `qa_proxy_pin`, the first other address is remembered
-for the rest of the process and every further address is closed.
+Loaded only in proxy mode. `qa_proxy_clients` takes addresses and ranges; the
+launcher always passes loopback (`127.0.0.0/8`, `::1`), because that is how the
+iOS Simulator and the Android emulator connect. With `qa_proxy_pin`, the first
+other address is remembered for the rest of the process and every further
+address is closed.
 
 A client that is not on this Mac cannot open a server connection to a loopback,
 link-local or unspecified address. Value types stay `NamedTuple`: a dataclass
@@ -17,7 +18,7 @@ import ipaddress
 from collections.abc import Sequence
 from typing import NamedTuple
 
-from mitmproxy import ctx
+from mitmproxy import ctx, exceptions
 
 REFUSAL = (
     "Proxy: refused a connection from another device. Only the first device that connected "
@@ -41,6 +42,11 @@ def normalize(host: str) -> str:
         return host
     mapped = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
     return str(mapped or address)
+
+
+def parse_clients(entries: Sequence[str]) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    """Each entry is an address or a range such as `127.0.0.0/8`. Raises ValueError on a bad entry."""
+    return tuple(ipaddress.ip_network(normalize(entry), strict=False) for entry in entries if entry)
 
 
 def _literal(host: str) -> str | None:
@@ -93,13 +99,14 @@ class ProxyGuard:
     def __init__(self) -> None:
         self.pinned: str | None = None
         self.refused = 0
-        self._clients: frozenset[str] = frozenset()
+        self._clients: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = ()
         self._pin = False
 
     def load(self, loader) -> None:
         loader.add_option(
             "qa_proxy_clients", Sequence[str], [],
-            "Client addresses always accepted. Loopback is included so the simulator and emulator work.",
+            "Client addresses or ranges always accepted, e.g. 127.0.0.0/8. "
+            "The launcher includes loopback so the simulator and emulator work.",
         )
         loader.add_option(
             "qa_proxy_pin", bool, False,
@@ -107,13 +114,23 @@ class ProxyGuard:
         )
 
     def configure(self, updated) -> None:
-        self._clients = frozenset(normalize(address) for address in ctx.options.qa_proxy_clients if address)
+        try:
+            self._clients = parse_clients(ctx.options.qa_proxy_clients)
+        except ValueError:
+            raise exceptions.OptionsError("qa_proxy_clients: each entry must be an IP address or range") from None
         self._pin = bool(ctx.options.qa_proxy_pin)
+
+    def _listed(self, ip: str) -> bool:
+        try:
+            address = ipaddress.ip_address(ip)
+        except ValueError:
+            return False
+        return any(address in network for network in self._clients)
 
     def client_connected(self, client) -> None:
         peer = getattr(client, "peername", None)
         ip = normalize(peer[0]) if peer else ""
-        if ip and (ip in self._clients or ip == self.pinned):
+        if ip and (self._listed(ip) or ip == self.pinned):
             return
         if ip and self._pin and self.pinned is None:
             self.pinned = ip
