@@ -6,7 +6,7 @@
   replaying requests, opening other sessions from disk. Needs a UI, code, security and privacy
   review and a runtime check.
 - **Repo**: wiretrace
-- **Status**: approved
+- **Status**: implemented
 - **Branch**: `feature/ui-mockups`
 - **Related**: [`mockups/`](../../mockups/README.md) screens 1–4; [`PLAN.md`](../../PLAN.md) §8
   U2–U8; spec 003 (fault options, mock files, flow comments), spec 004 (collectors, log files),
