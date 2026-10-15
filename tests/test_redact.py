@@ -86,10 +86,10 @@ def test_json_request_and_response_bodies_at_any_depth():
     body = json.dumps({"user": "ann", "password": "fake-pw", "data": [{"deep": {"refresh_token": "fake-r"}}]})
     entry = masked(request={"postData": {"mimeType": "application/json", "text": body}},
                    response={"content": {"mimeType": "application/json",
-                                         "text": json.dumps({"tokens": [{"id_token": "fake-i"}], "ok": True})}})
+                                         "text": json.dumps({"items": [{"id_token": "fake-i"}], "ok": True})}})
     assert json.loads(entry["request"]["postData"]["text"]) == {
         "user": "ann", "password": MASK, "data": [{"deep": {"refresh_token": MASK}}]}
-    assert json.loads(entry["response"]["content"]["text"]) == {"tokens": [{"id_token": MASK}], "ok": True}
+    assert json.loads(entry["response"]["content"]["text"]) == {"items": [{"id_token": MASK}], "ok": True}
 
 
 def test_form_body_text_and_params():
@@ -349,9 +349,9 @@ def test_semicolons_separate_query_pairs_too():
 
 
 def test_generic_token_names_are_masked_by_default():
-    body = json.dumps({"token": "fake", "apiKey": "fake", "secret": "fake", "login_token": "kept"})
+    body = json.dumps({"token": "fake", "apiKey": "fake", "secret": "fake", "login_token": "fake-login"})
     assert json.loads(redact_json_text(body, RULES)[0]) == {
-        "token": MASK, "apiKey": MASK, "secret": MASK, "login_token": "kept"}
+        "token": MASK, "apiKey": MASK, "secret": MASK, "login_token": MASK}
 
 
 def test_names_recorded_in_meta_are_added_and_bad_entries_ignored():
@@ -363,3 +363,72 @@ def test_names_recorded_in_meta_are_added_and_bad_entries_ignored():
 def test_unchanged_log_line_keeps_its_exact_text():
     line = '{"ts":1,  "message": "plain caf\\u00e9"}'
     assert mask_log_line(line, RULES) == line
+
+
+def test_new_field_names_and_stems_are_masked():
+    body = {
+        "otp": "123456", "pin": "9999", "code_verifier": "abc", "sessionId": "sid",
+        "newPassword": "a", "current_password": "b", "auth_token": "c", "sessionToken": "d",
+        "x-api-key": "e", "tokenCount": 3, "code": "invalid_grant", "name": "ada",
+    }
+    masked = json.loads(redact_json_text(json.dumps(body), RULES)[0])
+    for key in ("otp", "pin", "code_verifier", "sessionId", "newPassword", "current_password",
+                "auth_token", "sessionToken", "x-api-key", "tokenCount"):
+        assert masked[key] == MASK, key
+    assert masked["code"] == "invalid_grant" and masked["name"] == "ada"
+
+
+def test_code_is_masked_only_when_a_preset_adds_it():
+    text = json.dumps({"code": "invalid_grant"})
+    assert redact_json_text(text, RULES) == (text, 0)
+    rules = redact.rules_for(Preset(name="p", api_hosts=("a.example.com",), redact_fields=("code",)))
+    assert json.loads(redact_json_text(text, rules)[0])["code"] == MASK
+
+
+def test_new_headers_and_referer_are_masked():
+    entry = masked(request={
+        "headers": [
+            {"name": "X-Api-Key", "value": "k"},
+            {"name": "X-Auth-Token", "value": "t"},
+            {"name": "X-Amz-Security-Token", "value": "s"},
+            {"name": "X-Custom-Password", "value": "p"},
+            {"name": "Referer", "value": "https://a.example.com/cb?token=secret&ok=1"},
+            {"name": "Accept", "value": "*/*"},
+        ],
+    }, response={
+        "headers": [{"name": "Content-Location", "value": "https://a.example.com/x?session_id=abc&n=1"}],
+    })
+    values = header_values(entry["request"]["headers"])
+    assert values["X-Api-Key"] == values["X-Auth-Token"] == values["X-Amz-Security-Token"] == MASK
+    assert values["X-Custom-Password"] == MASK and values["Accept"] == "*/*"
+    assert "token=***" in values["Referer"] and "ok=1" in values["Referer"]
+    location = header_values(entry["response"]["headers"])["Content-Location"]
+    assert "session_id=***" in location and "n=1" in location
+
+
+def test_a_multipart_body_is_replaced_by_part_names():
+    mime = 'multipart/form-data; boundary=bound'
+    text = (
+        "--bound\r\nContent-Disposition: form-data; name=\"password\"\r\n\r\nsecret\r\n"
+        "--bound\r\nContent-Disposition: form-data; name=\"file\"; filename=\"a.bin\"\r\n\r\n"
+        "binary-secret\r\n--bound--\r\n"
+    )
+    entry = masked(request={"postData": {"mimeType": mime, "text": text}})
+    replaced = entry["request"]["postData"]["text"]
+    assert replaced == "Wiretrace: multipart body left out; parts: password, file"
+    assert "secret" not in replaced and "binary" not in replaced
+    again, count = redact_body(replaced, mime, RULES)
+    assert again == replaced and count == 0
+
+
+def test_jwt_and_matrix_tokens_are_masked_in_log_lines():
+    jwt = "eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.sig"
+    line = f"saw {jwt} and syt_abcdefghij in the log"
+    masked_line = mask_text(line, RULES)
+    assert jwt not in masked_line and "syt_" not in masked_line
+    assert masked_line.count(MASK) == 2
+    for prefix in ("syr_", "mat_", "mar_", "mct_", "mcr_"):
+        assert prefix not in mask_text(f"tok {prefix}abcdef", RULES)
+    record = json.dumps({"message": f"bearer-less {jwt}", "note": "syt_zzzzzzzz"})
+    loaded = json.loads(mask_log_line(record, RULES))
+    assert jwt not in loaded["message"] and "syt_" not in loaded["note"]

@@ -1,0 +1,7 @@
+# Versions mitmproxy 12.2.3 refuses, and that its main branch already allows (2026-10-15).
+# msgpack is the exception: 12.2.3 never imports it, and main no longer depends on it.
+# uv applies this file with `pip install --overrides` and so can widen those pins.
+cryptography>=50.0.0,<50.1
+h2==4.4.1
+tornado>=6.5.9,<=6.5.10
+msgpack>=1.2.1

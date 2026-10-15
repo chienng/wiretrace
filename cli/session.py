@@ -31,13 +31,26 @@ def timestamp(now: datetime | None = None) -> str:
     return (now or datetime.now().astimezone()).isoformat(timespec="seconds")
 
 
+def _owner_only(path: Path, mode: int) -> None:
+    """`mkdir` applies the umask, and an older sessions/ may be 0755. A symlink is left alone."""
+    if path.is_symlink():
+        return
+    os.chmod(path, mode)
+
+
 def create(preset: str, target: str, meta: dict, sessions_dir: Path = SESSIONS_DIR,
            now: datetime | None = None) -> Path:
-    """Create the folder and its meta.json. Raises FileExistsError if it already exists."""
+    """Create the folder and its meta.json. Raises FileExistsError if it already exists.
+
+    `sessions/` and the session folder are 0700, so a session recorded by an older
+    version is no longer readable by other users of this Mac either.
+    """
     now = now or datetime.now().astimezone()
     folder = sessions_dir / f"{now:%Y-%m-%d_%H%M%S}_{preset}_{target}"
     sessions_dir.mkdir(parents=True, exist_ok=True)
+    _owner_only(sessions_dir, 0o700)
     folder.mkdir()
+    _owner_only(folder, 0o700)
     write_meta(folder, {**meta, "started_at": timestamp(now)})
     return folder
 
@@ -50,6 +63,7 @@ def write_meta(folder: Path, meta: dict) -> None:
     tmp = folder / f".{META}.tmp"
     tmp.write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
     os.replace(tmp, folder / META)
+    _owner_only(folder / META, 0o600)
 
 
 def update_meta(folder: Path, **changes: object) -> None:

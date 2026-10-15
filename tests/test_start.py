@@ -859,7 +859,8 @@ def test_real_collector_through_the_launcher_with_a_fake_adb(launch):
 def test_command_loads_the_receiver_and_keeps_its_flows_out_of_the_session():
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"))
     scripts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-s"]
-    assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON)] and start.APP_LOGS_ADDON.is_file()
+    assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON), str(start.PROXY_GUARD)]
+    assert start.APP_LOGS_ADDON.is_file()
     assert "qa_app_log_file=/s/app.log.jsonl" in cmd
     assert r"save_stream_filter=!~d ^qa-logs\.internal$ & !~d ^mitm\.it$" in cmd
     assert r"^qa-logs\.internal(:\d+)?$" in cmd
@@ -887,7 +888,6 @@ def test_command_lets_the_certificate_page_load_for_every_mode_and_ui(mode, ui):
 ])
 def test_onboarding_allow_hosts_matches_that_host_only(authority, matches):
     assert bool(re.search(start.ONBOARDING_ALLOW_HOSTS, authority, re.IGNORECASE)) is matches
-    assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
 
 
 @pytest.mark.parametrize("authority, matches", [
@@ -1169,7 +1169,63 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
     assert e.value.code == 2
 
 
-def test_the_version_is_0_7_0():
+def test_the_version_is_0_7_2():
     from cli import __version__
 
-    assert __version__ == "0.7.1"
+    assert __version__ == "0.7.2"
+
+
+def test_main_sets_a_private_umask(monkeypatch):
+    import os
+    monkeypatch.setattr("cli.doctor.main", lambda: 0)
+    previous = os.umask(0o022)
+    try:
+        assert cli_main.main(["doctor"]) == 0
+        current = os.umask(0o022)
+        assert current == 0o077
+    finally:
+        os.umask(previous)
+
+
+def test_proxy_guard_is_loaded_only_in_proxy_mode_and_pins_without_a_client():
+    cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"))
+    assert str(start.PROXY_GUARD) in cmd
+    assert "qa_proxy_clients=127.0.0.1" in cmd and "qa_proxy_clients=::1" in cmd
+    assert "qa_proxy_pin=true" in cmd
+    wireguard = start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"))
+    assert "proxy_guard" not in " ".join(wireguard) and "qa_proxy_" not in " ".join(wireguard)
+
+
+def test_client_addresses_are_accepted_and_pinning_is_off():
+    cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
+                              clients=("192.168.1.20", "192.168.1.21"))
+    assert "qa_proxy_clients=192.168.1.20" in cmd and "qa_proxy_clients=192.168.1.21" in cmd
+    assert "qa_proxy_pin=false" in cmd
+    assert "qa_proxy_clients=127.0.0.1" in cmd
+
+
+def test_an_invalid_client_address_is_refused(tmp_path, capsys):
+    code = start.run("staging", clients=("not-an-ip",), presets_dir=tmp_path, sessions_dir=tmp_path / "sessions")
+    assert code == 1
+    assert "not-an-ip" in capsys.readouterr().err
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_har_command_loads_the_har_guard():
+    cmd = start.har_command(Path("/v/bin"), Path("/s/flows.mitm"), Path("/s/.flows.har.tmp"))
+    assert cmd[cmd.index("-s") + 1] == str(start.HAR_GUARD)
+    assert "-r" in cmd and any(arg.startswith("hardump=") for arg in cmd)
+
+
+def test_a_start_writes_flows_mitm_readable_only_by_the_owner(launch):
+    import os
+    previous = os.umask(0o077)
+    try:
+        run = launch("normal")
+        run.wait_started()
+        os.kill(run.proc.pid, signal.SIGINT)
+        assert run.finish() == 0, run.output
+        [folder] = run.folders()
+        assert (folder / session.FLOWS).stat().st_mode & 0o777 == 0o600
+    finally:
+        os.umask(previous)

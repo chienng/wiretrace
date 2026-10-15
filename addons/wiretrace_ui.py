@@ -14,7 +14,6 @@ from __future__ import annotations
 import asyncio
 import codecs
 import hmac
-import io
 import json
 import logging
 import os
@@ -24,15 +23,12 @@ import subprocess
 import sys
 import time
 import webbrowser
-import zlib
 from collections import deque
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import brotli
 import tornado.web
-import zstandard
 import tornado.websocket
 from mitmproxy import ctx, exceptions, flowfilter, http
 from tornado import httpserver, netutil
@@ -44,6 +40,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cli import __version__, report, session  # noqa: E402
+from cli import bodies  # noqa: E402
 from cli.preset import PRESETS_DIR  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -54,7 +51,6 @@ MAX_FLOWS = 10_000
 MAX_LOG_LINES = 50_000
 MAX_BODY_BYTES = 2 << 20
 MAX_COUNT_BYTES = 64 << 20
-CHUNK_BYTES = 1 << 20
 MAX_REQUEST_BYTES = 64 << 10
 # Rules carry bodies up to 1 MiB each; this larger limit is set only after the request passed the checks.
 MAX_RULES_REQUEST_BYTES = 32 << 20
@@ -172,83 +168,9 @@ def decode_prefix(data: bytes, content_type: str) -> str:
         return data.decode("utf-8", "replace")
 
 
-def _decompressor(encoding: str):
-    """A function `(raw, limit) -> output` that stops once `limit` bytes are out; None if not supported."""
-    if encoding == "gzip":
-        return lambda raw, limit: zlib.decompressobj(16 + zlib.MAX_WBITS).decompress(raw, limit)
-    if encoding == "deflate":
-        def deflate(raw: bytes, limit: int) -> bytes:
-            try:
-                return zlib.decompressobj().decompress(raw, limit)
-            except zlib.error:
-                return zlib.decompressobj(-zlib.MAX_WBITS).decompress(raw, limit)
-        return deflate
-    if encoding == "br":
-        return lambda raw, limit: brotli.Decompressor().process(raw, output_buffer_limit=limit)
-    if encoding == "zstd":
-        return lambda raw, limit: zstandard.ZstdDecompressor().stream_reader(io.BytesIO(raw)).read(limit)
-    return None
-
-
-def _zlib_size(raw: bytes, wbits: int) -> int:
-    d = zlib.decompressobj(wbits)
-    total = len(d.decompress(raw, CHUNK_BYTES))
-    while d.unconsumed_tail and total < MAX_COUNT_BYTES:
-        total += len(d.decompress(d.unconsumed_tail, CHUNK_BYTES))
-    return total
-
-
-def decoded_size(encoding: str, raw: bytes, known: int) -> int:
-    """The decoded size, counted in chunks up to MAX_COUNT_BYTES, so a compression bomb is never held in memory."""
-    if encoding in ("gzip", "deflate"):
-        attempts = [16 + zlib.MAX_WBITS] if encoding == "gzip" else [zlib.MAX_WBITS, -zlib.MAX_WBITS]
-        for wbits in attempts:
-            try:
-                return _zlib_size(raw, wbits)
-            except zlib.error:
-                continue
-        return known
-    if encoding == "zstd":
-        reader = zstandard.ZstdDecompressor().stream_reader(io.BytesIO(raw))
-        total = 0
-        while total < MAX_COUNT_BYTES and (chunk := reader.read(CHUNK_BYTES)):
-            total += len(chunk)
-        return total
-    if encoding == "br":
-        d = brotli.Decompressor()
-        total = len(d.process(raw, output_buffer_limit=CHUNK_BYTES))
-        while not d.is_finished() and total < MAX_COUNT_BYTES:
-            chunk = d.process(b"", output_buffer_limit=CHUNK_BYTES)
-            if not chunk:
-                break
-            total += len(chunk)
-        return total
-    return known
-
-
-def bounded_content(message: http.Message) -> tuple[bytes, int, bool]:
-    """Up to MAX_BODY_BYTES of the decoded body, its size, and whether it was cut."""
-    raw = message.raw_content or b""
-    encoding = message.headers.get("content-encoding", "").strip().lower()
-    if encoding in ("", "identity", "none"):
-        return raw[:MAX_BODY_BYTES], len(raw), len(raw) > MAX_BODY_BYTES
-    decompress = _decompressor(encoding)
-    if decompress is None:
-        return raw[:MAX_BODY_BYTES], len(raw), len(raw) > MAX_BODY_BYTES
-    try:
-        data = decompress(raw, MAX_BODY_BYTES + 1)
-    except Exception:
-        # As mitmproxy's get_content(strict=False): an undecodable body is shown as it travelled.
-        return raw[:MAX_BODY_BYTES], len(raw), len(raw) > MAX_BODY_BYTES
-    if len(data) <= MAX_BODY_BYTES:
-        return data, len(data), False
-    # Past MAX_COUNT_BYTES the size is a lower bound.
-    return data[:MAX_BODY_BYTES], decoded_size(encoding, raw, len(data)), True
-
-
 def body_info(message: http.Message) -> dict:
     """The body as text up to 2 MiB, or only its size when it is binary. Never decodes more than 2 MiB."""
-    data, size, truncated = bounded_content(message)
+    data, size, truncated = bodies.bounded_content(message, MAX_BODY_BYTES, MAX_COUNT_BYTES)
     if looks_binary(data, mime_of(message)):
         return {"text": None, "size": size, "truncated": False, "binary": True}
     if not truncated and not message.headers.get("content-encoding", "").strip():
@@ -317,14 +239,25 @@ def parse_log_line(raw: bytes, source: str, seq: int) -> dict | None:
 
 
 def list_mocks(root: str) -> list[str]:
+    """JSON files under `root`, at most MAX_MOCK_FILES of them, sorted. Symlinked folders are not entered."""
     if not root:
         return []
     base = Path(root)
+    found: list[str] = []
+    seen = 0
     try:
-        found = (p.relative_to(base).as_posix() for p in base.rglob("*.json") if p.is_file())
-        return sorted(found)[:MAX_MOCK_FILES]
+        for dirpath, dirnames, filenames in os.walk(base, followlinks=False):
+            dirnames[:] = [name for name in dirnames if not (Path(dirpath) / name).is_symlink()]
+            for name in filenames:
+                seen += 1
+                path = Path(dirpath) / name
+                if name.endswith(".json") and path.is_file():
+                    found.append(path.relative_to(base).as_posix())
+                if seen >= MAX_MOCK_FILES:
+                    return sorted(found)
+        return sorted(found)
     except OSError:
-        return []
+        return sorted(found)
 
 
 def qa_rules_document(rules: list) -> dict:

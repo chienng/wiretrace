@@ -11,7 +11,7 @@ from cli import report, session
 
 NOW = datetime(2026, 10, 14, 12, 0, 0)
 NAME = "2026-10-14_091500_staging_android"
-PRESET = "name: staging\napi_hosts:\n  - api.example.com\nredact:\n  headers: [X-Api-Key]\n  json_fields: [otp]\n"
+PRESET = "name: staging\napi_hosts:\n  - api.example.com\nredact:\n  headers: [X-Trace-Id]\n  json_fields: [otp]\n"
 
 
 def flow(path="/orders", status=200, comment="", request_headers=None, response_headers=None,
@@ -124,7 +124,7 @@ def test_summary_session_counts_and_masked_names(env):
     for expected in ("Preset: staging", "Target: android", "Mode: proxy", "Started: 2026-10-14T09:15:00+07:00",
                      "Ended: 2026-10-14T09:20:00+07:00", "Status: stopped", "Wiretrace version: 0.5.0",
                      "Requests: 2", "(status 400 or higher, or no response): 1", "Mocked by Wiretrace: 0",
-                     "Faulted by Wiretrace: 0", "Log lines: 3", "X-Api-Key", "Set-Cookie", "otp", "access_token"):
+                     "Faulted by Wiretrace: 0", "Log lines: 3", "X-Trace-Id", "Set-Cookie", "otp", "access_token"):
         assert expected in summary
 
 
@@ -289,7 +289,7 @@ def test_cut_off_with_no_complete_flow_and_logs_still_reports(env):
 
 def test_missing_preset_warns_and_applies_the_defaults(env, capsys):
     folder = make_session(env[0], [flow(
-        request_headers={"Authorization": "Bearer fake-token", "X-Api-Key": "fake-key"})],
+        request_headers={"Authorization": "Bearer fake-token", "X-Trace-Id": "fake-key"})],
         meta={"preset": "gone"})
     assert run(env) == 0
     err = capsys.readouterr().err
@@ -302,13 +302,13 @@ def test_missing_preset_warns_and_applies_the_defaults(env, capsys):
 
 
 def test_missing_preset_still_applies_the_rules_recorded_at_capture(env, capsys):
-    folder = make_session(env[0], [flow(request_headers={"X-Api-Key": "fake-key"})],
-                          meta={"preset": "gone", "redact": {"headers": ["X-Api-Key"], "json_fields": ["otp"]}})
+    folder = make_session(env[0], [flow(request_headers={"X-Trace-Id": "fake-key"})],
+                          meta={"preset": "gone", "redact": {"headers": ["X-Trace-Id"], "json_fields": ["otp"]}})
     assert run(env) == 0
     assert "recorded" in capsys.readouterr().err
     with open_zip(folder) as archive:
         assert "fake-key" not in member(archive, "flows.har")
-        assert "X-Api-Key" in member(archive, "summary.md")
+        assert "X-Trace-Id" in member(archive, "summary.md")
 
 
 def test_preset_that_no_longer_loads_warns(env, capsys):
@@ -319,8 +319,8 @@ def test_preset_that_no_longer_loads_warns(env, capsys):
 
 
 def test_preset_rules_are_used_as_they_are_now(env):
-    folder = make_session(env[0], [flow(request_headers={"X-Api-Key": "fake-key"})])
-    (env[1] / "staging.yaml").write_text(PRESET.replace("X-Api-Key", "X-Other"))
+    folder = make_session(env[0], [flow(request_headers={"X-Trace-Id": "fake-key"})])
+    (env[1] / "staging.yaml").write_text(PRESET.replace("X-Trace-Id", "X-Other"))
     assert run(env) == 0
     with open_zip(folder) as archive:
         assert "fake-key" in member(archive, "flows.har")
@@ -390,7 +390,7 @@ def test_failed_replace_leaves_no_temporary_file_and_keeps_the_old_zip(env, monk
 
 
 def test_report_hides_a_masked_request_id_header(env):
-    (env[1] / "staging.yaml").write_text(PRESET.replace("X-Api-Key", "X-Request-ID"))
+    (env[1] / "staging.yaml").write_text(PRESET.replace("X-Trace-Id", "X-Request-ID"))
     make_session(env[0], [flow("/boom", 500, request_headers={"X-Request-ID": "fake-id"})])
     assert run(env) == 0
     with open_zip(env[0] / NAME) as archive:
@@ -403,3 +403,27 @@ def test_report_command_is_registered():
     with pytest.raises(SystemExit) as info:
         cli_main.main(["report", "--help"])
     assert info.value.code == 0
+
+
+def test_a_report_of_a_gzip_bomb_keeps_the_placeholder(env):
+    import gzip
+    import os
+    from cli.bodies import HAR_LIMIT, PLACEHOLDER
+
+    bomb = flow(body=b"")
+    bomb.response.headers["Content-Encoding"] = "gzip"
+    bomb.response.headers["Content-Type"] = "text/plain"
+    bomb.response.raw_content = gzip.compress(b"X" * (HAR_LIMIT + 1))
+    folder = make_session(env[0], [bomb])
+    previous = os.umask(0o022)
+    try:
+        created = report.create(folder, env[1], now=NOW)
+    finally:
+        os.umask(previous)
+    assert created.requests == 1
+    assert created.zip.stat().st_mode & 0o777 == 0o600
+    with open_zip(folder) as archive:
+        har = json.loads(member(archive, "flows.har"))
+    content = har["log"]["entries"][0]["response"]["content"]
+    assert content["text"] == PLACEHOLDER
+    assert "X" * 100 not in content["text"]

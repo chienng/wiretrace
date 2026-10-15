@@ -5,10 +5,12 @@ import json
 import http.server
 import logging
 import os
+import shutil
 import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
@@ -47,6 +49,12 @@ def scenario(body, **options):
             await body(addon, tctx)
 
     asyncio.run(main())
+
+
+@pytest.fixture(autouse=True)
+def _wiretrace_root_is_the_test_folder(monkeypatch, tmp_path):
+    """Mock files in these tests live under tmp. Production still requires the checkout."""
+    monkeypatch.setattr(qa_tools, "WIRETRACE", tmp_path)
 
 
 @pytest.fixture
@@ -937,9 +945,12 @@ class Proxy:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.port = free_port()
         self.log = tmp_path / "mitmdump.log"
+        # The real process uses the checkout as the wiretrace folder, so the mocks must live inside it.
+        self.mocks_dir = Path(tempfile.mkdtemp(prefix=".test-mocks-", dir=ROOT))
+        shutil.copytree(mocks, self.mocks_dir, dirs_exist_ok=True)
         args = [str(VENV_BIN / "mitmdump"), "--mode", "regular", "--listen-port", str(self.port),
                 "--set", f"confdir={tmp_path / 'confdir'}", "-s", str(ROOT / "addons" / "qa_tools.py"),
-                "--set", "qa_api_hosts=127.0.0.1", "--set", f"qa_mocks_dir={mocks}"]
+                "--set", "qa_api_hosts=127.0.0.1", "--set", f"qa_mocks_dir={self.mocks_dir}"]
         for option in options:
             args += ["--set", option]
         with open(self.log, "w") as out:
@@ -964,6 +975,7 @@ class Proxy:
         self.proc.wait()
         self.server.shutdown()
         self.server.server_close()
+        shutil.rmtree(self.mocks_dir, ignore_errors=True)
 
 
 needs_mitmdump = pytest.mark.skipif(not (VENV_BIN / "mitmdump").exists(), reason="mitmdump is not in the venv")
@@ -1031,3 +1043,24 @@ def test_real_mitmdump_stops_quickly_while_a_request_is_delayed(tmp_path, mocks)
         assert len(outcome) == 1 and isinstance(outcome[0], OSError)
     finally:
         proxy.close()
+
+
+def test_lowercase_and_nonstandard_methods_serve_no_mock(mocks):
+    assert qa_tools.mock_file(str(mocks), "GET", "/api/v1/profile") is not None
+    for method in ("get", "trace", "TRACE", "CONNECT"):
+        assert qa_tools.mock_file(str(mocks), method, "/api/v1/profile") is None
+
+    async def body(addon, tctx):
+        for method in ("get", "TRACE"):
+            flow = make_flow(method=method)
+            await addon.request(flow)
+            assert flow.response is None
+
+    scenario(body, qa_mocks_dir=str(mocks))
+
+
+def test_a_mocks_dir_that_resolves_outside_the_wiretrace_folder_is_ignored(tmp_path):
+    link = tmp_path / "escape"
+    link.symlink_to("/")
+    assert qa_tools.mock_file(str(link), "GET", "/etc/passwd") is None
+    assert qa_tools.resolve_mock(str(link), "GET/etc/passwd.json") is None

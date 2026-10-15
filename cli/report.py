@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import NamedTuple
 
-from . import __version__, redact, session
+from . import __version__, bodies, redact, session
 from .preset import DEFAULT_REQUEST_ID_HEADER, PRESETS_DIR, PresetError, load_preset
 
 MAX_ROWS = 100
@@ -164,7 +164,12 @@ def read_flows(path: Path, rules: redact.Rules, request_id_header: str) -> Flows
         row = _row(flow, request_id_header, rules, notes)
         if row:
             rows.append(row)
-    har, _ = redact.redact_har(SaveHar().make_har(flows), rules)
+    copies = []
+    for flow in flows:
+        copy = flow.copy()
+        bodies.trim_oversized(copy)
+        copies.append(copy)
+    har, _ = redact.redact_har(SaveHar().make_har(copies), rules)
     return Flows(har, rows, len(flows), mocked, faulted, cut_off)
 
 
@@ -237,6 +242,7 @@ def write_zip(target: Path, name: str, members: dict[str, bytes], now: datetime)
                 info.external_attr = 0o644 << 16
                 archive.writestr(info, data)
         os.replace(tmp, target)
+        os.chmod(target, 0o600)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise

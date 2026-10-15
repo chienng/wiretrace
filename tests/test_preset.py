@@ -273,3 +273,17 @@ def test_redact_field_of_64_characters_is_good(tmp_path):
 def test_unknown_top_level_keys_stay_ignored_next_to_redact(tmp_path):
     p = load(tmp_path, GOOD + "reddact:\n  anything: 1\nredact:\n  headers: [X-Id]\n")
     assert p.redact_headers == ("X-Id",)
+
+
+def test_a_mocks_dir_symlink_outside_the_wiretrace_folder_is_refused(tmp_path):
+    root = tmp_path / "wiretrace"
+    presets = root / "presets"
+    presets.mkdir(parents=True)
+    (root / "mocks").mkdir()
+    (root / "mocks" / "out").symlink_to("/")
+    (presets / "staging.yaml").write_text(GOOD + "mocks_dir: mocks/out\n")
+    message = ""
+    with pytest.raises(PresetError) as info:
+        preset.load_preset("staging", presets)
+    message = str(info.value)
+    assert "mocks_dir" in message and "must be a folder inside the wiretrace folder" in message

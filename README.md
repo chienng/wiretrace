@@ -3,7 +3,7 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.7.1**.
+Current version: **0.7.2**.
 
 ## Features
 
@@ -60,12 +60,12 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 
 ## Quick start
 
-Download `wiretrace-0.7.1-macos.tar.gz` and its `.sha256` file from the Releases page, then:
+Download `wiretrace-0.7.2-macos.tar.gz` and its `.sha256` file from the Releases page, then:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.7.1-macos.tar.gz.sha256
-tar -xzf wiretrace-0.7.1-macos.tar.gz -C ~
+shasum -a 256 -c wiretrace-0.7.2-macos.tar.gz.sha256
+tar -xzf wiretrace-0.7.2-macos.tar.gz -C ~
 
 cd ~/wiretrace
 scripts/setup-mac.sh                 # add --skip-android if you only test iOS

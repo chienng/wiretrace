@@ -591,7 +591,8 @@ def test_mock_path_matches_where_the_qa_addon_looks(path, expected):
     assert wiretrace_ui.mock_path("mocks/staging", "GET", path) == f"mocks/staging/{expected}"
 
 
-def test_mock_path_is_a_file_the_qa_addon_would_serve(tmp_path):
+def test_mock_path_is_a_file_the_qa_addon_would_serve(tmp_path, monkeypatch):
+    monkeypatch.setattr(qa_tools, "WIRETRACE", tmp_path)
     root = tmp_path / "mocks"
     for path in ("/api/v1/profile?x=1", "/", "/a/b/"):
         relative = wiretrace_ui.mock_path("", "GET", path)
@@ -839,7 +840,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.7.1"
+        assert state["version"] == "0.7.2"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
@@ -1465,3 +1466,18 @@ def test_real_mitmdump_with_the_launchers_command(tmp_path, default_filter):
         if process.poll() is None:
             os.killpg(process.pid, signal.SIGKILL)
             process.wait()
+
+
+def test_list_mocks_stops_at_the_cap_and_skips_a_symlinked_folder(tmp_path, monkeypatch):
+    monkeypatch.setattr(wiretrace_ui, "MAX_MOCK_FILES", 3)
+    root = tmp_path / "mocks"
+    (root / "keep").mkdir(parents=True)
+    for name in ("c.json", "a.json", "b.json", "d.json"):
+        (root / "keep" / name).write_text("{}")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.json").write_text("{}")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    found = wiretrace_ui.list_mocks(str(root))
+    assert found == sorted(found) and len(found) == 3
+    assert all(not name.startswith("linked/") and "secret" not in name for name in found)

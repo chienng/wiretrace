@@ -104,10 +104,11 @@ def parse_preset(text: str, path: Path) -> Preset:
         raise PresetError(f"{where}: {problem}")
 
     mocks_dir = data.get("mocks_dir")
-    if mocks_dir is not None:
-        problem = mocks_dir_problem(mocks_dir)
-        if problem:
-            raise PresetError(f"{where}: 'mocks_dir' {problem}")
+    wiretrace = path.parent.parent
+    checked = mocks_dir if mocks_dir is not None else f"mocks/{name}"
+    problem = mocks_dir_problem(checked, wiretrace)
+    if problem:
+        raise PresetError(f"{where}: 'mocks_dir' {problem}")
 
     header = data.get("request_id_header")
     if header is not None:
@@ -162,14 +163,25 @@ def app_problem(app: dict) -> str | None:
     return None
 
 
-def mocks_dir_problem(value: object) -> str | None:
-    """Why `value` is not a folder inside the wiretrace folder, or None if it is one."""
+def mocks_dir_problem(value: object, root: Path | None = None) -> str | None:
+    """Why `value` is not a folder inside the wiretrace folder, or None if it is one.
+
+    `root` is the wiretrace folder. A path that is relative and free of `..` can still
+    leave that folder through a symlink, so the resolved path is checked too.
+    """
     if not isinstance(value, str) or not value:
         return "must be a folder path such as mocks/staging"
     if value.startswith(("/", "\\")) or PureWindowsPath(value).is_absolute():
         return "must be relative to the wiretrace folder, not an absolute path"
     if ".." in re.split(r"[/\\]", value):
         return "must not contain '..'"
+    base = (root if root is not None else PRESETS_DIR.parent).resolve()
+    try:
+        resolved = (base / value).resolve()
+    except OSError:
+        return "must be a folder inside the wiretrace folder"
+    if not resolved.is_relative_to(base):
+        return "must be a folder inside the wiretrace folder"
     return None
 
 

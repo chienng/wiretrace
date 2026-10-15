@@ -107,7 +107,8 @@ if [ ! -x .venv/bin/python ]; then
 fi
 # Wheels only: building from source needs a compiler, i.e. the Command Line Tools.
 # Bytecode up front, so the first doctor / mitmweb start is not slowed by it.
-"$UV" pip install --python .venv/bin/python --only-binary :all: --compile-bytecode -r requirements.txt
+"$UV" pip install --python .venv/bin/python --only-binary :all: --compile-bytecode \
+    --overrides overrides.txt -r requirements.txt
 
 if [ "$skip_android" -eq 1 ]; then
     step "Android platform-tools: skipped (--skip-android)"

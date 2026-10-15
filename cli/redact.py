@@ -23,15 +23,38 @@ if TYPE_CHECKING:
     from .preset import Preset
 
 MASK = "***"
-DEFAULT_HEADERS = ("Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie")
+DEFAULT_HEADERS = ("Authorization", "Proxy-Authorization", "Cookie", "Set-Cookie",
+                   "X-Api-Key", "X-Auth-Token", "X-Amz-Security-Token")
 DEFAULT_FIELDS = ("password", "access_token", "refresh_token", "id_token", "client_secret",
-                  "token", "api_key", "secret")
+                  "token", "api_key", "secret", "otp", "pin", "code_verifier", "session_id")
+# A field or header is also masked when its normalized name contains one of these.
+# `code` is not here and not a default: error bodies use it for error codes.
+STEMS = ("password", "passwd", "passphrase", "secret", "token", "apikey",
+         "privatekey", "recoverykey", "credential")
 _FORM = "application/x-www-form-urlencoded"
+_MULTIPART = "multipart/form-data"
+_MULTIPART_NOTE = "Wiretrace: multipart body left out; parts: "
+_URL_HEADERS = frozenset({"location", "referer", "content-location"})
 _OPCODE_TEXT = 1
 
 
 def normalize(name: str) -> str:
     return name.lower().replace("_", "").replace("-", "")
+
+
+def _has_stem(name: str) -> bool:
+    normalized = normalize(name)
+    return any(stem in normalized for stem in STEMS)
+
+
+def field_secret(name: str, rules: Rules) -> bool:
+    """True when `name` is a listed field, or its normalized form contains a stem."""
+    return normalize(name) in rules.field_set or _has_stem(name)
+
+
+def header_secret(name: str, rules: Rules) -> bool:
+    """True when `name` is a listed header, or its normalized form contains a stem."""
+    return name.lower() in rules.header_set or _has_stem(name)
 
 
 @dataclass(frozen=True)
@@ -72,20 +95,20 @@ def with_names(rules: Rules, headers: object, fields: object) -> Rules:
 
 # Structured masking
 
-def _mask_json(node: object, fields: frozenset[str]) -> tuple[object, int]:
+def _mask_json(node: object, rules: Rules) -> tuple[object, int]:
     if isinstance(node, dict):
         out: dict = {}
         count = 0
         for key, value in node.items():
-            if isinstance(key, str) and normalize(key) in fields:
+            if isinstance(key, str) and field_secret(key, rules):
                 count += value != MASK
                 out[key] = MASK
             else:
-                out[key], inner = _mask_json(value, fields)
+                out[key], inner = _mask_json(value, rules)
                 count += inner
         return out, count
     if isinstance(node, list):
-        items = [_mask_json(item, fields) for item in node]
+        items = [_mask_json(item, rules) for item in node]
         return [item for item, _ in items], sum(count for _, count in items)
     return node, 0
 
@@ -103,7 +126,7 @@ def redact_json_text(text: str, rules: Rules) -> tuple[str, int]:
             return text, 0
         masked = mask_text(text, rules)
         return (masked, 1) if masked != text else (text, 0)
-    masked, count = _mask_json(data, rules.field_set)
+    masked, count = _mask_json(data, rules)
     if not count:
         return text, 0
     return json.dumps(masked, ensure_ascii=False), count
@@ -116,18 +139,45 @@ def _mask_pairs(query: str, rules: Rules) -> tuple[str, int]:
     count = 0
     for i in range(0, len(parts), 2):
         name, equals, value = parts[i].partition("=")
-        if equals and value != MASK and normalize(unquote_plus(name)) in rules.field_set:
+        if equals and value != MASK and field_secret(unquote_plus(name), rules):
             parts[i] = f"{name}={MASK}"
             count += 1
     return ("".join(parts), count) if count else (query, 0)
 
 
+def _part_names(text: str, mime: str) -> list[str]:
+    """The `name` of each part, in order. File contents are not read back out."""
+    found = re.search(r"""boundary\s*=\s*"?([^";\s]+)"?""", mime, re.IGNORECASE)
+    if not found:
+        return []
+    names = []
+    for part in re.split(r"(?:\r\n|\n|\r)--" + re.escape(found.group(1)), text):
+        header = re.split(r"\r\n\r\n|\n\n|\r\r", part, maxsplit=1)[0]
+        match = re.search(r"""\bname\s*=\s*(?:"([^"]*)"|([^;\s]+))""", header, re.IGNORECASE)
+        if match and "content-disposition" in header.lower():
+            names.append(match.group(1) if match.group(1) is not None else match.group(2))
+    return names
+
+
+def _redact_multipart(text: str, mime: str) -> tuple[str, int]:
+    if text.startswith(_MULTIPART_NOTE):
+        return text, 0
+    note = _MULTIPART_NOTE + ", ".join(_part_names(text, mime))
+    return note, 1
+
+
 def redact_body(text: str, mime: str | None, rules: Rules) -> tuple[str, int]:
-    """JSON first, then a URL-encoded form; any other format is left as it is."""
+    """JSON first, then a URL-encoded form. A multipart body is replaced by its part names.
+
+    Any other format is left as it is.
+    """
+    base = (mime or "").split(";")[0].strip().lower()
+    if base == _MULTIPART:
+        return _redact_multipart(text, mime or "")
     masked, count = redact_json_text(text, rules)
     if count:
         return masked, count
-    if (mime or "").split(";")[0].strip().lower() == _FORM:
+    if base == _FORM:
         return _mask_pairs(text, rules)
     return text, 0
 
@@ -160,10 +210,10 @@ def _mask_headers(headers: object, rules: Rules) -> int:
         name, value = header.get("name"), header.get("value")
         if not isinstance(name, str):
             continue
-        if name.lower() in rules.header_set:
+        if header_secret(name, rules):
             count += value != MASK
             header["value"] = MASK
-        elif name.lower() == "location" and isinstance(value, str):
+        elif name.lower() in _URL_HEADERS and isinstance(value, str):
             header["value"], inner = redact_url(value, rules)
             count += inner
     return count
@@ -183,7 +233,7 @@ def _mask_named(items: object, rules: Rules) -> int:
     count = 0
     for item in _entries(items):
         name = item.get("name")
-        if isinstance(name, str) and normalize(name) in rules.field_set and "value" in item:
+        if isinstance(name, str) and field_secret(name, rules) and "value" in item:
             count += item["value"] != MASK
             item["value"] = MASK
     return count
@@ -278,8 +328,16 @@ def _mask_pair_value(match: re.Match[str]) -> str:
     return f"{match.group('k')}{quote}{MASK}{quote}"
 
 
+# Case-sensitive: a JWT header starts with eyJ, and Matrix tokens use the lowercase prefixes.
+_TOKEN = re.compile(
+    r"eyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"
+    r"|(?<![A-Za-z0-9])(?:syt|syr|mat|mar|mct|mcr)_[A-Za-z0-9._~+/=-]+"
+)
+
+
 def mask_text(text: str, rules: Rules) -> str:
-    """Mask header lines, bearer tokens and `field=value` / `"field": value` pairs in free text."""
+    """Mask header lines, bearer tokens, JWTs, Matrix tokens and `field=value` pairs in free text."""
+    text = _TOKEN.sub(MASK, text)
     for pattern, repl in _text_patterns(rules):
         text = pattern.sub(repl, text)
     return text
@@ -303,7 +361,7 @@ def mask_log_line(line: str, rules: Rules) -> str:
         return mask_text(line, rules)
     if not isinstance(record, dict):
         return mask_text(line, rules)
-    keyed, _ = _mask_json(record, rules.field_set)
+    keyed, _ = _mask_json(record, rules)
     masked = _mask_strings(keyed, rules)
     if masked == record:
         return line

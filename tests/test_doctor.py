@@ -177,3 +177,15 @@ def test_python_version():
 def test_exit_code():
     assert doctor.exit_code([Result(OK, "a", ""), Result(WARN, "b", ""), Result(INFO, "c", "")]) == 0
     assert doctor.exit_code([Result(OK, "a", ""), Result(FAIL, "b", "")]) == 1
+
+
+def test_setup_installs_with_the_dependency_overrides():
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    script = (root / "scripts" / "setup-mac.sh").read_text()
+    assert "--overrides overrides.txt" in script
+    overrides = (root / "overrides.txt").read_text()
+    assert "cryptography>=50.0.0,<50.1" in overrides
+    assert "h2==4.4.1" in overrides
+    assert "tornado>=6.5.9,<=6.5.10" in overrides
+    assert "msgpack>=1.2.1" in overrides

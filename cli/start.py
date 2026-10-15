@@ -14,6 +14,7 @@ PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> AB
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import shutil
@@ -21,7 +22,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -41,6 +42,10 @@ WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
 APP_LOGS_ADDON = WIRETRACE_DIR / "addons" / "app_logs.py"
 UI_ADDON = WIRETRACE_DIR / "addons" / "wiretrace_ui.py"
+PROXY_GUARD = WIRETRACE_DIR / "addons" / "proxy_guard.py"
+HAR_GUARD = WIRETRACE_DIR / "addons" / "har_guard.py"
+# The simulator and the emulator connect from the Mac itself. Always accepted in proxy mode.
+LOOPBACK_CLIENTS = ("127.0.0.1", "::1")
 UI_PORT = 8081
 RULES_DIR = "rules"
 MITMWEB, WIRETRACE, NO_UI = "mitmweb", "wiretrace", "none"
@@ -105,9 +110,19 @@ def busy_ports(ports: list[tuple[str, str, int, str]]) -> list[doctor.Result]:
     return [r for r in (doctor.check_port(*p) for p in ports) if r.status == doctor.FAIL]
 
 
+def client_problem(addresses: Sequence[str]) -> str | None:
+    """Why a `--client` value is not an IP address, or None."""
+    for value in addresses:
+        try:
+            ipaddress.ip_address(value)
+        except ValueError:
+            return f"Invalid --client address {value!r}."
+    return None
+
+
 def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
                   proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-                  ui_port: int = UI_PORT) -> list[str]:
+                  ui_port: int = UI_PORT, clients: Sequence[str] = ()) -> list[str]:
     kind = ui_kind(ui)
     cmd = [str(bin_dir / ("mitmweb" if kind == MITMWEB else "mitmdump"))]
     if mode == "wireguard":
@@ -121,17 +136,25 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     cmd += ["--allow-hosts", ONBOARDING_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
     cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
+    if mode == "proxy":
+        cmd += ["-s", str(PROXY_GUARD)]
     if kind == WIRETRACE:
         cmd += ["-s", str(UI_ADDON)]
     for host in preset.api_hosts:
         cmd += ["--set", f"qa_api_hosts={host}"]
     cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
+    cmd += ["--set", f"qa_wiretrace_dir={Path(wiretrace_dir).resolve()}"]
     cmd += ["--set", f"qa_rules_file={rules_file(preset, wiretrace_dir).absolute()}"]
     cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
     cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
     # Receiver and certificate-page flows stay visible in mitmweb but are not saved: the first would
     # duplicate app.log.jsonl, the second is not app traffic.
     cmd += ["--set", f"save_stream_filter={SAVE_FILTER}"]
+    if mode == "proxy":
+        # Pinning is on only when the user did not name a device: the first other address is the one.
+        for address in (*LOOPBACK_CLIENTS, *clients):
+            cmd += ["--set", f"qa_proxy_clients={address}"]
+        cmd += ["--set", "qa_proxy_pin=" + ("false" if clients else "true")]
     if kind == WIRETRACE:
         # The window is the only output; the token is made by the addon and never goes on a command line.
         cmd += ["--set", "flow_detail=0", "--set", f"qa_ui_port={ui_port}",
@@ -151,7 +174,9 @@ def rules_file(preset: Preset, wiretrace_dir: Path = WIRETRACE_DIR) -> Path:
 
 
 def har_command(bin_dir: Path, flows: Path, har: Path) -> list[str]:
-    return [str(bin_dir / "mitmdump"), "-n", "-r", str(flows), "--set", f"hardump={har}"]
+    # har_guard runs before mitmproxy's savehar, so the HAR is built from trimmed flows.
+    return [str(bin_dir / "mitmdump"), "-n", "-s", str(HAR_GUARD), "-r", str(flows),
+            "--set", f"hardump={har}"]
 
 
 def collector_command(preset: Preset, target: str, bin_dir: Path, out: Path, *,
@@ -229,7 +254,12 @@ def _mitmproxy_version() -> str | None:
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool | str = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
         bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-        ui_port: int = UI_PORT, collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
+        ui_port: int = UI_PORT, clients: Sequence[str] = (),
+        collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
+    problem = client_problem(clients)
+    if problem:
+        say(problem, err=True)
+        return 1
     try:
         preset = load_preset(preset_name, presets_dir)
     except PresetError as e:
@@ -284,7 +314,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             device_logs = f"off ({problem})"
         say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs))
         return supervise(
-            build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port),
+            build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients),
             har_command(bin_dir, flows, folder / session.HAR_TMP),
             folder,
             stops,
@@ -473,6 +503,7 @@ def write_masked_har(har_cmd: list[str], folder: Path, rules: redact.Rules, stop
                 return "could not mask it"
             masked.write_text(json.dumps(redact.redact_har(har, rules)[0], indent=4), encoding="utf-8")
             os.replace(masked, folder / session.HAR)
+            os.chmod(folder / session.HAR, 0o600)
         except Exception:
             # Whatever went wrong, flows.har must not exist unmasked.
             return "could not mask it"

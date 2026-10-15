@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -134,3 +135,17 @@ def test_list_sessions_is_oldest_first_and_skips_other_entries(tmp_path):
 def test_create_names_match_the_pattern(tmp_path):
     folder = session.create("my_preset-2", "ios-sim", {}, tmp_path, now=NOW.astimezone())
     assert session.started(folder.name) == NOW
+
+
+def test_create_is_private_even_when_the_umask_is_permissive(tmp_path):
+    previous = os.umask(0o022)
+    try:
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        sessions.chmod(0o755)
+        folder = session.create("staging", "android", {}, sessions, now=NOW.astimezone())
+        assert sessions.stat().st_mode & 0o777 == 0o700
+        assert folder.stat().st_mode & 0o777 == 0o700
+        assert (folder / session.META).stat().st_mode & 0o777 == 0o600
+    finally:
+        os.umask(previous)

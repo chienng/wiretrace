@@ -44,6 +44,7 @@ MAX_RULE_BODY = 1 << 20
 MAX_RULE_DELAY_MS = 120_000
 MIN_NTH, MAX_NTH = 2, 1_000
 MAX_METHOD = 16
+MOCK_METHODS = frozenset({"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"})
 RULE_ID = re.compile(r"[a-z0-9]{6,32}")
 METHOD = re.compile(r"[A-Z]+")
 ACTIONS = ("mock", "status", "delay", "drop")
@@ -105,9 +106,35 @@ def is_api_host(host: str, api_hosts: Sequence[str]) -> bool:
     return any(host == h or host.endswith("." + h) for h in api_hosts)
 
 
-def mock_file(mocks_dir: str, method: str, raw_path: str) -> tuple[Path, str] | None:
-    """The mock file for a request and its label, or None. Never leaves `mocks_dir`."""
-    if not mocks_dir or not method.isascii() or not method.isalpha():
+# The folder this checkout lives in. Mock files are served only from inside it.
+WIRETRACE = Path(__file__).resolve().parent.parent
+
+
+def _mocks_root(mocks_dir: str, wiretrace: str = "") -> Path | None:
+    """The resolved mocks folder when it is a real directory inside the wiretrace folder.
+
+    `wiretrace` is that folder when the launcher names one; otherwise this checkout.
+    """
+    if not mocks_dir:
+        return None
+    try:
+        base = Path(wiretrace).resolve() if wiretrace else WIRETRACE.resolve()
+        root = Path(mocks_dir).resolve()
+        if root.is_dir() and root.is_relative_to(base):
+            return root
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def request_method(request: http.Request) -> str:
+    """The method as the client spelled it. `request.method` is always upper case."""
+    return request.data.method.decode("utf-8", "surrogateescape")
+
+
+def mock_file(mocks_dir: str, method: str, raw_path: str, wiretrace: str = "") -> tuple[Path, str] | None:
+    """The mock file for a request and its label, or None. Never leaves `mocks_dir` or the wiretrace folder."""
+    if method not in MOCK_METHODS:
         return None
     path = raw_path.split("?", 1)[0]
     if path == "/":
@@ -121,7 +148,9 @@ def mock_file(mocks_dir: str, method: str, raw_path: str) -> tuple[Path, str] | 
         return None
     label = "/".join([method, *segments]) + ".json"
     try:
-        root = Path(mocks_dir).resolve()
+        root = _mocks_root(mocks_dir, wiretrace)
+        if root is None:
+            return None
         file = (root / label).resolve()
         if file.is_relative_to(root) and file.is_file():
             return file, label
@@ -184,14 +213,16 @@ def _path_pattern(path: str) -> re.Pattern:
     return re.compile(".*".join(re.escape(part) for part in path.split("*")), re.DOTALL)
 
 
-def resolve_mock(mocks_dir: str, label: str) -> Path | None:
+def resolve_mock(mocks_dir: str, label: str, wiretrace: str = "") -> Path | None:
     """The file `label` names inside `mocks_dir`, or None. Same rule as `mock_file()`: never leaves the folder."""
     if not mocks_dir or not label or "\\" in label or label.startswith("/"):
         return None
     if any(s in ("", ".", "..") for s in label.split("/")):
         return None
     try:
-        root = Path(mocks_dir).resolve()
+        root = _mocks_root(mocks_dir, wiretrace)
+        if root is None:
+            return None
         file = (root / label).resolve()
         if file.is_relative_to(root) and file.is_file():
             return file
@@ -204,7 +235,8 @@ def _is_int(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def _parse_rule(raw: object, index: int, api_hosts: Sequence[str], mocks_dir: str) -> Rule | RuleError:
+def _parse_rule(raw: object, index: int, api_hosts: Sequence[str], mocks_dir: str,
+                wiretrace: str = "") -> Rule | RuleError:
     def fail(field: str, message: str) -> RuleError:
         return RuleError(message, index, field)
 
@@ -269,7 +301,7 @@ def _parse_rule(raw: object, index: int, api_hosts: Sequence[str], mocks_dir: st
         return fail("action.body", "must be at most 1 MiB")
     if not isinstance(mock, str):
         return fail("action.mock_file", "must be a string")
-    if kind == "mock" and mock and resolve_mock(mocks_dir, mock) is None:
+    if kind == "mock" and mock and resolve_mock(mocks_dir, mock, wiretrace) is None:
         return fail("action.mock_file", "must be a mock file of this preset")
     if not _is_int(delay_ms) or not 0 <= delay_ms <= MAX_RULE_DELAY_MS:
         return fail("action.delay_ms", f"must be 0 to {MAX_RULE_DELAY_MS:,} ms")
@@ -293,7 +325,8 @@ def _parse_rule(raw: object, index: int, api_hosts: Sequence[str], mocks_dir: st
                 mode, n, f"{rule_id}:{digest}", data)
 
 
-def parse_rules(data: object, api_hosts: Sequence[str], mocks_dir: str) -> Rules | RuleError:
+def parse_rules(data: object, api_hosts: Sequence[str], mocks_dir: str,
+                wiretrace: str = "") -> Rules | RuleError:
     """Validate a rules document (`{version: 1, rules: [...]}`); never raises. Messages carry no values."""
     if not isinstance(data, dict):
         return RuleError("The rules file must be a JSON object")
@@ -308,7 +341,7 @@ def parse_rules(data: object, api_hosts: Sequence[str], mocks_dir: str) -> Rules
         return RuleError(f"At most {MAX_RULES} rules", None, "rules")
     rules, seen = [], set()
     for index, raw in enumerate(raw_rules):
-        rule = _parse_rule(raw, index, api_hosts, mocks_dir)
+        rule = _parse_rule(raw, index, api_hosts, mocks_dir, wiretrace)
         if isinstance(rule, RuleError):
             return rule
         if rule.id in seen:
@@ -398,12 +431,15 @@ class QATools:
         self._rules_file = ""
         self._rules_stat: tuple | None = None
         self._rules_checked = 0.0
+        self._wiretrace = ""
 
     def load(self, loader) -> None:
         loader.add_option("qa_api_hosts", Sequence[str], [],
                           "Hosts (and subdomains) the Wiretrace QA features apply to. Empty: nothing happens.")
         loader.add_option("qa_mocks_dir", str, "",
                           "Folder of mock files: <folder>/<METHOD>/<path>.json.")
+        loader.add_option("qa_wiretrace_dir", str, "",
+                          "Wiretrace folder. Mock files are served only from inside it. Empty: this checkout.")
         loader.add_option("qa_request_id_header", str, "X-Request-ID",
                           "Header read to show a request ID as the flow comment.")
         loader.add_option("qa_fault_filter", str, "",
@@ -424,8 +460,10 @@ class QATools:
         snapshot = build_snapshot(list(o.qa_api_hosts), o.qa_mocks_dir, o.qa_request_id_header,
                                   o.qa_fault_filter, o.qa_fault_status, o.qa_fault_delay_ms, o.qa_fault_drop)
         self._snapshot = snapshot
+        self._wiretrace = o.qa_wiretrace_dir
         # Rules are validated against the API hosts and the mocks folder, so any change re-reads them.
-        if self._rules_file != o.qa_rules_file or updated & {"qa_api_hosts", "qa_mocks_dir", "qa_rules_file"}:
+        if self._rules_file != o.qa_rules_file or updated & {
+                "qa_api_hosts", "qa_mocks_dir", "qa_rules_file", "qa_wiretrace_dir"}:
             self._rules_file = o.qa_rules_file
             self.reload_rules()
         summary = (f"Wiretrace QA: {len(snapshot.api_hosts)} API hosts, "
@@ -467,7 +505,7 @@ class QATools:
             return self._reject("The rules file cannot be read")
         except ValueError:
             return self._reject("The rules file is not valid JSON")
-        parsed = parse_rules(data, self._snapshot.api_hosts, self._snapshot.mocks_dir)
+        parsed = parse_rules(data, self._snapshot.api_hosts, self._snapshot.mocks_dir, self._wiretrace)
         if isinstance(parsed, RuleError):
             where = f"rule {parsed.index + 1}, " if parsed.index is not None else ""
             return self._reject(f"{where}{parsed.field or 'file'}: {parsed.message}")
@@ -516,14 +554,15 @@ class QATools:
 
     def validate_rules(self, data: object) -> dict:
         """`{"rules": [normalized rule…]}`, or `{"error", "index", "field"}`. Changes nothing."""
-        parsed = parse_rules(data, self._snapshot.api_hosts, self._snapshot.mocks_dir)
+        parsed = parse_rules(data, self._snapshot.api_hosts, self._snapshot.mocks_dir, self._wiretrace)
         if isinstance(parsed, RuleError):
             return {"error": parsed.message, "index": parsed.index, "field": parsed.field}
         return {"rules": [r.data for r in parsed.rules]}
 
     def test_rule(self, raw: object, flow: http.HTTPFlow) -> dict:
         """Whether a draft rule would match `flow`, and what the app would get. Counters stay untouched."""
-        parsed = parse_rules(rules_document([raw]), self._snapshot.api_hosts, self._snapshot.mocks_dir)
+        parsed = parse_rules(rules_document([raw]), self._snapshot.api_hosts, self._snapshot.mocks_dir,
+                             self._wiretrace)
         if isinstance(parsed, RuleError):
             return {"error": parsed.message, "index": None, "field": parsed.field}
         rule = parsed.rules[0]
@@ -586,7 +625,7 @@ class QATools:
         elif rule.action == "mock":
             body = rule.body
             if rule.mock_file:
-                file = resolve_mock(self._snapshot.mocks_dir, rule.mock_file)
+                file = resolve_mock(self._snapshot.mocks_dir, rule.mock_file, self._wiretrace)
                 try:
                     body = file.read_bytes() if file else None
                 except OSError:
@@ -640,7 +679,7 @@ class QATools:
                 flow.response = http.Response.make(faults.status, FAULT_BODY, JSON)
                 return
 
-        found = mock_file(snapshot.mocks_dir, flow.request.method, flow.request.path)
+        found = mock_file(snapshot.mocks_dir, request_method(flow.request), flow.request.path, self._wiretrace)
         if found:
             file, label = found
             try:

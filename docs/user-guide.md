@@ -133,7 +133,12 @@ redact:
 
 A header name has letters, digits and `-` only. A field name starts with a letter or digit
 and may also contain `_`, `.` and `-`. Capital letters, `_` and `-` do not matter, so
-`login_token` also hides `loginToken` and `Login-Token`. If `redact:` has a key other than
+`login_token` also hides `loginToken` and `Login-Token`. A name is also hidden when it
+contains `password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`, `privatekey`,
+`recoverykey` or `credential`, so `newPassword`, `auth_token` and `X-Custom-Token` are
+hidden without being listed. `otp`, `pin`, `code_verifier` and `session_id` are hidden
+too. `code` is not: error responses use it for an error code. If the app sends a one-time
+code under `code`, add `code` to `json_fields`. If `redact:` has a key other than
 `headers` or `json_fields`, or a name that is not valid, `./wiretrace start` stops and names it.
 
 ---
@@ -233,7 +238,11 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - Only the preset's `api_hosts` and their subdomains are decrypted. Other apps and
   third-party traffic pass through untouched.
 - Every request and response is saved to `flows.mitm` in the session folder as it
-  happens, so nothing is lost if you close the window.
+  happens, so nothing is lost if you close the window. The session folder and `sessions/`
+  are readable only by your macOS user (`drwx------`). `meta.json`, `flows.mitm`,
+  `flows.har`, the log files and a bug-report zip are `-rw-------`. Another account on
+  this Mac cannot read them. A `sessions/` folder left by an older Wiretrace is tightened
+  the next time you start.
 - `--target` is `android`, `ios`, `android-emu`, `ios-sim`, or `device` (the default). It
   names the session folder, picks the setup reminders printed at start, and picks which
   device log is collected (Step 2).
@@ -242,7 +251,13 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   window (preview)* below). The Rules view is only in that window. It cannot be combined with
   `--no-ui`.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
-  Wi-Fi proxy to `<Mac IP>:8080`.
+  Wi-Fi proxy to `<Mac IP>:8080`. The Mac itself is always accepted (the iOS Simulator and
+  the Android emulator connect that way). The first other device that connects is the only
+  other device accepted until you stop Wiretrace. A later device gets no page, and the
+  Terminal prints one line telling you to restart or to pass `--client`. To allow a known
+  phone instead of pinning the first one, repeat `--client` with its IP address:
+  `./wiretrace start --preset staging --mode proxy --client 192.168.1.20`. A phone cannot
+  open the Mac's own addresses (for example `http://127.0.0.1:8081/`) through this proxy.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
   `--target ios-sim --mode proxy`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8080`
   (this usually needs admin rights; see
@@ -381,19 +396,27 @@ copy a single request as cURL.
 
 **What is hidden (replaced by `***`).** In `flows.har` and in the zip's `flows.har`:
 
-- the headers `Authorization`, `Proxy-Authorization`, `Cookie` and `Set-Cookie`, and every
-  cookie value;
+- the headers `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, `X-Api-Key`,
+  `X-Auth-Token` and `X-Amz-Security-Token`, any other header whose name contains one of
+  the words below, and every cookie value;
 - the fields `password`, `access_token`, `refresh_token`, `id_token`, `client_secret`,
-  `token`, `api_key` and `secret`, and any names you added with `redact:`, wherever they
-  appear in JSON request and response bodies (at any depth), in forms, in URLs (query and
-  `#` part), in the `Location` header, and in WebSocket text messages;
+  `token`, `api_key`, `secret`, `otp`, `pin`, `code_verifier` and `session_id`, any name
+  that contains `password`, `passwd`, `passphrase`, `secret`, `token`, `apikey`,
+  `privatekey`, `recoverykey` or `credential` (so `newPassword` and `sessionToken` are
+  hidden), and any names you added with `redact:`, wherever they appear in JSON request
+  and response bodies (at any depth), in forms, in URLs (query and `#` part), in the
+  `Location`, `Referer` and `Content-Location` headers, and in WebSocket text messages;
 - Capital letters, `_` and `-` do not matter: `accessToken` and `access-token` are hidden too.
-  A field name must match as a whole: `token` does not hide `login_token`; add that name
-  with `redact:` if you need it.
+  `code` is not hidden, because error bodies use it for an error code. Add it under
+  `redact.json_fields` when the app sends a secret under that name.
+- A `multipart/form-data` request body is replaced by a line that lists the part names only.
 - A body that looks like JSON but is cut off or broken is searched like a log line (below).
 
 In the log files of the zip, every text in each line is searched for the same header
-names, for `Bearer <token>`, and for `"field": "value"`, `field=value` and `field: value`.
+names, for `Bearer <token>`, for a JSON Web Token (`eyJ….….…`), for a Matrix token
+(`syt_`, `syr_`, `mat_`, `mar_`, `mct_` or `mcr_` plus the token), and for `"field": "value"`,
+`field=value` and `field: value`. JSON keys in a log line follow the same field rules,
+including a name that only contains one of those words.
 
 **What is not hidden. Read this before you share anything.**
 
@@ -401,9 +424,10 @@ names, for `Bearer <token>`, and for `"field": "value"`, `field=value` and `fiel
   value. Only the zip's log files are changed.
 - The **File menu and export in mitmweb** save the original, unmasked data. For a ticket,
   use `./wiretrace report`, not mitmweb's export.
-- A body that is not JSON or a URL-encoded form (for example XML, multipart uploads,
+- A body that is not JSON, a URL-encoded form or multipart (for example XML,
   GraphQL text, binary data) is left as it is, even if it holds a password. So are
-  parts of the URL path, and binary WebSocket messages.
+  parts of the URL path, and binary WebSocket messages. A body larger than 16 MiB after
+  decompression is replaced by a short note; the original stays in `flows.mitm`.
 - Logs are hidden by pattern only. A secret that does not look like one of the
   patterns above stays in the log. The command says this every time; open the zip's log files
   and check them before you share.
