@@ -1,5 +1,7 @@
 import socket
 
+import pytest
+
 from cli import doctor
 from cli.doctor import FAIL, INFO, OK, WARN, Result
 
@@ -190,3 +192,35 @@ def test_setup_installs_with_the_dependency_overrides():
     assert "h2>=4.4.1,<=4.4.1" in overrides
     assert "tornado>=6.5.9,<=6.5.10" in overrides
     assert "msgpack>=1.2.1" in overrides
+
+
+@pytest.mark.parametrize("machine, translated, expected", [
+    ("x86_64", None, "x86_64"),
+    ("arm64", "0", "arm64"),
+    ("x86_64", "1", "arm64"),
+])
+def test_setup_picks_the_native_cpu_even_under_rosetta(tmp_path, machine, translated, expected):
+    import re
+    import subprocess
+    from pathlib import Path
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "setup-mac.sh").read_text()
+    function = re.search(r"^host_cpu\(\) \{\n.*?^\}\n", script, re.S | re.M).group(0)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    sysctl = f"echo {translated}" if translated else "echo \"sysctl: unknown oid\" >&2; exit 1"
+    for name, body in (("uname", f"echo {machine}"), ("sysctl", sysctl)):
+        stub = bin_dir / name
+        stub.write_text(f"#!/bin/sh\n{body}\n")
+        stub.chmod(0o755)
+    result = subprocess.run(["/bin/bash", "-c", function + "host_cpu"], env={"PATH": str(bin_dir)},
+                            capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == expected
+
+
+def test_setup_asks_uv_for_the_python_of_that_cpu():
+    from pathlib import Path
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "setup-mac.sh").read_text()
+    assert 'PYTHON_REQUEST="cpython-3.12-macos-$python_arch-none"' in script
+    assert '"$UV" python install "$PYTHON_REQUEST"' in script
+    assert '"$UV" venv --python "$PYTHON_REQUEST" .venv' in script
+    assert 'if [ "$venv_cpu" != "$cpu" ]; then' in script

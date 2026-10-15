@@ -44,11 +44,23 @@ UV_SHA256_ARM64="a9c1b29002cf3c83f07fa9cd8a887a3be0107d90e23189721221e7257db8e3d
 PLATFORM_TOOLS_VERSION="37.0.1"
 PLATFORM_TOOLS_SHA256="ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d"
 
-case "$(uname -m)" in
-    x86_64) uv_target="x86_64-apple-darwin"; uv_sha256="$UV_SHA256_X86_64" ;;
-    arm64) uv_target="aarch64-apple-darwin"; uv_sha256="$UV_SHA256_ARM64" ;;
-    *) echo "Unsupported CPU: $(uname -m)" >&2; exit 1 ;;
+host_cpu() {
+    # A Terminal running under Rosetta reports x86_64. Its Intel builds would run
+    # translated and get the Intel cryptography pin (overrides.txt).
+    if [ "$(sysctl -n sysctl.proc_translated 2>/dev/null)" = "1" ]; then
+        echo arm64
+    else
+        uname -m
+    fi
+}
+
+cpu="$(host_cpu)"
+case "$cpu" in
+    x86_64) uv_target="x86_64-apple-darwin"; uv_sha256="$UV_SHA256_X86_64"; python_arch="x86_64" ;;
+    arm64) uv_target="aarch64-apple-darwin"; uv_sha256="$UV_SHA256_ARM64"; python_arch="aarch64" ;;
+    *) echo "Unsupported CPU: $cpu" >&2; exit 1 ;;
 esac
+PYTHON_REQUEST="cpython-3.12-macos-$python_arch-none"
 
 tmp="$(mktemp -d "$ROOT/.download.XXXXXX")"
 trap 'rm -rf "$tmp"' EXIT
@@ -98,12 +110,20 @@ fi
 export PATH="$UV_BIN:$PATH"
 
 step "Python 3.12"
-"$UV" python install 3.12
+"$UV" python install "$PYTHON_REQUEST"
 
 step "Python packages (.venv)"
 cd "$ROOT"
+if [ -x .venv/bin/python ]; then
+    # A .venv copied from another Mac, or made under Rosetta, can be for the other CPU.
+    venv_cpu="$(.venv/bin/python -c 'import platform; print(platform.machine())' 2>/dev/null)" || venv_cpu=""
+    if [ "$venv_cpu" != "$cpu" ]; then
+        echo "replacing .venv: it was made for ${venv_cpu:-another CPU}, this Mac is $cpu"
+        rm -rf .venv
+    fi
+fi
 if [ ! -x .venv/bin/python ]; then
-    "$UV" venv --python 3.12 .venv
+    "$UV" venv --python "$PYTHON_REQUEST" .venv
 fi
 # Wheels only: building from source needs a compiler, i.e. the Command Line Tools.
 # Bytecode up front, so the first doctor / mitmweb start is not slowed by it.
