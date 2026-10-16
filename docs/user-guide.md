@@ -171,12 +171,25 @@ With a store or release build, HTTPS traffic cannot be decrypted.
 
 ### Step 1 — Start Wiretrace
 
+Copy the block for your phone.
+
+iPhone:
+
 ```bash
 cd ~/wiretrace
 ./wiretrace start --preset staging --target ios --ui wiretrace
 ```
 
-Use your preset and `--target`. The Wiretrace window opens in your browser: click **Setup**
+Android phone:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset staging --target android --ui wiretrace
+```
+
+If your preset has another name, change `staging`. For the Android emulator use
+`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy` (see
+[Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
 in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick,
 and turns each step green when Wiretrace sees it work. Without `--ui wiretrace` you get mitmweb
 instead, which shows the same QR code. The first time, macOS may ask whether to allow incoming

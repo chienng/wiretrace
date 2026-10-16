@@ -5,49 +5,6 @@ app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac 
 
 Current version: **0.8.0**.
 
-## Features
-
-- **Setup check.** `./wiretrace doctor` checks Python, mitmproxy, the ports, the macOS
-  firewall, `adb` and connected devices, and the CA certificate, and says what to fix.
-- **Capture.** `./wiretrace start` runs mitmproxy in WireGuard mode (UDP 51820, the
-  default) or as a Wi-Fi proxy (`--mode proxy`, TCP 8080). `--target` is `android`, `ios`,
-  `android-emu`, `ios-sim` or `device`. Each session is saved in its own folder under
-  `sessions/`, as it happens.
-- **Presets.** One YAML file per project and environment. Only the listed API hosts are
-  decrypted; all other traffic passes through untouched. A preset also sets the starting
-  filter, the mocks folder, the request ID header, the app to collect logs from, and extra
-  names to mask.
-- **Mocks from files.** A file `mocks/<preset>/<METHOD>/<path>.json` answers that request
-  instead of the backend. Changes apply to the next request, without a restart.
-- **Rules.** Per request: answer with a mock or a status code, wait a number of
-  milliseconds, or drop the connection, always, once, or every Nth call. Edited in the
-  Wiretrace window's *Rules* view and saved in `rules/<preset>.json`. The older
-  `qa_fault_*` options still work in mitmweb.
-- **Device logs.** The app's own process log, collected next to the traffic: `adb logcat`
-  for Android devices and emulators, `pymobiledevice3` for iPhones, `simctl` for the iOS
-  Simulator. The log follows the app across restarts and reconnects.
-- **In-app logs.** A test build can `POST` its own log lines to `https://qa-logs.internal/log`;
-  Wiretrace answers that name itself and stores the lines in the session. Nothing leaves the Mac.
-- **Request IDs.** The `X-Request-ID` header (or another one set in the preset) links a
-  request to the log lines that carry the same ID.
-- **Masked HAR.** When a session stops, Wiretrace writes `flows.har` with passwords, tokens
-  and cookies replaced by `***`.
-- **Bug report zip.** `./wiretrace report` packs a session into one zip: a summary with the
-  failed requests, the masked HAR, and the masked logs.
-- **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
-  and logs on one screen, a log timeline with the device's status, earlier sessions, search in
-  headers and bodies, replay and compare, the setup wizard and the Rules view. It is only
-  reachable from the same Mac, with a new
-  token at every start. mitmweb stays the default, so without `--ui wiretrace` you get mitmweb
-  and no Rules view; `--no-ui` runs in the Terminal only.
-- **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
-  `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
-  SHA-256 checksum, from one commit.
-
-Masking has limits (for example, bodies that are neither JSON nor forms are not changed).
-Read [what is and is not masked](docs/user-guide.md#step-5--export-for-the-bug-ticket)
-before you share a report.
-
 ## Requirements
 
 - A Mac with macOS, Intel or Apple silicon. A standard (non-admin) account is enough.
@@ -109,14 +66,26 @@ In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
 If `./wiretrace start` says *name is 'example', but must equal the file name*, the file was
 not changed or not saved.
 
-**5. Start capturing:**
+**5. Start capturing.** Copy the block for your phone.
+
+iPhone:
 
 ```bash
+cd ~/wiretrace
+./wiretrace start --preset staging --target ios --ui wiretrace
+```
+
+Android phone:
+
+```bash
+cd ~/wiretrace
 ./wiretrace start --preset staging --target android --ui wiretrace
 ```
 
-Use `--target ios` for an iPhone. The Wiretrace window opens in your browser. Without
-`--ui wiretrace` you get mitmweb instead.
+If your preset has another name, change `staging`. For the Android emulator use
+`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy` (see
+[Part 3 of the user guide](docs/user-guide.md#part-3--test-with-wiretrace-every-session)). The
+Wiretrace window opens in your browser. Without `--ui wiretrace` you get mitmweb instead.
 
 **6. The first time only, connect the phone:** click *Setup* in the window and follow the
 wizard: install the WireGuard app, scan the QR code, turn the tunnel on, then open `http://mitm.it` on the phone
@@ -132,6 +101,11 @@ General → About → Certificate Trust Settings. Details:
 ```
 
 ## Design
+
+**The Wiretrace window today** (screenshot of 0.8.0 with the sample data in
+[`ui/dev/fixtures/`](ui/dev/fixtures/); every host, token and device in it is fake)
+
+![Wiretrace 0.8.0 main window with sample data](docs/images/traffic.png)
 
 The images below are **design mockups**, not screenshots of the current product. All data
 in them is illustrative. They show where Wiretrace is going; the Wiretrace window (preview)
@@ -169,6 +143,49 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 **6. Menu-bar app** (design mockup, not built yet)
 
 ![Design mockup: menu-bar app](mockups/screens/06-menu-bar.png)
+
+## Features
+
+- **Setup check.** `./wiretrace doctor` checks Python, mitmproxy, the ports, the macOS
+  firewall, `adb` and connected devices, and the CA certificate, and says what to fix.
+- **Capture.** `./wiretrace start` runs mitmproxy in WireGuard mode (UDP 51820, the
+  default) or as a Wi-Fi proxy (`--mode proxy`, TCP 8080). `--target` is `android`, `ios`,
+  `android-emu`, `ios-sim` or `device`. Each session is saved in its own folder under
+  `sessions/`, as it happens.
+- **Presets.** One YAML file per project and environment. Only the listed API hosts are
+  decrypted; all other traffic passes through untouched. A preset also sets the starting
+  filter, the mocks folder, the request ID header, the app to collect logs from, and extra
+  names to mask.
+- **Mocks from files.** A file `mocks/<preset>/<METHOD>/<path>.json` answers that request
+  instead of the backend. Changes apply to the next request, without a restart.
+- **Rules.** Per request: answer with a mock or a status code, wait a number of
+  milliseconds, or drop the connection, always, once, or every Nth call. Edited in the
+  Wiretrace window's *Rules* view and saved in `rules/<preset>.json`. The older
+  `qa_fault_*` options still work in mitmweb.
+- **Device logs.** The app's own process log, collected next to the traffic: `adb logcat`
+  for Android devices and emulators, `pymobiledevice3` for iPhones, `simctl` for the iOS
+  Simulator. The log follows the app across restarts and reconnects.
+- **In-app logs.** A test build can `POST` its own log lines to `https://qa-logs.internal/log`;
+  Wiretrace answers that name itself and stores the lines in the session. Nothing leaves the Mac.
+- **Request IDs.** The `X-Request-ID` header (or another one set in the preset) links a
+  request to the log lines that carry the same ID.
+- **Masked HAR.** When a session stops, Wiretrace writes `flows.har` with passwords, tokens
+  and cookies replaced by `***`.
+- **Bug report zip.** `./wiretrace report` packs a session into one zip: a summary with the
+  failed requests, the masked HAR, and the masked logs.
+- **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
+  and logs on one screen, a log timeline with the device's status, earlier sessions, search in
+  headers and bodies, replay and compare, the setup wizard and the Rules view. It is only
+  reachable from the same Mac, with a new
+  token at every start. mitmweb stays the default, so without `--ui wiretrace` you get mitmweb
+  and no Rules view; `--no-ui` runs in the Terminal only.
+- **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
+  `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
+  SHA-256 checksum, from one commit.
+
+Masking has limits (for example, bodies that are neither JSON nor forms are not changed).
+Read [what is and is not masked](docs/user-guide.md#step-5--export-for-the-bug-ticket)
+before you share a report.
 
 ## Documents
 
