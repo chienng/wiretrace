@@ -1,15 +1,22 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.8.0**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.9.0**, on Intel and Apple silicon Macs.
 
-What 0.8.0 gives you: a one-command install that needs no admin rights, a setup
+What 0.9.0 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
 next to the traffic (Part 3). `./wiretrace report` turns a session into a zip for the bug
-ticket. The Wiretrace window (`--ui wiretrace`) is a preview; in 0.8.0 it gains a setup
-wizard, rules that make requests fail or slow, a log timeline with the device's status,
-earlier sessions, saved filters, search in headers and bodies, replay and compare.
+ticket. The Wiretrace window (`--ui wiretrace`) is a preview, with a setup wizard, rules that
+make requests fail or slow, a log timeline with the device's status, earlier sessions, saved
+filters, search in headers and bodies, replay and compare. New in 0.9.0: the **Wiretrace
+app** that setup puts in `~/Applications`, a `default` preset to start with, and editing or
+creating presets from the window.
+
+Using 0.8.0 or 0.7.2? Those versions have no `./install` and no Wiretrace app; follow the
+guide that came with them: [0.8.0](https://github.com/chienng/wiretrace/blob/v0.8.0/docs/user-guide.md),
+[0.7.2](https://github.com/chienng/wiretrace/blob/v0.7.2/docs/user-guide.md), or
+`~/wiretrace/docs/user-guide.md` in your download.
 
 New to Wiretrace? Do Part 1 once per Mac, Part 2 once per phone, then Part 3 every time
 you test. Run each command in **Terminal** (Applications → Utilities → Terminal).
@@ -25,8 +32,8 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  `wiretrace-0.8.0-macos.tar.gz` and `wiretrace-0.8.0-macos.tar.gz.sha256`, or
-  `wiretrace-0.8.0-macos.dmg` and `wiretrace-0.8.0-macos.dmg.sha256`. Both contain the same
+  `wiretrace-0.9.0-macos.tar.gz` and `wiretrace-0.9.0-macos.tar.gz.sha256`, or
+  `wiretrace-0.9.0-macos.dmg` and `wiretrace-0.9.0-macos.dmg.sha256`. Both contain the same
   files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -36,8 +43,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.8.0-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.8.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.9.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.9.0-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -47,14 +54,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.9.0-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.8.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.9.0**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -680,7 +687,7 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 **What each area does.**
 
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
-  (for example *v0.8.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  (for example *v0.9.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is

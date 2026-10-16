@@ -3,7 +3,18 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.8.0**.
+Current version: **0.9.0**.
+
+**Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
+the steps below do not work for them. Follow the guide of your version instead:
+
+| Version | Guides |
+|---|---|
+| 0.8.0 | [README](https://github.com/chienng/wiretrace/blob/v0.8.0/README.md) · [user guide](https://github.com/chienng/wiretrace/blob/v0.8.0/docs/user-guide.md) |
+| 0.7.2 | [README](https://github.com/chienng/wiretrace/blob/v0.7.2/README.md) · [user guide](https://github.com/chienng/wiretrace/blob/v0.7.2/docs/user-guide.md) |
+
+The same two files are also in your download: `~/wiretrace/README.md` and
+`~/wiretrace/docs/user-guide.md`.
 
 ## Requirements
 
@@ -25,15 +36,15 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 Run every command below in **Terminal**, one block at a time. The
 [user guide](docs/user-guide.md) explains each step in more detail.
 
-**1. Download.** From the Releases page, download `wiretrace-0.8.0-macos.tar.gz` and
-`wiretrace-0.8.0-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
+**1. Download.** From the Releases page, download `wiretrace-0.9.0-macos.tar.gz` and
+`wiretrace-0.9.0-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
 
 **2. Check and unpack** into your home folder. The first line must print `OK`:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.8.0-macos.tar.gz.sha256
-tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
+shasum -a 256 -c wiretrace-0.9.0-macos.tar.gz.sha256
+tar -xzf wiretrace-0.9.0-macos.tar.gz -C ~
 ```
 
 **3. Install** (a few minutes, no password needed, never use `sudo`):
