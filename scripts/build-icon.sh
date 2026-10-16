@@ -1,5 +1,5 @@
 #!/bin/bash
-# Builds app/Wiretrace.icns from app/icon.svg, and the menu bar mark menubar/icon.pdf from
+# Builds app/Wiretrace.icns from app/icon.svg, and the menu bar icon menubar/icon.tiff from
 # app/menubar-icon.svg. A developer tool: it needs rsvg-convert (librsvg). Both outputs are
 # committed, so setup-mac.sh and make-app.sh never run this.
 set -euo pipefail
@@ -17,6 +17,8 @@ for size in 16 32 128 256 512; do
 done
 iconutil -c icns -o "$ROOT/app/Wiretrace.icns" "$set"
 echo "Built app/Wiretrace.icns"
-# Vector, so the size is only nominal: menubar/__main__.py scales it to the menu bar.
-rsvg-convert -f pdf -w 18 "$ROOT/app/menubar-icon.svg" -o "$ROOT/menubar/icon.pdf"
-echo "Built menubar/icon.pdf"
+# PNGs in a TIFF, not a PDF: AppKit draws rsvg's PDF of the cut-out W as blank.
+rsvg-convert -w 16 -h 16 "$ROOT/app/menubar-icon.svg" -o "$tmp/menubar.png"
+rsvg-convert -w 32 -h 32 "$ROOT/app/menubar-icon.svg" -o "$tmp/menubar@2x.png"
+tiffutil -cathidpicheck "$tmp/menubar.png" "$tmp/menubar@2x.png" -out "$ROOT/menubar/icon.tiff" 2>/dev/null
+echo "Built menubar/icon.tiff"

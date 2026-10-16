@@ -66,8 +66,8 @@ To keep it in the Dock, right-click its Dock icon → **Options** → **Keep in 
    Mac, or another device with a Wi-Fi proxy. For a Wi-Fi proxy, set the phone's proxy to
    this Mac's IP address, port 8080; the setup wizard shows the steps.
 
-The Wiretrace window opens in your browser, and the **Wiretrace** menu (the W at the top
-right of the screen) appears.
+The Wiretrace window opens in your browser, and the **Wiretrace** menu (the W icon at
+the top right of the screen) appears.
 
 <details>
 <summary>Or start in Terminal</summary>
@@ -113,7 +113,7 @@ General → About → Certificate Trust Settings. Details:
 [Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
 
 **6. Test, stop, report.** Test your app, then choose **Stop session** in the
-**Wiretrace** menu, the W at the top right (or press Ctrl+C, if you started in Terminal). Wiretrace writes
+**Wiretrace** menu, the W icon at the top right (or press Ctrl+C, if you started in Terminal). Wiretrace writes
 `flows.har` (secrets masked) into the session folder. For a bug ticket, in Terminal:
 
 ```bash

@@ -53,7 +53,7 @@ on run
 	end repeat
 
 	if recordingPreset is not "" then
-		display dialog "Wiretrace is already recording " & recordingPreset & ". Use the Wiretrace menu (the W at the top right) to open the window or stop." with title appTitle buttons {"OK"} default button "OK"
+		display dialog "Wiretrace is already recording " & recordingPreset & ". Use the Wiretrace menu (the W icon at the top right) to open the window or stop." with title appTitle buttons {"OK"} default button "OK"
 		return
 	end if
 	if projectNames is {} then
@@ -91,7 +91,7 @@ on run
 	else
 		set message to "Wiretrace is recording " & projectName & "."
 	end if
-	display dialog message & " Stop it from the Wiretrace menu (the W at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
+	display dialog message & " Stop it from the Wiretrace menu (the W icon at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
 end run
 
 on showError(message)

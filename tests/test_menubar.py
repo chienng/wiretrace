@@ -78,12 +78,17 @@ def test_zero_errors_has_no_count_in_the_title_and_show_last_error_is_grey():
     assert view.last_error is None
 
 
-def test_the_w_mark_ships_with_the_menu_bar_and_no_title_has_a_dot():
-    assert ICON_PATH.read_bytes().startswith(b"%PDF-"), "run `make icon`"
-    views = [render(None, 1_000.0, False), render(status(), 1_000.0, False),
-             render(status(), 1_000.0, False, seen=True), render(None, 1_000.0, False, seen=True),
-             render(status(), 1_000.0, True)]
-    assert all(view.title.startswith("Wiretrace") for view in views)
+def test_the_icon_ships_with_the_menu_bar_and_only_errors_or_a_stale_status_add_text():
+    assert ICON_PATH.read_bytes()[:4] in (b"MM\x00*", b"II*\x00"), "run `make icon`"
+    badges = {
+        "starting": render(None, 1_000.0, False).badge,
+        "live": render(status(errors=0), 1_000.0, False).badge,
+        "errors": render(status(), 1_000.0, False).badge,
+        "stale": render(None, 1_000.0, False, seen=True).badge,
+        "stopping": render(status(), 1_000.0, True).badge,
+        "app": render(status(), 1_000.0, False, app=True).badge,
+    }
+    assert badges == {"starting": "", "live": "", "errors": "6", "stale": "?", "stopping": "", "app": "6"}
 
 
 @pytest.mark.parametrize("model", [None, "", "  "])

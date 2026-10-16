@@ -19,9 +19,9 @@ FRESH_S = 5.0
 STARTING, LIVE, STALE, STOPPING = "STARTING", "LIVE", "STALE", "STOPPING"
 CHECK_ARGV = "--check"
 MAX_STATUS_BYTES = 65_536
-# The W mark left of the title, a template image built from app/menubar-icon.svg.
-ICON_PATH = Path(__file__).with_name("icon.pdf")
-ICON_HEIGHT_PT = 12.0
+# The Wiretrace icon, a template image built from app/menubar-icon.svg.
+ICON_PATH = Path(__file__).with_name("icon.tiff")
+ICON_HEIGHT_PT = 16.0
 
 TARGET_LABELS = {
     "android": "Android",
@@ -48,10 +48,13 @@ class Row:
 
 @dataclass(frozen=True)
 class MenuView:
+    """``title`` is shown when the icon cannot be loaded; ``badge`` is the text next to the icon."""
+
     state: str
     title: str
     rows: tuple[Row, ...]
     last_error: str | None = None
+    badge: str = ""
 
 
 def is_fresh(status: dict | None, now: float) -> bool:
@@ -120,7 +123,7 @@ def render(status: dict | None, now: float, stopping: bool, *, seen: bool = Fals
     rows = tuple(row for row in view.rows if row.action != "quit")
     if not any(row.action == "stop" for row in rows):
         rows += (_action("Stop session", "stop"),)
-    return MenuView(view.state, view.title, rows, view.last_error)
+    return MenuView(view.state, view.title, rows, view.last_error, view.badge)
 
 
 def _render(status: dict | None, now: float, seen: bool) -> MenuView:
@@ -143,7 +146,7 @@ def _render(status: dict | None, now: float, seen: bool) -> MenuView:
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
         )
-        return MenuView(LIVE, title, rows, last_error=last if errors else None)
+        return MenuView(LIVE, title, rows, last_error=last if errors else None, badge=str(errors) if errors else "")
 
     if seen or status is not None:
         rows = (
@@ -152,7 +155,7 @@ def _render(status: dict | None, now: float, seen: bool) -> MenuView:
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
         )
-        return MenuView(STALE, "Wiretrace · ?", rows)
+        return MenuView(STALE, "Wiretrace · ?", rows, badge="?")
 
     rows = (
         Row("note", "Starting…", enabled=False),

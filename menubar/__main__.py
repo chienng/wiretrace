@@ -58,7 +58,7 @@ def check() -> int:
 
 
 def load_icon(appkit):
-    """The W mark as a template image, so macOS tints it for a light or dark menu bar. None if missing."""
+    """The Wiretrace icon as a template image, so macOS tints it for a light or dark menu bar. None if missing."""
     image = appkit.NSImage.alloc().initWithContentsOfFile_(str(ICON_PATH))
     if image is None:
         return None
@@ -67,6 +67,7 @@ def load_icon(appkit):
         return None
     image.setSize_((size.width * ICON_HEIGHT_PT / size.height, ICON_HEIGHT_PT))
     image.setTemplate_(True)
+    image.setAccessibilityDescription_("Wiretrace")
     return image
 
 
@@ -101,9 +102,11 @@ class Bar:
         self.item = bar.statusItemWithLength_(appkit.NSVariableStatusItemLength)
         button = self.item.button()
         icon = load_icon(appkit)
-        if button is not None and icon is not None:
+        self.has_icon = button is not None and icon is not None
+        if self.has_icon:
             button.setImage_(icon)
             button.setImagePosition_(appkit.NSImageLeft)
+            button.setToolTip_("Wiretrace")
         self.menu = None
         self.apply(rebuild=True)
 
@@ -154,8 +157,8 @@ class Bar:
     def apply(self, rebuild: bool) -> None:
         button = self.item.button()
         if button is not None:
-            button.setTitle_(self.view.title)
-            # Dimmed unless recording: the title alone reads "Wiretrace" while starting too.
+            button.setTitle_(self.view.badge if self.has_icon else self.view.title)
+            # Dimmed unless recording: the icon looks the same while starting.
             button.setAppearsDisabled_(self.view.state != LIVE)
         if not rebuild:
             return

@@ -280,13 +280,15 @@ All of the tests listed under "Tests derived from them", plus:
 
 2026-10-16, for 0.9.0, after a tester could not find the item:
 
-- **The W mark replaces the ●.** The title is `Wiretrace` / `Wiretrace · N` (LIVE),
-  `Wiretrace · ?` (STALE), `Wiretrace` (STARTING) and `Wiretrace · stopping`, with the
-  Wiretrace mark at its left in every state. The mark is `menubar/icon.pdf`, built from
-  `app/menubar-icon.svg` by `make icon` and committed. It's a template image, so macOS tints
-  it for a light or dark menu bar, scaled to 12 pt high. When the file can't be loaded the
-  item shows the title alone.
+- **An icon replaces "● Wiretrace".** The item is the app icon's tile with the W cut out
+  (`app/menubar-icon.svg`), 16 pt, as a template image so macOS tints it for a light or dark
+  menu bar. Next to it: N when LIVE with errors, `?` when STALE, nothing otherwise
+  (`MenuView.badge`). Tooltip and accessibility description: "Wiretrace".
+- **A TIFF, not a PDF.** `make icon` writes `menubar/icon.tiff` (16 and 32 px) and it is
+  committed. AppKit drew rsvg's PDF of the cut-out W as blank.
+- **When the icon can't be loaded**, the item shows the old titles without the ●
+  (`Wiretrace`, `Wiretrace · N`, `Wiretrace · ?`, `Wiretrace · stopping`), so it is never empty.
 - **Dimmed unless LIVE.** The ● was the only difference between STARTING and LIVE, so the
   item now uses the system's dimmed look in every state but LIVE.
-- Docs and dialogs say "the Wiretrace menu (the W at the top right)". The criteria and the
-  state table above keep the old titles as a record of what shipped in 0.8.0.
+- Docs and dialogs say "the Wiretrace menu (the W icon at the top right)". The criteria and
+  the state table above keep the old titles as a record of what shipped in 0.8.0.
