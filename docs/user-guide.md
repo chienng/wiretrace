@@ -187,8 +187,15 @@ cd ~/wiretrace
 ./wiretrace start --preset staging --target android --ui wiretrace
 ```
 
+A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset staging --mode proxy --ui wiretrace
+```
+
 If your preset has another name, change `staging`. For the Android emulator use
-`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy` (see
+`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
 [Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
 in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick
 (*Choose device*, *Connect to this Mac*, *Trust Wiretrace*, *Check the app*, and the optional
@@ -313,20 +320,27 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   window (preview)* below). The Rules view is only in that window. It cannot be combined with
   `--no-ui`.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
-  Wi-Fi proxy to `<Mac IP>:8080`. The Mac itself is always accepted (the iOS Simulator and
+  Wi-Fi proxy to `<Mac IP>:8080`. With `--ui wiretrace`, the setup wizard shows the proxy
+  steps for the device you pick instead of the WireGuard QR code:
+  `./wiretrace start --preset staging --mode proxy --ui wiretrace`. Apps that ignore the
+  system proxy (Flutter, some React Native libraries) are not captured in this mode; use
+  WireGuard for them. The Mac itself is always accepted (the iOS Simulator and
   the Android emulator connect that way). The first other device that connects is the only
   other device accepted until you stop Wiretrace. A later device gets no page, and the
   Terminal prints one line telling you to restart or to pass `--client`. To allow a known
   phone instead of pinning the first one, repeat `--client` with its IP address:
-  `./wiretrace start --preset staging --mode proxy --client 192.168.1.20`. A phone cannot
+  `./wiretrace start --preset staging --mode proxy --ui wiretrace --client 192.168.1.20`. A phone cannot
   open the Mac's own addresses (for example `http://127.0.0.1:8081/`) through this proxy.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
-  `--target ios-sim --mode proxy`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8080`
+  `--target ios-sim --mode proxy --ui wiretrace`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8080`
   (this usually needs admin rights; see
   [`install-without-admin.md`](install-without-admin.md#ios-simulator-without-admin)), and
   install the certificate in the booted Simulator once:
   `xcrun simctl keychain booted add-root-cert ~/.mitmproxy/mitmproxy-ca-cert.pem`.
   Ignore the "set the Wi-Fi proxy" reminder Wiretrace prints; it is meant for phones.
+- **A browser or Burp Suite on this Mac:** start with `--mode proxy --ui wiretrace`, point the
+  browser's proxy (or Burp's upstream proxy) at `127.0.0.1:8080`, and make it trust
+  `~/.mitmproxy/mitmproxy-ca-cert.pem`. Only the preset's `api_hosts` are decrypted.
 - The preset's `default_filter` is the starting filter: in mitmweb's search box, or what
   is printed with `--no-ui`. It never limits what is saved. Common filters:
   `~c 500` (status 500), `~m POST`, `~u /api/v1/orders`, `~bs "SOME_TEXT"` (response body).

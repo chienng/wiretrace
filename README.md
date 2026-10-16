@@ -82,8 +82,18 @@ cd ~/wiretrace
 ./wiretrace start --preset staging --target android --ui wiretrace
 ```
 
+A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset staging --mode proxy --ui wiretrace
+```
+
+Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8080. The setup wizard shows
+the steps.
+
 If your preset has another name, change `staging`. For the Android emulator use
-`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy` (see
+`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
 [Part 3 of the user guide](docs/user-guide.md#part-3--test-with-wiretrace-every-session)). The
 Wiretrace window opens in your browser. Without `--ui wiretrace` you get mitmweb instead.
 
