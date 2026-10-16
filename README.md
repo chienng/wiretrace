@@ -55,10 +55,13 @@ cd ~/wiretrace
 ```
 
 It ends with a setup check. Only `FAIL` lines must be fixed; run `./wiretrace doctor` to
-check again. The setup also creates the **Wiretrace app** in `~/Applications`.
+check again. The setup also creates the **Wiretrace app** in `~/Applications` and, when the
+check passes, opens it for you (`./install --no-open` does not). You can start right away; no
+new Terminal window is needed.
 
-**4. Start capturing.** Open **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight.
-To keep it in the Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
+**4. Start capturing** in the Wiretrace app that the setup opened. Next time, open
+**Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the Dock,
+right-click its Dock icon → **Options** → **Keep in Dock**.
 
 1. Choose the project: `default`, which comes with Wiretrace, or
    [a preset you created](#your-own-preset-optional).

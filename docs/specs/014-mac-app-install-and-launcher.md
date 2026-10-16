@@ -298,6 +298,12 @@ own app, and a later signed app should keep it, so it does not change after the 
   (`scripts/build-icon.sh`, needs `rsvg-convert`) builds the committed `app/Wiretrace.icns`.
   `make-app.sh` writes its bytes to `Contents/Resources/applet.icns` and removes
   `CFBundleIconName`, which would otherwise select the default script icon in `Assets.car`.
+- 2026-10-16, before 0.9.0, at the Orchestrator's request: setup opens the app when it was
+  created and doctor passed, unless `--no-open` is given or stdout is not a terminal; when
+  `open` fails it prints the Launchpad line instead. The last lines no longer tell everyone to
+  open a new Terminal window: Wiretrace finds `adb` in `~/tools` without the `PATH` lines, so
+  that line now says it is only for typing `adb` or `uv`. The closing lines are
+  `finish()` in `setup-mac.sh`, tested with a stub `open` in `tests/test_doctor.py`.
   Tested: the icon is the committed file, and a quarantined source folder gives an app with
   no quarantine flag.
 

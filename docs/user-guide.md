@@ -74,7 +74,8 @@ cd ~/wiretrace
 ```
 
 If you only test iOS, use `./install --skip-android`. (`./install` runs
-`scripts/setup-mac.sh`; either command works.)
+`scripts/setup-mac.sh`; either command works.) When the setup check at the end passes, the
+setup opens the Wiretrace app, so you can start testing at once; `--no-open` skips that.
 
 The first run takes a few minutes. It installs, all inside your home folder:
 
@@ -98,7 +99,8 @@ end up owned by root.
 The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS opens it
 without asking. You can start every session from it instead of Terminal:
 
-1. Open **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the
+1. The setup opens **Wiretrace** the first time. Later, open it (the blue **W** icon) from
+   Launchpad or Spotlight. To keep it in the
    Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
 2. Choose your project (a preset: `default`, or one you created in Step 6), then your device.
    The last ones you used are selected.
@@ -114,9 +116,11 @@ has no Terminal window. If Wiretrace is already recording, the app says so and d
 The app opens the folder the setup ran in. If you move that folder, the app says so: run
 `scripts/setup-mac.sh` again from the new place.
 
-### Step 4 — Open a new Terminal window
+### Step 4 — Only to type `adb` or `uv`: open a new Terminal window
 
-The `PATH` changes apply only to new windows (or run `exec zsh`).
+Wiretrace works right after the setup, from the app or with `./wiretrace` in the same
+window. The `PATH` lines only matter when you type `adb` or `uv` yourself, and they apply
+only to new windows (or run `exec zsh`).
 
 ### Step 5 — Read the setup check
 
