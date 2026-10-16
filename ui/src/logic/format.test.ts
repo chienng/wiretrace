@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatDuration, formatElapsed, formatSize, statusClass } from './format';
+import { formatDuration, formatElapsed, formatSize, formatVersion, statusClass } from './format';
 import { tryParseJson } from './json';
 
 describe('format', () => {
@@ -10,6 +10,12 @@ describe('format', () => {
     expect(formatDuration(null)).toBe('—');
     expect(formatElapsed(754)).toBe('00:12:34');
     expect(formatElapsed(-5)).toBe('00:00:00');
+  });
+  it('labels the version, or nothing without one', () => {
+    expect(formatVersion('0.8.0')).toBe('v0.8.0');
+    expect(formatVersion(' 0.8.0 ')).toBe('v0.8.0');
+    expect(formatVersion('')).toBe('');
+    expect(formatVersion(undefined)).toBe('');
   });
   it('classes statuses', () => {
     expect(statusClass(200)).toBe('s2');

@@ -26,6 +26,12 @@ export function formatElapsed(seconds: number): string {
   return `${pad(Math.floor(s / 3600))}:${pad(Math.floor((s % 3600) / 60))}:${pad(s % 60)}`;
 }
 
+/** "0.8.0" → "v0.8.0" for the title bar; nothing when the server sent no version. */
+export function formatVersion(version: string | null | undefined): string {
+  const v = version?.trim();
+  return v ? `v${v}` : '';
+}
+
 export type StatusClass = 's2' | 's3' | 's4' | 's5' | 'ws' | 'none';
 
 export function statusClass(status: number | null): StatusClass {
