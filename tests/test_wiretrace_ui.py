@@ -88,6 +88,14 @@ class Client:
         return await self.http.fetch(self.base + path, method=method, headers=sent, body=body,
                                      follow_redirects=False, raise_error=False)
 
+    async def refused_code(self, path: str, method: str, **kwargs) -> int:
+        """The status of a request the server may refuse before reading its body, or 599 when it
+        closed the connection while the body was still being sent."""
+        try:
+            return (await self.fetch(path, method, **kwargs)).code
+        except (BrokenPipeError, ConnectionResetError):
+            return 599
+
     async def json(self, path: str, **kwargs):
         response = await self.fetch(path, **kwargs)
         assert response.code == 200, response.body
@@ -804,8 +812,8 @@ def test_the_faults_endpoint_is_gone():
 def test_a_rule_body_near_1_mib_is_accepted_but_only_after_the_checks(tmp_path):
     async def body(ui, client, tctx):
         big = {"revision": "", "rules": [rule(action={"body": "x" * 900_000})]}
-        assert (await client.fetch("/api/rules", "PUT", cookie=False, body=big)).code in (403, 599)
-        assert (await client.fetch("/api/rules", "PUT", mutate=False, body=big)).code in (403, 599)
+        assert await client.refused_code("/api/rules", "PUT", cookie=False, body=big) in (403, 599)
+        assert await client.refused_code("/api/rules", "PUT", mutate=False, body=big) in (403, 599)
         assert not (tmp_path / "rules").exists()
         assert (await client.fetch("/api/rules", "PUT", body=big)).code == 200
 
@@ -814,8 +822,8 @@ def test_a_rule_body_near_1_mib_is_accepted_but_only_after_the_checks(tmp_path):
 
 def test_a_body_over_the_limit_is_refused():
     async def body(ui, client, tctx):
-        response = await client.fetch("/api/report", "POST", body="x" * (wiretrace_ui.MAX_REQUEST_BYTES + 1))
-        assert response.code in (400, 413, 599)
+        code = await client.refused_code("/api/report", "POST", body="x" * (wiretrace_ui.MAX_REQUEST_BYTES + 1))
+        assert code in (400, 413, 599)
         assert (await client.fetch("/api/state")).code == 200
 
     scenario(body)
