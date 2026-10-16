@@ -1,0 +1,54 @@
+# Wiretrace preset: one file per project and environment.
+#
+# After copying this file to presets/<name>.yaml, change the lines marked CHANGE:
+#   1. name                  the file name without .yaml
+#   2. api_hosts             your app's API hosts (ask the app's developers)
+#   3. app.android_package   for Android, and/or app.ios_process for iOS
+# Then save and start with: ./wiretrace start --preset <name> --target android
+#
+# Keys Wiretrace does not know yet are ignored, so a preset can already carry
+# settings for later features.
+
+# Required. Must equal the file name without .yaml: presets/staging.yaml needs name: staging.
+name: default                       # CHANGE
+
+# Required. Host names only: no https://, no port, no path, no wildcard.
+# Each host and all of its subdomains are decrypted, on any port; traffic to
+# every other host passes through undecrypted.
+api_hosts:                          # CHANGE: replace both lines with your hosts
+  - api-staging.example.com
+  - auth-staging.example.com
+
+# Optional. mitmproxy filter expression shown at start: the view filter in mitmweb,
+# the print filter with --no-ui. It never limits what is saved.
+# Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image". Default: no filter.
+# default_filter: "!~t image"
+
+# Optional. Folder of mock files, relative to the wiretrace folder (no absolute path, no "..").
+# A file mocks/<name>/<METHOD>/<path>.json answers that request instead of the backend,
+# for example mocks/example/GET/api/v1/profile.json answers GET /api/v1/profile.
+# Default: mocks/<name>, which follows the preset's name.
+# mocks_dir: mocks/example
+
+# Optional. Request header whose value is shown as the flow comment in mitmweb.
+# A header name: letters, digits and "-" only. Default: X-Request-ID.
+request_id_header: X-Request-ID
+
+# Optional. The app under test, so `./wiretrace start` can collect its device log into
+# device.log.jsonl. Without the key for your --target, the device log is off and Wiretrace
+# says so at start.
+app:
+  # --target android or android-emu: the app's package name, as in `adb shell pm list packages`.
+  android_package: com.example.myapp   # CHANGE for Android
+  # --target ios or ios-sim: the app's process name, as shown in Xcode or Console.
+  # Letters, digits, spaces, '.', '_' and '-' only, up to 64 characters.
+  ios_process: MyApp                   # CHANGE for iOS
+
+# Optional. Names to hide in addition to the built-in ones, in flows.har and in the bug report
+# zip (`./wiretrace report`). Built in: the headers Authorization, Proxy-Authorization, Cookie and
+# Set-Cookie, and the fields password, access_token, refresh_token, id_token, client_secret,
+# token, api_key and secret. You cannot remove those. Capital letters, "_" and "-" do not matter: login_token also hides
+# loginToken. Only these two keys are allowed; a typo stops the start.
+# redact:
+#   headers: [X-Api-Key]           # header names: letters, digits and "-"
+#   json_fields: [otp, login_token]   # JSON, form and URL field names

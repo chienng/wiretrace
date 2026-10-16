@@ -50,6 +50,10 @@ def test_example_preset_loads():
     assert preset.load_preset("example").name == "example"
 
 
+def test_default_preset_loads():
+    assert preset.load_preset("default").name == "default"
+
+
 # Errors name the file and the problem
 
 def test_missing_api_hosts(tmp_path):

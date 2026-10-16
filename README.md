@@ -40,17 +40,81 @@ tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
 
 ```bash
 cd ~/wiretrace
-scripts/setup-mac.sh                 # add --skip-android if you only test iOS
+./install                            # add --skip-android if you only test iOS
 ```
 
 It ends with a setup check. Only `FAIL` lines must be fixed; run `./wiretrace doctor` to
-check again. Then open a **new** Terminal window.
+check again. The setup also creates the **Wiretrace app** in `~/Applications`.
 
-The setup also creates the **Wiretrace app** in `~/Applications`. After step 4, open it from
-Launchpad or Spotlight instead of step 5: choose your project and your phone, and the window
-opens. Stop the session from the **● Wiretrace** menu at the top right of the screen.
+**4. Start capturing.** Open **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight.
+To keep it in the Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
 
-**4. Create a preset** for your project. A preset tells Wiretrace which hosts to decrypt:
+1. Choose the project: `default`, which comes with Wiretrace, or
+   [a preset you created](#your-own-preset-optional).
+2. Choose the device: iPhone, Android phone, the iOS Simulator or Android emulator on this
+   Mac, or another device with a Wi-Fi proxy. For a Wi-Fi proxy, set the phone's proxy to
+   this Mac's IP address, port 8080; the setup wizard shows the steps.
+
+The Wiretrace window opens in your browser, and **● Wiretrace** appears at the top right of
+the screen.
+
+<details>
+<summary>Or start in Terminal</summary>
+
+Open a **new** Terminal window after the install, then copy the block for your phone.
+
+iPhone:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset default --target ios --ui wiretrace
+```
+
+Android phone:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset default --target android --ui wiretrace
+```
+
+A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
+
+```bash
+cd ~/wiretrace
+./wiretrace start --preset default --mode proxy --ui wiretrace
+```
+
+Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8080. The setup wizard shows
+the steps.
+
+With a preset you created, change `default` to its name. For the Android emulator use
+`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
+[Part 3 of the user guide](docs/user-guide.md#part-3--test-with-wiretrace-every-session)).
+Without `--ui wiretrace` you get mitmweb instead. The Terminal also takes the options the app
+does not have, such as `--client` or `--no-ui`.
+
+</details>
+
+**5. The first time only, connect the phone:** click *Setup* in the window and follow the
+wizard: install the WireGuard app, scan the QR code, turn the tunnel on, then open `http://mitm.it` on the phone
+and install the certificate. On an iPhone, also turn on full trust for it in Settings →
+General → About → Certificate Trust Settings. Details:
+[Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
+
+**6. Test, stop, report.** Test your app, then choose **Stop session** in the
+**● Wiretrace** menu (or press Ctrl+C, if you started in Terminal). Wiretrace writes
+`flows.har` (secrets masked) into the session folder. For a bug ticket, in Terminal:
+
+```bash
+cd ~/wiretrace
+./wiretrace report
+```
+
+### Your own preset (optional)
+
+A preset tells Wiretrace which hosts to decrypt: only the hosts under its `api_hosts:` are
+decrypted. The steps above use the `default` preset (`presets/default.yaml`). For another
+project or environment, create one:
 
 ```bash
 cd ~/wiretrace
@@ -67,53 +131,9 @@ In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
 | `android_package:` | for Android, the app's package name, such as `com.mycompany.myapp` |
 | `ios_process:` | for iOS, the app's process name, such as `MyApp` |
 
-If `./wiretrace start` says *name is 'example', but must equal the file name*, the file was
-not changed or not saved.
-
-**5. Start capturing**, with the Wiretrace app or in Terminal. In Terminal, copy the block for
-your phone.
-
-iPhone:
-
-```bash
-cd ~/wiretrace
-./wiretrace start --preset staging --target ios --ui wiretrace
-```
-
-Android phone:
-
-```bash
-cd ~/wiretrace
-./wiretrace start --preset staging --target android --ui wiretrace
-```
-
-A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
-
-```bash
-cd ~/wiretrace
-./wiretrace start --preset staging --mode proxy --ui wiretrace
-```
-
-Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8080. The setup wizard shows
-the steps.
-
-If your preset has another name, change `staging`. For the Android emulator use
-`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
-[Part 3 of the user guide](docs/user-guide.md#part-3--test-with-wiretrace-every-session)). The
-Wiretrace window opens in your browser. Without `--ui wiretrace` you get mitmweb instead.
-
-**6. The first time only, connect the phone:** click *Setup* in the window and follow the
-wizard: install the WireGuard app, scan the QR code, turn the tunnel on, then open `http://mitm.it` on the phone
-and install the certificate. On an iPhone, also turn on full trust for it in Settings →
-General → About → Certificate Trust Settings. Details:
-[Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
-
-**7. Test, stop, report.** Use the app, then press Ctrl+C in Terminal. Wiretrace writes
-`flows.har` (secrets masked) into the session folder. For a bug ticket:
-
-```bash
-./wiretrace report
-```
+Then start with `--preset staging`, or choose `staging` in the Wiretrace app. If
+`./wiretrace start` says *name is 'example', but must equal the file name*, the file was not
+changed or not saved.
 
 ## Design
 
@@ -204,6 +224,9 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   many requests failed; from there you can open the window, jump to the last error, or stop
   the session. `--no-menu-bar` leaves that item out. mitmweb stays the default, so without
   `--ui wiretrace` you get mitmweb and no Rules view; `--no-ui` runs in the Terminal only.
+- **Wiretrace app.** The setup builds `~/Applications/Wiretrace.app` on your Mac, with the
+  Wiretrace icon. Open it from Launchpad, Spotlight or the Dock, pick a project and a device,
+  and the Wiretrace window opens; the menu bar item is how you stop that session.
 - **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
   `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
   SHA-256 checksum, from one commit.
@@ -231,6 +254,9 @@ Release files (`.tar.gz` and `.dmg`, with checksums) are built from a commit int
 `make tarball` (the `.tar.gz` only), `make release` (both), with `COMMIT=<ref>` for another
 commit than `HEAD`. They run `scripts/build-release.sh [--tar-only] [<commit>]`. Commit first,
 including `ui/dist/` after `make ui`: uncommitted changes are never in a release.
+
+The app's icon is `app/Wiretrace.icns`, built from `app/icon.svg` with `make icon` (needs
+`rsvg-convert`) and committed, so testers' Macs never build it.
 
 ## License
 

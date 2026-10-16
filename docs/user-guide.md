@@ -63,10 +63,11 @@ Either way you now have `~/wiretrace`.
 
 ```bash
 cd ~/wiretrace
-scripts/setup-mac.sh
+./install
 ```
 
-If you only test iOS, use `scripts/setup-mac.sh --skip-android`.
+If you only test iOS, use `./install --skip-android`. (`./install` runs
+`scripts/setup-mac.sh`; either command works.)
 
 The first run takes a few minutes. It installs, all inside your home folder:
 
@@ -88,12 +89,12 @@ end up owned by root.
 ### The Wiretrace app
 
 The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS opens it
-without asking. Once you have a preset (Step 6), you can start every session from it instead
-of Terminal:
+without asking. You can start every session from it instead of Terminal:
 
-1. Open **Wiretrace** from Launchpad or Spotlight. To keep it in the Dock, right-click its Dock
-   icon → **Options** → **Keep in Dock**.
-2. Choose your project (a preset), then your device. The last ones you used are selected.
+1. Open **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the
+   Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
+2. Choose your project (a preset: `default`, or one you created in Step 6), then your device.
+   The last ones you used are selected.
 3. After a few seconds the Wiretrace window opens in your browser and **● Wiretrace** appears
    at the top right of the screen.
 
@@ -132,10 +133,13 @@ continue.
 | `INFO CA certificate: not created yet` | Normal before the first start. |
 | `WARN CA private key: readable by other users` | Run the `chmod 600 …` command shown. |
 
-### Step 6 — Create a preset for your project
+### Step 6 — Optional: create a preset for your project
 
-A preset tells Wiretrace which API hosts to decrypt. It is one file per project and
-environment in `~/wiretrace/presets/`. Start from the example:
+A preset tells Wiretrace which API hosts to decrypt: only the hosts under its `api_hosts:`
+are decrypted. It is one file per project and environment in `~/wiretrace/presets/`.
+Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
+and start with `--preset default`. For another project or environment, start from the
+example:
 
 ```bash
 cd ~/wiretrace
@@ -199,24 +203,24 @@ iPhone:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --target ios --ui wiretrace
+./wiretrace start --preset default --target ios --ui wiretrace
 ```
 
 Android phone:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --target android --ui wiretrace
+./wiretrace start --preset default --target android --ui wiretrace
 ```
 
 A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --mode proxy --ui wiretrace
+./wiretrace start --preset default --mode proxy --ui wiretrace
 ```
 
-If your preset has another name, change `staging`. For the Android emulator use
+With a preset you created, change `default` to its name. For the Android emulator use
 `--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
 [Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
 in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick
@@ -314,7 +318,8 @@ running and go on with Part 3, or press **Ctrl+C** and start again later.
 
 ## Part 3 — Test with Wiretrace (every session)
 
-The examples use a preset named `staging` (Part 1, Step 6).
+The examples use a preset named `staging` (Part 1, Step 6). With the preset that comes with
+Wiretrace, use `--preset default`.
 
 ### Step 1 — Start capturing
 
@@ -964,7 +969,7 @@ Your device setup (CA and tunnel in `~/.mitmproxy`) stays valid.
 ```bash
 mv ~/wiretrace ~/wiretrace-old
 tar -xzf wiretrace-<version>-macos.tar.gz -C ~
-cd ~/wiretrace && scripts/setup-mac.sh
+cd ~/wiretrace && ./install
 ```
 
 The setup also updates the Wiretrace app, which then opens the new folder.
@@ -972,7 +977,8 @@ The setup also updates the Wiretrace app, which then opens the new folder.
 Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
 files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
 `~/wiretrace-old/rules/` to `~/wiretrace/rules/`, and any sessions you want to keep from
-`~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
+`~/wiretrace-old/sessions/`. If you changed `presets/default.yaml`, copy it too: the new
+version comes with its own. Then delete `~/wiretrace-old`.
 
 Stop Wiretrace (Ctrl+C, or **Stop session** in the **● Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
 builds can carry the same version number, so to check which one you run, look at the Terminal
