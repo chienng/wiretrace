@@ -632,7 +632,9 @@ or *Stop session* in the menu bar, still ends Wiretrace and never starts the cho
 
 **What each area does.**
 
-- **Title bar.** *Traffic* and *Logs* switch between the two views; *Logs* shows the number of
+- **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
+  (for example *v0.8.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is
   still saved to the session folder. It also shows the preset (a menu, see *Switching the
