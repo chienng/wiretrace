@@ -220,9 +220,19 @@ going through mitmproxy"*, or does not load, the tunnel is off or not connected:
 
 **Android**
 
-1. On `mitm.it`, download the Android certificate.
-2. Settings → Security → Encryption & credentials → Install a certificate → **CA certificate**
-   (the menu names vary by vendor).
+1. On `mitm.it`, in Chrome, tap **Get mitmproxy-ca-cert.cer** under Android. Tapping the
+   downloaded file does not install it; use Settings (step 2).
+2. Open the certificate menu. The names depend on the phone maker:
+   - Most phones (Pixel and others): Settings → Security → Encryption & credentials →
+     Install a certificate → **CA certificate**.
+   - Samsung: Settings → **Security and privacy** → **More security settings** → **Install from
+     device storage** → **CA certificate**. On older Samsung phones, the first two are
+     **Biometrics and security** → **Other security settings**.
+   - Not there? Search Settings for **CA certificate**.
+3. Tap **Install anyway** at the warning, then pick `mitmproxy-ca-cert.cer` in **Downloads**.
+   If the phone has no screen lock, it asks you to set a PIN, pattern or password first.
+4. Check: in the same menu, **Trusted credentials** (Samsung: **View security certificates**) →
+   **User** lists **mitmproxy**.
 
 **If `mitm.it` does not load**, install the certificate file directly. It is on your Mac at
 `~/.mitmproxy/`:
@@ -235,7 +245,7 @@ going through mitmproxy"*, or does not load, the tunnel is off or not connected:
   adb push ~/.mitmproxy/mitmproxy-ca-cert.cer /sdcard/Download/
   ```
 
-  then Settings → Security → Install a certificate → CA certificate → pick the file.
+  then do steps 2 to 4 above.
 
 ### Step 4 — Check
 

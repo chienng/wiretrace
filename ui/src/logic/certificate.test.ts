@@ -18,6 +18,17 @@ describe('certificate steps', () => {
     expect(steps).toContain('Safari');
   });
 
+  it('gives Android the Samsung menu and a search fallback, not only the stock menu', () => {
+    // Regression: Samsung phones have no "Encryption & credentials" menu, so the stock path alone
+    // left Samsung users without a way to install the certificate.
+    const steps = firstSteps('android');
+    expect(steps).toContain('Encryption & credentials');
+    expect(steps).toContain('Samsung: Settings → Security and privacy → More security settings → Install from device storage');
+    expect(steps).toContain('Search Settings for "CA certificate"');
+    expect(steps).toContain('does not install it');
+    expect(steps.indexOf('View security certificates')).toBeGreaterThan(steps.indexOf('Install anyway'));
+  });
+
   it('names how the phone is connected', () => {
     expect(firstSteps('ios', true)).toMatch(/^With the WireGuard tunnel on/);
     expect(firstSteps('android', false)).toMatch(/^With the Wi-Fi proxy set/);

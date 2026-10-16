@@ -37,11 +37,26 @@ function android(connected: string): CertGroup {
     platform: 'Android',
     steps: [
       { text: `${connected}, open http://mitm.it in Chrome.` },
-      { text: 'Under Android, tap "Get mitmproxy-ca-cert.cer" to download it.' },
       {
         text:
-          'Settings → Security → Encryption & credentials → Install a certificate → CA certificate, and pick the ' +
-          'file. The menu names vary by phone maker.',
+          'Under Android, tap "Get mitmproxy-ca-cert.cer" to download it. Tapping the downloaded file does not ' +
+          'install it: use Settings, next step.',
+      },
+      {
+        text:
+          'Install it from Settings. Most phones: Settings → Security → Encryption & credentials → Install a ' +
+          'certificate → CA certificate. Samsung: Settings → Security and privacy → More security settings → ' +
+          'Install from device storage → CA certificate (older Samsung: Biometrics and security → Other security ' +
+          'settings). Not there? Search Settings for "CA certificate".',
+      },
+      {
+        text:
+          'Tap Install anyway, then pick mitmproxy-ca-cert.cer in Downloads. The phone asks for a screen lock ' +
+          '(PIN, pattern or password) if it has none.',
+      },
+      {
+        text:
+          'Check: in the same menu, Trusted credentials (Samsung: View security certificates) → User lists mitmproxy.',
       },
       { text: 'Only a QA build of the app that trusts user CAs uses this certificate; store builds ignore it.' },
     ],
