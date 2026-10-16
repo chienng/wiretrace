@@ -8,19 +8,46 @@ set -euo pipefail
 
 usage() {
     cat <<'EOF'
-Usage: scripts/setup-mac.sh [--skip-android]
+Usage: scripts/setup-mac.sh [--skip-android] [--no-open]
 
 Installs uv, Python 3.12 and the Wiretrace Python packages (into .venv), plus
 Android platform-tools (into ~/tools) unless --skip-android is given, and
 creates ~/Applications/Wiretrace.app. Needs no admin rights. Ends by running
-./wiretrace doctor.
+./wiretrace doctor and, when it passes, opening the Wiretrace app (not with
+--no-open, or when the output is not a terminal).
 EOF
 }
 
+# The closing lines. Wiretrace finds adb in ~/tools itself, so it runs before the
+# PATH changes apply; only adb or uv typed in Terminal need a new window.
+finish() {
+    local app_made="$1" status="$2" open_app="$3" app="$4"
+    echo
+    if [ "$status" -ne 0 ]; then
+        echo "Fix the FAIL lines above, then run ./wiretrace doctor again."
+        if [ "$app_made" -eq 1 ]; then
+            echo "Then open Wiretrace from Launchpad or Spotlight."
+        fi
+    elif [ "$app_made" -eq 1 ] && [ "$open_app" -eq 1 ] && open "$app" 2>/dev/null; then
+        echo "Wiretrace is ready, and the Wiretrace app is opening: choose your project and device."
+        echo "Next time, open Wiretrace from Launchpad or Spotlight; no Terminal needed."
+    elif [ "$app_made" -eq 1 ]; then
+        echo "Wiretrace is ready: open Wiretrace from Launchpad or Spotlight; no Terminal needed."
+    else
+        echo "Wiretrace is ready: start it with ./wiretrace start (see the README)."
+    fi
+    if [ "$app_made" -eq 1 ]; then
+        echo "To keep it in the Dock: right-click its Dock icon > Options > Keep in Dock."
+    fi
+    echo "To type adb or uv yourself, open a new Terminal window first (or run: exec zsh)."
+}
+
 skip_android=0
+open_app=1
 for arg in "$@"; do
     case "$arg" in
         --skip-android) skip_android=1 ;;
+        --no-open) open_app=0 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown option: $arg" >&2; usage >&2; exit 2 ;;
     esac
@@ -178,10 +205,6 @@ set +e
 status=$?
 set -e
 
-echo
-echo "Open a new Terminal window (or run: exec zsh) so the PATH changes apply."
-if [ "$app_made" -eq 1 ]; then
-    echo "Next time, open Wiretrace from Launchpad or Spotlight; no Terminal needed."
-    echo "To keep it in the Dock: right-click its Dock icon > Options > Keep in Dock."
-fi
+[ -t 1 ] || open_app=0
+finish "$app_made" "$status" "$open_app" "$HOME/Applications/Wiretrace.app"
 exit "$status"

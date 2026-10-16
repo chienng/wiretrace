@@ -217,6 +217,61 @@ def test_setup_picks_the_native_cpu_even_under_rosetta(tmp_path, machine, transl
     assert result.stdout.strip() == expected
 
 
+def run_setup_finish(tmp_path, app_made, status, open_app, open_works=True):
+    import re
+    import subprocess
+    from pathlib import Path
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "setup-mac.sh").read_text()
+    function = re.search(r"^finish\(\) \{\n.*?^\}\n", script, re.S | re.M).group(0)
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    opened = tmp_path / "opened"
+    stub = bin_dir / "open"
+    stub.write_text(f'#!/bin/sh\necho "$@" >> {opened}\nexit {0 if open_works else 1}\n')
+    stub.chmod(0o755)
+    result = subprocess.run(
+        ["/bin/bash", "-c", function + f'finish {app_made} {status} {open_app} "/Apps/Wiretrace.app"'],
+        env={"PATH": str(bin_dir)}, capture_output=True, text=True, check=True)
+    return result.stdout, opened.read_text().split("\n")[:-1] if opened.exists() else []
+
+
+def test_setup_opens_the_app_when_the_check_passes(tmp_path):
+    out, opened = run_setup_finish(tmp_path, app_made=1, status=0, open_app=1)
+    assert opened == ["/Apps/Wiretrace.app"]
+    assert "the Wiretrace app is opening" in out
+    assert "Keep in Dock" in out
+    assert "To type adb or uv yourself, open a new Terminal window" in out
+    assert "so the PATH changes apply" not in out
+
+
+@pytest.mark.parametrize("app_made, status, open_app, expected", [
+    (1, 1, 1, "Fix the FAIL lines above"),
+    (1, 0, 0, "open Wiretrace from Launchpad or Spotlight"),
+    (0, 0, 1, "start it with ./wiretrace start"),
+])
+def test_setup_does_not_open_the_app_after_a_fail_with_no_open_or_without_the_app(
+        tmp_path, app_made, status, open_app, expected):
+    out, opened = run_setup_finish(tmp_path, app_made, status, open_app)
+    assert opened == []
+    assert expected in out
+    assert "is opening" not in out
+
+
+def test_setup_says_where_the_app_is_when_it_cannot_open_it(tmp_path):
+    out, opened = run_setup_finish(tmp_path, app_made=1, status=0, open_app=1, open_works=False)
+    assert opened == ["/Apps/Wiretrace.app"]
+    assert "is opening" not in out
+    assert "Wiretrace is ready: open Wiretrace from Launchpad or Spotlight" in out
+
+
+def test_setup_opens_the_app_only_from_a_terminal_and_without_no_open():
+    from pathlib import Path
+    script = (Path(__file__).resolve().parent.parent / "scripts" / "setup-mac.sh").read_text()
+    assert "--no-open) open_app=0 ;;" in script
+    assert "[ -t 1 ] || open_app=0\n" in script
+    assert 'finish "$app_made" "$status" "$open_app" "$HOME/Applications/Wiretrace.app"' in script
+
+
 def test_setup_asks_uv_for_the_python_of_that_cpu():
     from pathlib import Path
     script = (Path(__file__).resolve().parent.parent / "scripts" / "setup-mac.sh").read_text()
