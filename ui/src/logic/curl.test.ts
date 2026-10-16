@@ -32,6 +32,24 @@ describe('buildCurl', () => {
     );
   });
 
+  it('replaces accept-encoding with --compressed and drops content-length', () => {
+    const detail = {
+      summary: flow({ method: 'POST', path: '/api/v1/orders' }),
+      request: {
+        http_version: 'HTTP/1.1',
+        headers: [
+          ['Accept-Encoding', 'gzip'],
+          ['content-length', '2'],
+          ['accept', '*/*'],
+        ] as [string, string][],
+        body: body('{}'),
+      },
+    };
+    expect(buildCurl(detail)).toBe(
+      `curl -X 'POST' 'https://api.example.com/api/v1/orders' -H 'accept: */*' --compressed --data-raw '{}'`,
+    );
+  });
+
   it('leaves out the body when there is none or it is binary', () => {
     const request = { http_version: 'HTTP/1.1', headers: [], body: body('') };
     expect(buildCurl({ summary: flow(), request })).toBe(`curl -X 'GET' 'https://api.example.com/api/v1/profile'`);
