@@ -1,6 +1,6 @@
 import { api, ApiError } from '../api';
 import { devicePill } from '../logic/device';
-import { formatElapsed } from '../logic/format';
+import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
 import { OFF_WHILE_VIEWING, presetMenuState } from '../logic/presets';
 import { useNow } from '../hooks';
@@ -123,10 +123,18 @@ export function TitleBar({ newCount }: Props) {
   const rulesOn = appState?.rules_on ?? 0;
   const seen = !!appState && (appState.flow_count > 0 || flows.length > 0);
   const pill = appState ? devicePill(appState) : null;
+  const version = formatVersion(appState?.version);
 
   return (
     <header className="titlebar">
-      <span className="title">Wiretrace</span>
+      <span className="title">
+        Wiretrace
+        {version && (
+          <span className="version" title="Wiretrace version">
+            {version}
+          </span>
+        )}
+      </span>
       <div className="seg sm" role="tablist" aria-label="View">
         <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>
           Traffic
