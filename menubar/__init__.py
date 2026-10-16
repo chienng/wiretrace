@@ -19,6 +19,9 @@ FRESH_S = 5.0
 STARTING, LIVE, STALE, STOPPING = "STARTING", "LIVE", "STALE", "STOPPING"
 CHECK_ARGV = "--check"
 MAX_STATUS_BYTES = 65_536
+# The W mark left of the title, a template image built from app/menubar-icon.svg.
+ICON_PATH = Path(__file__).with_name("icon.pdf")
+ICON_HEIGHT_PT = 12.0
 
 TARGET_LABELS = {
     "android": "Android",
@@ -123,7 +126,7 @@ def render(status: dict | None, now: float, stopping: bool, *, seen: bool = Fals
 def _render(status: dict | None, now: float, seen: bool) -> MenuView:
     if is_fresh(status, now) and isinstance(status, dict):
         errors = _count(status, "errors")
-        title = f"● Wiretrace · {errors}" if errors else "● Wiretrace"
+        title = f"Wiretrace · {errors}" if errors else "Wiretrace"
         last = _text(status, "last_error") or None
         rows = (
             _info("Wiretrace", "Recording"),

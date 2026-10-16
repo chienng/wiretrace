@@ -102,13 +102,13 @@ without asking. You can start every session from it instead of Terminal:
    Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
 2. Choose your project (a preset: `default`, or one you created in Step 6), then your device.
    The last ones you used are selected.
-3. After a few seconds the Wiretrace window opens in your browser and **● Wiretrace** appears
-   at the top right of the screen.
+3. After a few seconds the Wiretrace window opens in your browser and the **Wiretrace** menu
+   (the W at the top right of the screen) appears.
 
 <!-- Screenshot of the two lists: taken during the spec 014 runtime check. -->
 
 The session keeps recording after the app's last message closes. To stop it and save
-`flows.har`, use **Stop session** in the **● Wiretrace** menu: a session started from the app
+`flows.har`, use **Stop session** in the **Wiretrace** menu (the W at the top right): a session started from the app
 has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
 
 The app opens the folder the setup ran in. If you move that folder, the app says so: run
@@ -641,8 +641,9 @@ window only answers on this Mac and cannot be reached from the network. If you c
 copy the link from the Terminal again. Do not paste the link into a chat or a ticket: the
 window shows requests with their tokens, and the phone's WireGuard configuration.
 
-**Menu bar.** With `--ui wiretrace`, a **● Wiretrace** item appears in the macOS menu bar
-(no Dock icon). After a request fails it reads **● Wiretrace · N**, where N is the same count
+**Menu bar.** With `--ui wiretrace`, a **Wiretrace** item with the W mark appears in the macOS
+menu bar (no Dock icon). It is dimmed while the session starts, and when Wiretrace stops
+answering (it then reads **Wiretrace · ?**). After a request fails it reads **Wiretrace · N**, where N is the same count
 as the window's *Errors* filter. The menu shows the preset, the device (target, mode, and the
 phone's model when logs are streaming), how long the session has been running, and the request,
 error and rules-on counts. **Open Wiretrace** (⌘O) opens the window again, including after you
@@ -1007,7 +1008,7 @@ files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
 `~/wiretrace-old/sessions/`. If you changed `presets/default.yaml`, copy it too: the new
 version comes with its own. Then delete `~/wiretrace-old`.
 
-Stop Wiretrace (Ctrl+C, or **Stop session** in the **● Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
+Stop Wiretrace (Ctrl+C, or **Stop session** in the **Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
 builds can carry the same version number, so to check which one you run, look at the Terminal
 banner: a build with rules prints a `Rules:` line.
 

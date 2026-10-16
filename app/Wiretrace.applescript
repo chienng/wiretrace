@@ -2,12 +2,11 @@
 -- tester's Mac. The logic is in `wiretrace app` (cli/app.py); this only shows lists and dialogs.
 -- Spec: docs/specs/014-mac-app-install-and-launcher.md.
 --
--- ASCII only: the bullet and the ellipsis are made with `character id`.
+-- ASCII only: the ellipsis is made with `character id`.
 
 property appTitle : "Wiretrace"
 
 on run
-	set bullet to character id 9679
 	set ellipsis to character id 8230
 	set rootFile to (POSIX path of (path to me)) & "Contents/Resources/wiretrace-root"
 	try
@@ -54,7 +53,7 @@ on run
 	end repeat
 
 	if recordingPreset is not "" then
-		display dialog "Wiretrace is already recording " & recordingPreset & ". Use the " & bullet & " Wiretrace menu at the top right to open the window or stop." with title appTitle buttons {"OK"} default button "OK"
+		display dialog "Wiretrace is already recording " & recordingPreset & ". Use the Wiretrace menu (the W at the top right) to open the window or stop." with title appTitle buttons {"OK"} default button "OK"
 		return
 	end if
 	if projectNames is {} then
@@ -92,7 +91,7 @@ on run
 	else
 		set message to "Wiretrace is recording " & projectName & "."
 	end if
-	display dialog message & " Stop it from the " & bullet & " Wiretrace menu at the top right." with title appTitle buttons {"OK"} default button "OK" giving up after 15
+	display dialog message & " Stop it from the Wiretrace menu (the W at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
 end run
 
 on showError(message)

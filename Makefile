@@ -5,7 +5,7 @@
 #   make tarball COMMIT=v0.7.1   the same, from another commit or tag
 #   make release                 the .tar.gz and the .dmg, each with a .sha256
 #   make ui                      rebuild ui/dist/ (commit it before a release)
-#   make icon                    rebuild app/Wiretrace.icns from app/icon.svg (needs rsvg-convert)
+#   make icon                    rebuild app/Wiretrace.icns and menubar/icon.pdf (needs rsvg-convert)
 #   make install                 run the setup (./install), for developers: testers' Macs
 #                                usually have no make, so the README uses ./install
 
@@ -19,7 +19,7 @@ help:
 	@echo "make tarball [COMMIT=<ref>]   build dist/wiretrace-<version>-macos.tar.gz (+ .sha256)"
 	@echo "make release [COMMIT=<ref>]   build the .tar.gz and the .dmg (+ .sha256 each)"
 	@echo "make ui                       rebuild ui/dist/ with npm (commit it before a release)"
-	@echo "make icon                     rebuild app/Wiretrace.icns from app/icon.svg (commit it)"
+	@echo "make icon                     rebuild app/Wiretrace.icns and menubar/icon.pdf (commit them)"
 	@echo "make clean                    remove the release files of the current version from dist/"
 
 install:

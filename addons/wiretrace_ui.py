@@ -1267,7 +1267,7 @@ class WiretraceUI:
             try:
                 await asyncio.to_thread(webbrowser.open, link)
             except Exception:
-                where = "open the link above" if print_link else "use Open Wiretrace in the ● Wiretrace menu"
+                where = "open the link above" if print_link else "use Open Wiretrace in the Wiretrace menu (the W at the top right)"
                 logger.error("Wiretrace UI: could not open the browser; %s", where)
 
     async def done(self) -> None:

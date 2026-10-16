@@ -275,3 +275,18 @@ All of the tests listed under "Tests derived from them", plus:
 - The addon without `WIRETRACE_UI_TOKEN` behaves as in 0.8.0; the existing token tests pass.
 - The page with `#flow=<known id>` selects it; with an unknown ID nothing changes; the
   fragment is removed after reading.
+
+## Errata
+
+2026-10-16, for 0.9.0, after a tester could not find the item:
+
+- **The W mark replaces the ●.** The title is `Wiretrace` / `Wiretrace · N` (LIVE),
+  `Wiretrace · ?` (STALE), `Wiretrace` (STARTING) and `Wiretrace · stopping`, with the
+  Wiretrace mark at its left in every state. The mark is `menubar/icon.pdf`, built from
+  `app/menubar-icon.svg` by `make icon` and committed. It's a template image, so macOS tints
+  it for a light or dark menu bar, scaled to 12 pt high. When the file can't be loaded the
+  item shows the title alone.
+- **Dimmed unless LIVE.** The ● was the only difference between STARTING and LIVE, so the
+  item now uses the system's dimmed look in every state but LIVE.
+- Docs and dialogs say "the Wiretrace menu (the W at the top right)". The criteria and the
+  state table above keep the old titles as a record of what shipped in 0.8.0.

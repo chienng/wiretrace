@@ -16,7 +16,9 @@ import time
 import webbrowser
 from pathlib import Path
 
-from menubar import CHECK_ARGV, read_status, render, row_text, stop_effect, window_url
+from menubar import (
+    CHECK_ARGV, ICON_HEIGHT_PT, ICON_PATH, LIVE, read_status, render, row_text, stop_effect, window_url,
+)
 
 APP_ARGV = "--app"
 USAGE = "usage: python -m menubar PID PORT STATUS_PATH [--app]"
@@ -55,6 +57,19 @@ def check() -> int:
     return 0
 
 
+def load_icon(appkit):
+    """The W mark as a template image, so macOS tints it for a light or dark menu bar. None if missing."""
+    image = appkit.NSImage.alloc().initWithContentsOfFile_(str(ICON_PATH))
+    if image is None:
+        return None
+    size = image.size()
+    if size.height <= 0:
+        return None
+    image.setSize_((size.width * ICON_HEIGHT_PT / size.height, ICON_HEIGHT_PT))
+    image.setTemplate_(True)
+    return image
+
+
 def read_token() -> str:
     token = sys.stdin.readline().rstrip("\n")
     try:
@@ -84,6 +99,11 @@ class Bar:
         self.view = render(None, time.time(), False, app=app)
         bar = appkit.NSStatusBar.systemStatusBar()
         self.item = bar.statusItemWithLength_(appkit.NSVariableStatusItemLength)
+        button = self.item.button()
+        icon = load_icon(appkit)
+        if button is not None and icon is not None:
+            button.setImage_(icon)
+            button.setImagePosition_(appkit.NSImageLeft)
         self.menu = None
         self.apply(rebuild=True)
 
@@ -135,6 +155,8 @@ class Bar:
         button = self.item.button()
         if button is not None:
             button.setTitle_(self.view.title)
+            # Dimmed unless recording: the title alone reads "Wiretrace" while starting too.
+            button.setAppearsDisabled_(self.view.state != LIVE)
         if not rebuild:
             return
         menu = self.appkit.NSMenu.alloc().init()

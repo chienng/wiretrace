@@ -7,6 +7,7 @@ import pytest
 
 from menubar import (
     FRESH_S,
+    ICON_PATH,
     LIVE,
     STALE,
     STARTING,
@@ -54,7 +55,7 @@ def test_starting_until_a_status_file_has_been_read():
 def test_live_menu_matches_the_counts_and_hides_a_zero():
     view = render(status(), 1_000.0, False)
     assert view.state == LIVE
-    assert view.title == "● Wiretrace · 6"
+    assert view.title == "Wiretrace · 6"
     assert row(view, "Wiretrace").value == "Recording"
     assert row(view, "Preset").value == "staging"
     assert row(view, "Device").value == "Android · WireGuard · Pixel 8"
@@ -69,12 +70,20 @@ def test_live_menu_matches_the_counts_and_hides_a_zero():
 
 def test_zero_errors_has_no_count_in_the_title_and_show_last_error_is_grey():
     view = render(status(errors=0, last_error=None), 1_000.0, False)
-    assert view.title == "● Wiretrace"
+    assert view.title == "Wiretrace"
     assert "· 0" not in view.title
     assert row(view, "errors").alert is False
     assert row(view, "Show last error").enabled is False
     assert "last_error" not in enabled_actions(view)
     assert view.last_error is None
+
+
+def test_the_w_mark_ships_with_the_menu_bar_and_no_title_has_a_dot():
+    assert ICON_PATH.read_bytes().startswith(b"%PDF-"), "run `make icon`"
+    views = [render(None, 1_000.0, False), render(status(), 1_000.0, False),
+             render(status(), 1_000.0, False, seen=True), render(None, 1_000.0, False, seen=True),
+             render(status(), 1_000.0, True)]
+    assert all(view.title.startswith("Wiretrace") for view in views)
 
 
 @pytest.mark.parametrize("model", [None, "", "  "])
@@ -92,7 +101,7 @@ def test_updated_at_exactly_five_seconds_old_is_live_and_older_is_stale():
     fresh = status(updated_at=1_000.0)
     assert is_fresh(fresh, 1_000.0 + FRESH_S)
     live = render(fresh, 1_000.0 + FRESH_S, False)
-    assert live.state == LIVE and live.title == "● Wiretrace · 6"
+    assert live.state == LIVE and live.title == "Wiretrace · 6"
     stale = render(fresh, 1_000.0 + FRESH_S + 0.001, False)
     assert stale.state == STALE
     assert stale.title == "Wiretrace · ?"
