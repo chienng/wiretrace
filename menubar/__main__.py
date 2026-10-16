@@ -1,4 +1,6 @@
-"""Menu bar process: ``python -m menubar PID PORT STATUS_PATH``, token on stdin.
+"""Menu bar process: ``python -m menubar PID PORT STATUS_PATH [--app]``, token on stdin.
+
+``--app``: the session was started from Wiretrace.app; see :func:`menubar.render`.
 
 The token is the first line of stdin and is not in argv or the environment.
 Exits 2, with one line on stderr, when AppKit is missing or there is no window
@@ -16,6 +18,8 @@ from pathlib import Path
 
 from menubar import CHECK_ARGV, read_status, render, row_text, stop_effect, window_url
 
+APP_ARGV = "--app"
+USAGE = "usage: python -m menubar PID PORT STATUS_PATH [--app]"
 PYOBJC_MISSING = "PyObjC not installed (run scripts/setup-mac.sh)"
 NO_WINDOW_SERVER = "no window server"
 
@@ -63,7 +67,8 @@ def read_token() -> str:
 class Bar:
     """The status item. Plain Python: PyObjC would treat its methods as Objective-C."""
 
-    def __init__(self, appkit, helper, controller, launcher: int, port: int, path: Path, token: str) -> None:
+    def __init__(self, appkit, helper, controller, launcher: int, port: int, path: Path, token: str,
+                 app: bool = False) -> None:
         self.appkit = appkit
         self.helper = helper
         self.controller = controller
@@ -71,11 +76,12 @@ class Bar:
         self.port = port
         self.path = path
         self.token = token
+        self.app = app
         self.signalled = False
         self.stopping = False
         self.seen = False
         self.menu_open = False
-        self.view = render(None, time.time(), False)
+        self.view = render(None, time.time(), False, app=app)
         bar = appkit.NSStatusBar.systemStatusBar()
         self.item = bar.statusItemWithLength_(appkit.NSVariableStatusItemLength)
         self.menu = None
@@ -122,7 +128,7 @@ class Bar:
         status = read_status(self.path)
         if status is not None:
             self.seen = True
-        self.view = render(status, time.time(), self.stopping, seen=self.seen)
+        self.view = render(status, time.time(), self.stopping, seen=self.seen, app=self.app)
         self.apply(rebuild=rebuild)
 
     def apply(self, rebuild: bool) -> None:
@@ -201,19 +207,22 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if args == [CHECK_ARGV]:
         return check()
+    app = args[3:] == [APP_ARGV]
+    if app:
+        args = args[:3]
     if len(args) != 3:
-        fail("usage: python -m menubar PID PORT STATUS_PATH")
+        fail(USAGE)
     try:
         launcher_pid, port = int(args[0]), int(args[1])
     except ValueError:
-        fail("usage: python -m menubar PID PORT STATUS_PATH")
+        fail(USAGE)
     status_path = Path(args[2])
     token = read_token()
     appkit, app_helper = load_appkit()
     if not window_server(appkit):
         fail(NO_WINDOW_SERVER)
     controller = _define_controller(appkit).alloc().init()
-    controller.bar = Bar(appkit, app_helper, controller, launcher_pid, port, status_path, token)
+    controller.bar = Bar(appkit, app_helper, controller, launcher_pid, port, status_path, token, app=app)
     appkit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
         1.0, controller, "tick:", None, True)
     controller.tick_(None)

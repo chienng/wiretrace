@@ -6,3 +6,5 @@ __pycache__/
 .pytest_cache/
 .DS_Store
 ui/node_modules/
+/.app-last
+/app-start.log

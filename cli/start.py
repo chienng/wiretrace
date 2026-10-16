@@ -10,7 +10,9 @@ longer reaches it, so the launcher forwards every stop. It never decides the sta
 
 With `--ui wiretrace`, a third child (`python -m menubar`) is the menu bar item.
 It is also in its own session. It may send one SIGINT here, which is the same stop
-as Ctrl+C. The launcher stops that child on every exit path.
+as Ctrl+C. The launcher stops that child on every exit path. With `--from-app` there
+is no Terminal, so the menu is the only stop: a menu that ends is a stop too
+(docs/specs/014-mac-app-install-and-launcher.md).
 
 States (docs/specs/002-start-launcher-presets-sessions.md, 004-log-collectors-and-app-log-receiver.md):
 PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> ABORTED.
@@ -50,6 +52,8 @@ POLL_S = 0.1
 SWITCH_RETRY_S = 1.0
 MAX_SWITCH_BYTES = 4096
 MENU_CLOSED = "Menu bar: closed; capture continues (Ctrl+C here to stop)"
+MENU_CLOSED_APP = "Menu bar closed; stopping the session (started from Wiretrace.app)."
+APP_NEEDS_MENU = "--from-app needs --ui wiretrace and the menu bar item."
 WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 # Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
@@ -135,7 +139,7 @@ def client_problem(addresses: Sequence[str]) -> str | None:
 
 def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
                   proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-                  ui_port: int = UI_PORT, clients: Sequence[str] = ()) -> list[str]:
+                  ui_port: int = UI_PORT, clients: Sequence[str] = (), from_app: bool = False) -> list[str]:
     kind = ui_kind(ui)
     cmd = [str(bin_dir / ("mitmweb" if kind == MITMWEB else "mitmdump"))]
     if mode == "wireguard":
@@ -174,6 +178,9 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
                 "--set", f"qa_ui_session_dir={flows.parent}",
                 "--set", f"qa_ui_default_filter={preset.default_filter or ''}",
                 "--set", "qa_ui_open_browser=true"]
+        if from_app:
+            # Its output goes to app-start.log, a file: the link with the token must not.
+            cmd += ["--set", "qa_ui_print_link=false"]
     elif preset.default_filter:
         # An option, not mitmdump's positional filter argument, which would also limit saving.
         option = "view_filter" if kind == MITMWEB else "dumper_filter"
@@ -235,9 +242,15 @@ def menu_bar_text(kind: str, no_menu_bar: bool, problem: str | None) -> str | No
     return "on"
 
 
-def menu_command(launcher_pid: int, port: int, status_path: Path) -> list[str]:
+def menu_command(launcher_pid: int, port: int, status_path: Path, app: bool = False) -> list[str]:
     """Argv for the menu process. The token is not here; it is written to stdin."""
-    return [sys.executable, "-m", "menubar", str(launcher_pid), str(port), str(status_path)]
+    cmd = [sys.executable, "-m", "menubar", str(launcher_pid), str(port), str(status_path)]
+    return cmd + ["--app"] if app else cmd
+
+
+def app_menu_problem(reason: str) -> str:
+    return (f"The menu bar item could not start ({reason}). "
+            "A session started from the app cannot be stopped without it.")
 
 
 def mitm_env(token: str | None) -> dict[str, str] | None:
@@ -306,10 +319,14 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
         ui_port: int = UI_PORT, clients: Sequence[str] = (), no_menu_bar: bool = False,
         collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command,
-        menu_available: Callable[[], str | None] | None = None) -> int:
+        menu_available: Callable[[], str | None] | None = None, from_app: bool = False) -> int:
     problem = client_problem(clients)
     if problem:
         say(problem, err=True)
+        return 1
+    kind = ui_kind(ui)
+    if from_app and (kind != WIRETRACE or no_menu_bar):
+        say(APP_NEEDS_MENU, err=True)
         return 1
     try:
         preset = load_preset(preset_name, presets_dir)
@@ -317,9 +334,18 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         say(str(e), err=True)
         return 1
 
-    kind = ui_kind(ui)
     if ports_busy(mode, kind, proxy_port, ui_port):
         return 1
+
+    probe_menu = menu_available or _menu_problem
+    # Asked once before any folder exists; the first session reuses the answer.
+    menu_probed = False
+    if from_app:
+        reason = probe_menu()
+        if reason:
+            say(app_menu_problem(reason), err=True)
+            return 1
+        menu_probed = True
 
     removed = session.remove_old(sessions_dir, datetime.now())
     if removed:
@@ -360,16 +386,22 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             menu_problem = None
             menu_cmd = None
             if kind == WIRETRACE and not no_menu_bar:
-                menu_problem = (menu_available or _menu_problem)()
+                menu_problem = None if menu_probed else probe_menu()
+                menu_probed = False
+                if from_app and menu_problem:
+                    session.remove(folder)
+                    say(app_menu_problem(menu_problem), err=True)
+                    return 1
                 if menu_problem is None and token:
-                    menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS)
+                    menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS, app=from_app)
             # Invariant 1: every stop signal ends the run, so any signal at all means no next child.
             if switched and signals[0]:
                 session.remove(folder)
                 return code
             say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
                        menu_bar_text(kind, no_menu_bar, menu_problem)))
-            child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients)
+            child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients,
+                                      from_app=from_app)
             har_cmd = har_command(bin_dir, flows, folder / session.HAR_TMP)
             # Checked again as late as possible: a signal during the banner must not start the child.
             if switched and signals[0]:
@@ -388,6 +420,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 child_env=mitm_env(token),
                 switch=kind == WIRETRACE,
                 outcome=outcome,
+                from_app=from_app,
             )
             # Invariant 9: only the Wiretrace window loops.
             if kind != WIRETRACE or outcome.state != RUNNING or outcome.switch_to is None or signals[0]:
@@ -552,14 +585,15 @@ class _MenuBar:
     The token is the first line on stdin and is not in argv or the environment.
     """
 
-    def __init__(self, proc: subprocess.Popen) -> None:
+    def __init__(self, proc: subprocess.Popen, app: bool = False) -> None:
         self.proc = proc
+        self.app = app
         self.exit_reported = False
         self.closed = False
         self._err: str | None = None
 
     @classmethod
-    def start(cls, cmd: list[str], token: str) -> _MenuBar | None:
+    def start(cls, cmd: list[str], token: str, app: bool = False) -> _MenuBar | None:
         pythonpath = os.pathsep.join(p for p in (str(WIRETRACE_DIR), os.environ.get("PYTHONPATH")) if p)
         env = os.environ.copy()
         env.pop("WIRETRACE_UI_TOKEN", None)
@@ -581,7 +615,7 @@ class _MenuBar:
             proc.wait()
             say("Menu bar: off (could not start)")
             return None
-        return cls(proc)
+        return cls(proc, app)
 
     def _reason(self) -> str:
         if self._err is not None:
@@ -596,16 +630,22 @@ class _MenuBar:
         self._err = text.splitlines()[-1].strip() if text else ""
         return self._err or "could not start"
 
-    def notice_exit(self) -> None:
-        """The menu ended by itself while RUNNING: say so once and do not start it again."""
+    def notice_exit(self) -> bool:
+        """The menu ended by itself while RUNNING: say so once and do not start it again.
+
+        True the one time the exit is noticed.
+        """
         code = self.proc.poll()
         if code is None or self.exit_reported:
-            return
+            return False
         self.exit_reported = True
         if code == 2:
             say(f"Menu bar: off ({self._reason()})")
-        else:
+        if self.app:
+            say(MENU_CLOSED_APP)
+        elif code != 2:
             say(MENU_CLOSED)
+        return True
 
     def stop(self) -> None:
         """After the session is saved: SIGTERM, wait up to MENU_STOP_S, SIGKILL, reap."""
@@ -633,11 +673,12 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
               collector_cmd: list[str] | None = None, rules: redact.Rules | None = None, *,
               menu_cmd: list[str] | None = None, menu_token: str | None = None,
               child_env: dict[str, str] | None = None, switch: bool = False,
-              outcome: Outcome | None = None) -> int:
+              outcome: Outcome | None = None, from_app: bool = False) -> int:
     """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`.
 
     `switch`: read and delete `.switch.json` once the child has exited. `outcome` gets the state
-    the child exited in and the preset that file named.
+    the child exited in and the preset that file named. `from_app`: a menu that ends, or that
+    cannot start, stops the session.
     """
     tool = Path(child_cmd[0]).name
     try:
@@ -656,7 +697,10 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
             if collector is None:
                 session.update_meta(folder, device_logs=None, device_logs_off="the collector could not start")
         if menu_cmd and menu_token:
-            menu = _MenuBar.start(menu_cmd, menu_token)
+            menu = _MenuBar.start(menu_cmd, menu_token, app=from_app)
+            if menu is None and from_app:
+                say(MENU_CLOSED_APP)
+                stops.append(signal.SIGINT)
         state = _wait(child, stops, collector, menu)
         ended_at = session.timestamp()
         # Invariant 6: read before `_finalize` may remove an empty folder.
@@ -710,8 +754,10 @@ def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | Non
             warned = True
         if collector and state == RUNNING:
             collector.notice_exit()
-        if menu and state == RUNNING:
-            menu.notice_exit()
+        if menu and state == RUNNING and menu.notice_exit() and menu.app:
+            # The same stop as the menu's own SIGINT: it lands in `stops`, so it is never a switch.
+            stops.append(signal.SIGINT)
+            continue
         try:
             child.wait(timeout=POLL_S)
         except subprocess.TimeoutExpired:

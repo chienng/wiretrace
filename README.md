@@ -46,6 +46,10 @@ scripts/setup-mac.sh                 # add --skip-android if you only test iOS
 It ends with a setup check. Only `FAIL` lines must be fixed; run `./wiretrace doctor` to
 check again. Then open a **new** Terminal window.
 
+The setup also creates the **Wiretrace app** in `~/Applications`. After step 4, open it from
+Launchpad or Spotlight instead of step 5: choose your project and your phone, and the window
+opens. Stop the session from the **● Wiretrace** menu at the top right of the screen.
+
 **4. Create a preset** for your project. A preset tells Wiretrace which hosts to decrypt:
 
 ```bash
@@ -66,7 +70,8 @@ In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
 If `./wiretrace start` says *name is 'example', but must equal the file name*, the file was
 not changed or not saved.
 
-**5. Start capturing.** Copy the block for your phone.
+**5. Start capturing**, with the Wiretrace app or in Terminal. In Terminal, copy the block for
+your phone.
 
 iPhone:
 

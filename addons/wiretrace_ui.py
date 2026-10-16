@@ -1163,6 +1163,8 @@ class WiretraceUI:
                           "Session folder: meta.json, the log files and the report.")
         loader.add_option("qa_ui_default_filter", str, "", "Initial search of the Wiretrace window.")
         loader.add_option("qa_ui_open_browser", bool, True, "Open the Wiretrace window link at start.")
+        loader.add_option("qa_ui_print_link", bool, True,
+                          "Print the window link. Off when the output goes to a file (Wiretrace.app).")
 
     def configure(self, updated) -> None:
         if not 0 <= ctx.options.qa_ui_port <= 65535:
@@ -1201,15 +1203,17 @@ class WiretraceUI:
         self._tasks = [asyncio.create_task(self._tail_logs()), asyncio.create_task(self._flush_updates())]
 
         link = f"http://127.0.0.1:{self.port}/?token={self.token}"
+        print_link = ctx.options.qa_ui_print_link
         try:
-            print(f"Wiretrace UI: {link}", flush=True)
+            print(f"Wiretrace UI: {link}" if print_link else "Wiretrace UI: opened in the browser", flush=True)
         except OSError:
             pass
         if ctx.options.qa_ui_open_browser:
             try:
                 await asyncio.to_thread(webbrowser.open, link)
             except Exception:
-                logger.error("Wiretrace UI: could not open the browser; open the link above")
+                where = "open the link above" if print_link else "use Open Wiretrace in the ● Wiretrace menu"
+                logger.error("Wiretrace UI: could not open the browser; %s", where)
 
     async def done(self) -> None:
         self._closed = True

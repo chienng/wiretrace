@@ -1826,3 +1826,137 @@ def test_a_valid_switch_file_names_the_preset_and_is_deleted(tmp_path):
     assert start.take_switch(tmp_path) == "other"
     assert not (tmp_path / session.SWITCH).exists()
     assert start.take_switch(tmp_path) is None
+
+
+# Started from Wiretrace.app (spec 014)
+
+@pytest.mark.parametrize("ui, no_menu_bar", [("mitmweb", False), ("none", False), ("wiretrace", True)])
+def test_from_app_without_the_wiretrace_window_and_its_menu_starts_nothing(tmp_path, monkeypatch, capsys,
+                                                                           ui, no_menu_bar):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    monkeypatch.setattr(start, "supervise", lambda *a, **k: pytest.fail("must not start"))
+    code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", ui_port=free_port(), no_menu_bar=no_menu_bar,
+                     menu_available=lambda: None, from_app=True)
+    assert code == 1
+    assert start.APP_NEEDS_MENU in capsys.readouterr().err
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_from_app_with_the_menu_bar_unavailable_starts_nothing(tmp_path, monkeypatch, capsys):
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=free_port(),
+                               menu_available=lambda: "no window server", from_app=True)
+    assert code == 1 and seen == {}
+    assert ("The menu bar item could not start (no window server). "
+            "A session started from the app cannot be stopped without it.") in capsys.readouterr().err
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_from_app_hides_the_link_and_starts_the_menu_in_app_mode(tmp_path, monkeypatch):
+    probes = []
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=8123,
+                               menu_available=lambda: probes.append(1), from_app=True)
+    assert code == 0 and len(probes) == 1
+    cmd, kw = seen["cmd"], seen["kw"]
+    assert cmd[cmd.index("qa_ui_print_link=false") - 1] == "--set"
+    assert kw["menu_cmd"] == [sys.executable, "-m", "menubar", str(os.getpid()), "8123",
+                              str(seen["folder"] / session.STATUS), "--app"]
+    assert kw["from_app"] is True and kw["menu_token"] not in " ".join(kw["menu_cmd"])
+
+
+def test_without_from_app_the_link_is_printed_and_the_menu_is_as_before(tmp_path, monkeypatch):
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=8123, menu_available=lambda: None)
+    assert code == 0
+    assert not any(arg.startswith("qa_ui_print_link") for arg in seen["cmd"])
+    assert "--app" not in seen["kw"]["menu_cmd"] and seen["kw"]["from_app"] is False
+    assert wiretrace_command() == wiretrace_command(from_app=False)
+    assert "qa_ui_print_link=false" in wiretrace_command(from_app=True)
+
+
+def test_from_app_is_hidden_and_passed_to_run(monkeypatch, capsys):
+    assert parse_start(monkeypatch, "--ui", "wiretrace", "--from-app")[1]["from_app"] is True
+    assert parse_start(monkeypatch, "--ui", "wiretrace")[1]["from_app"] is False
+    with pytest.raises(SystemExit):
+        cli_main.main(["start", "--help"])
+    assert "--from-app" not in capsys.readouterr().out
+
+
+def test_after_a_switch_from_the_app_the_next_session_is_in_app_mode_too(tmp_path, monkeypatch):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")], from_app=True)
+    assert code == 0 and len(calls) == 2
+    for call in calls:
+        assert call["kw"]["from_app"] is True and call["kw"]["menu_cmd"][-1] == "--app"
+        assert "qa_ui_print_link=false" in call["cmd"]
+
+
+def _switching_child_body() -> str:
+    return """import json, os, signal, sys, time
+flows = sys.argv[1]
+stopping = False
+
+def on_sigint(*_):
+    global stopping
+    stopping = True
+
+signal.signal(signal.SIGINT, on_sigint)
+with open(flows, "wb") as handle:
+    handle.write(b"flows")
+with open(os.path.join(os.path.dirname(flows), ".switch.json"), "w") as handle:
+    handle.write(json.dumps({"name": "other"}))
+while not stopping:
+    time.sleep(0.05)
+"""
+
+
+def test_from_app_a_menu_that_exits_stops_and_saves_the_session_and_never_switches(tmp_path, capsys):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    pidfile = tmp_path / "menu.pid"
+    child = _script(tmp_path, "child.py", _switching_child_body())
+    # Exits once the child is recording and has asked for a switch: a crash, or a force quit.
+    menu = _script(tmp_path, "menu.py", (
+        "import os, sys, time\n"
+        "with open(sys.argv[1], 'w') as handle:\n"
+        "    handle.write(str(os.getpid()))\n"
+        "while not os.path.exists(sys.argv[2]):\n"
+        "    time.sleep(0.02)\n"
+        "time.sleep(0.2)\n"
+        "raise SystemExit(1)\n"))
+    har = _script(tmp_path, "har.py", _har_body(False))
+    outcome = start.Outcome()
+    code = start.supervise(
+        [sys.executable, str(child), str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, [], menu_cmd=[sys.executable, str(menu), str(pidfile), str(folder / session.SWITCH)],
+        menu_token="menu-token",
+        switch=True, outcome=outcome, from_app=True,
+    )
+    out = capsys.readouterr().out
+    assert code == 0, out
+    assert out.count(start.MENU_CLOSED_APP) == 1 and start.MENU_CLOSED not in out
+    assert "Switching presets" not in out
+    # STOPPING is never a switch in `run`, whatever `.switch.json` said.
+    assert outcome.state == start.STOPPING
+    assert session.read_meta(folder)["status"] == "stopped"
+    assert (folder / session.HAR).is_file()
+    assert not (folder / session.SWITCH).exists()
+    assert process_gone(int(pidfile.read_text()))
+
+
+def test_from_app_a_menu_that_cannot_start_stops_the_session(tmp_path, capsys):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    child = _script(tmp_path, "child.py", _child_body())
+    har = _script(tmp_path, "har.py", _har_body(False))
+    code = start.supervise(
+        [sys.executable, str(child), "normal", str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, [], menu_cmd=["/no/such/wiretrace-menubar"], menu_token="tok", from_app=True,
+    )
+    out = capsys.readouterr().out
+    assert start.MENU_CLOSED_APP in out and "Stopping…" in out
+    # The stop can reach the child before it wrote anything; then the folder is removed as usual.
+    if folder.exists():
+        assert code == 0 and session.read_meta(folder)["status"] == "stopped"
+    else:
+        assert code == 1 and "Nothing was captured" in out

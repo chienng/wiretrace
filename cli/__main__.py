@@ -2,7 +2,7 @@ import argparse
 import os
 import sys
 
-from . import __version__, doctor, report, session, start
+from . import __version__, app, doctor, report, session, start
 from .preset import PRESETS_DIR
 
 
@@ -33,6 +33,15 @@ def main(argv: list[str] | None = None) -> int:
                                 "Without it, only the first other device that connects is accepted")
     start_cmd.add_argument("--no-menu-bar", action="store_true",
                            help="with --ui wiretrace, do not show the menu bar item")
+    # Wiretrace.app's sessions: no link printed, the menu bar is the stop.
+    start_cmd.add_argument("--from-app", action="store_true", help=argparse.SUPPRESS)
+
+    app_cmd = commands.add_parser("app", help="used by Wiretrace.app")
+    app_commands = app_cmd.add_subparsers(dest="app_command", required=True)
+    app_commands.add_parser("state", help="whether a session is recording, the projects and the devices")
+    app_start = app_commands.add_parser("start", help="start a session detached")
+    app_start.add_argument("--project", required=True)
+    app_start.add_argument("--device", required=True, choices=tuple(app.DEVICES))
 
     report_cmd = commands.add_parser(
         "report", help="write a bug report zip of a session (secrets masked) into its folder")
@@ -44,7 +53,12 @@ def main(argv: list[str] | None = None) -> int:
         return doctor.main()
     if args.command == "start":
         return start.run(args.preset, args.target, args.mode, ui=start.NO_UI if args.no_ui else args.ui,
-                         clients=tuple(args.client), no_menu_bar=args.no_menu_bar)
+                         clients=tuple(args.client), no_menu_bar=args.no_menu_bar, from_app=args.from_app)
+    if args.command == "app":
+        if args.app_command == "state":
+            print("\n".join(app.state()))
+            return 0
+        return app.start(args.project, args.device)
     if args.command == "report":
         return report.run(args.session, session.SESSIONS_DIR, PRESETS_DIR)
     return 2

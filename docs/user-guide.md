@@ -77,12 +77,34 @@ The first run takes a few minutes. It installs, all inside your home folder:
 | mitmproxy, pymobiledevice3 and the other packages | `~/wiretrace/.venv` |
 | Android platform-tools r37.0.1 (`adb`) | `~/tools/platform-tools` |
 | Two `PATH` lines | `~/.zshrc` |
+| The Wiretrace app | `~/Applications/Wiretrace.app` |
 
 Every download is checked against a SHA-256 checksum stored in the script; a file that
 does not match is never installed. Running the script again is safe and quick.
 
 Do **not** run it with `sudo`. It refuses, because the files in your home folder would
 end up owned by root.
+
+### The Wiretrace app
+
+The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS opens it
+without asking. Once you have a preset (Step 6), you can start every session from it instead
+of Terminal:
+
+1. Open **Wiretrace** from Launchpad or Spotlight. To keep it in the Dock, right-click its Dock
+   icon → **Options** → **Keep in Dock**.
+2. Choose your project (a preset), then your device. The last ones you used are selected.
+3. After a few seconds the Wiretrace window opens in your browser and **● Wiretrace** appears
+   at the top right of the screen.
+
+<!-- Screenshot of the two lists: taken during the spec 014 runtime check. -->
+
+The session keeps recording after the app's last message closes. To stop it and save
+`flows.har`, use **Stop session** in the **● Wiretrace** menu: a session started from the app
+has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
+
+The app opens the folder the setup ran in. If you move that folder, the app says so: run
+`scripts/setup-mac.sh` again from the new place.
 
 ### Step 4 — Open a new Terminal window
 
@@ -945,19 +967,21 @@ tar -xzf wiretrace-<version>-macos.tar.gz -C ~
 cd ~/wiretrace && scripts/setup-mac.sh
 ```
 
+The setup also updates the Wiretrace app, which then opens the new folder.
+
 Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
 files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
 `~/wiretrace-old/rules/` to `~/wiretrace/rules/`, and any sessions you want to keep from
 `~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
 
-Stop Wiretrace (Ctrl+C) before you update: it reloads its add-on files when they change. Two
+Stop Wiretrace (Ctrl+C, or **Stop session** in the **● Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
 builds can carry the same version number, so to check which one you run, look at the Terminal
 banner: a build with rules prints a `Rules:` line.
 
 **Remove Wiretrace completely:**
 
 ```bash
-rm -rf ~/wiretrace ~/tools/platform-tools ~/.local/share/uv
+rm -rf ~/wiretrace ~/tools/platform-tools ~/.local/share/uv ~/Applications/Wiretrace.app
 rm -f ~/.local/bin/uv ~/.local/bin/uvx
 ```
 

@@ -182,6 +182,19 @@ def test_the_browser_opens_the_link_only_when_asked(monkeypatch, capsys):
     scenario(quiet, qa_ui_open_browser=False)
 
 
+def test_without_print_link_the_browser_still_opens_and_no_token_is_printed(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(wiretrace_ui.webbrowser, "open", lambda url: opened.append(url) or True)
+
+    async def body(ui, client, tctx):
+        assert opened == [f"http://127.0.0.1:{ui.port}/?token={ui.token}"]
+
+    scenario(body, qa_ui_open_browser=True, qa_ui_print_link=False)
+    out = capsys.readouterr()
+    assert out.out == "Wiretrace UI: opened in the browser\n"
+    assert "token=" not in out.out + out.err
+
+
 PAGES = ["/", "/index.html", f"/assets/{ASSET.name}", "/api/state", "/api/flows", "/api/flows/x",
          "/api/filter?expr=~u%20x", "/api/logs?source=app", "/api/mocks", "/api/nothing", "/api/sessions",
          "/api/search?q=orders", "/api/report/draft", "/api/report/file/har",

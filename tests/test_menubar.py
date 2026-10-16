@@ -139,3 +139,22 @@ def test_read_status_rejects_anything_that_is_not_version_1(tmp_path: Path):
     assert read_status(path)["preset"] == "staging"
     path.write_bytes(b"{" + b"x" * 70_000)
     assert read_status(path) is None
+
+
+@pytest.mark.parametrize("state, view", [
+    (STARTING, lambda app: render(None, 1_000.0, False, app=app)),
+    (LIVE, lambda app: render(status(), 1_000.0, False, app=app)),
+    (STALE, lambda app: render(None, 1_000.0, False, seen=True, app=app)),
+])
+def test_started_from_the_app_there_is_no_quit_and_stop_is_always_there(state, view):
+    app, plain = view(True), view(False)
+    assert app.state == plain.state == state and app.title == plain.title
+    assert "quit" not in {item.action for item in app.rows}
+    assert "stop" in enabled_actions(app)
+    assert labels(app)[-1] == "Stop session"
+    assert labels(app) == [label for label in labels(plain) if label != "Quit"] + (
+        ["Stop session"] if state == STARTING else [])
+
+
+def test_started_from_the_app_stopping_is_unchanged():
+    assert render(status(), 1_000.0, True, app=True) == render(status(), 1_000.0, True)
