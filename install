@@ -1,0 +1,8 @@
+#!/bin/sh
+# Installs Wiretrace for this user: runs scripts/setup-mac.sh with the same arguments.
+# Kept outside make on purpose: without the Xcode Command Line Tools, /usr/bin/make is a
+# stub that opens an install dialog, and installing the tools needs admin rights.
+set -e
+
+DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+exec "$DIR/scripts/setup-mac.sh" "$@"

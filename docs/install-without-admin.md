@@ -59,8 +59,10 @@ Follow steps 1 and 2 of the [README quick start](../README.md#quick-start): down
 
 ```bash
 cd ~/wiretrace
-scripts/setup-mac.sh                 # add --skip-android if you only test iOS
+./install                            # add --skip-android if you only test iOS
 ```
+
+`./install` runs `scripts/setup-mac.sh`. It is not `make install`: without the Xcode Command Line Tools, `make` is a stub that opens their install dialog, and installing them needs admin. Developers who have them can use `make install`.
 
 All inside your home folder, it installs `uv` into `~/.local/bin`, Python 3.12, the Python packages into `~/wiretrace/.venv`, and Android platform-tools into `~/tools/platform-tools`, then adds the `PATH` lines to `~/.zshrc` and builds `~/Applications/Wiretrace.app` (see Gatekeeper below). It installs fixed versions of `uv` and platform-tools, downloaded from their GitHub / Google release URLs, and checks each file against a SHA-256 checksum stored in the script before installing it; no downloaded script is executed. It can be run again safely. It never asks for a password; do not run it with `sudo`. Open a new Terminal window afterwards so the `PATH` changes apply.
 
