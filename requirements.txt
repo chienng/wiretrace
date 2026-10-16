@@ -3,3 +3,4 @@ pyyaml>=6
 pymobiledevice3>=4
 httpx>=0.27      # YouTrack / issue tracker API
 keyring>=25      # stores tracker tokens in the macOS Keychain (no admin needed)
+pyobjc-framework-Cocoa>=11  # menu bar; universal2 wheels for Intel and Apple silicon, brings pyobjc-core

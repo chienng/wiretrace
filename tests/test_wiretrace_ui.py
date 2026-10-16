@@ -1894,3 +1894,94 @@ def test_list_mocks_stops_at_the_cap_and_skips_a_symlinked_folder(tmp_path, monk
     found = wiretrace_ui.list_mocks(str(root))
     assert found == sorted(found) and len(found) == 3
     assert all(not name.startswith("linked/") and "secret" not in name for name in found)
+
+
+def test_take_ui_token_accepts_only_a_32_byte_urlsafe_token(monkeypatch):
+    import secrets
+    good = secrets.token_urlsafe(32)
+    monkeypatch.setenv("WIRETRACE_UI_TOKEN", good)
+    assert wiretrace_ui.take_ui_token() == good
+    assert "WIRETRACE_UI_TOKEN" not in os.environ
+    monkeypatch.setenv("WIRETRACE_UI_TOKEN", "a" * 43)
+    assert wiretrace_ui.take_ui_token() == "a" * 43
+    for bad in ("short", "a" * 42, "a" * 44, "a" * 42 + "+", "a" * 42 + "/", "a" * 42 + "="):
+        monkeypatch.setenv("WIRETRACE_UI_TOKEN", bad)
+        assert wiretrace_ui.take_ui_token() is None
+        assert "WIRETRACE_UI_TOKEN" not in os.environ
+    assert wiretrace_ui.take_ui_token() is None
+
+
+def test_running_uses_the_launcher_token_and_drops_it_from_the_environment(monkeypatch):
+    import secrets
+    token = secrets.token_urlsafe(32)
+    monkeypatch.setenv("WIRETRACE_UI_TOKEN", token)
+
+    async def body(ui, client, tctx):
+        assert ui.token == token
+        assert "WIRETRACE_UI_TOKEN" not in os.environ
+
+    scenario(body)
+
+
+def test_status_file_matches_the_window_counts_and_is_removed(tmp_path):
+    from types import SimpleNamespace
+    folder = write_session(tmp_path / "sess")
+    (folder / session.DEVICE_STATUS).write_text(json.dumps({
+        "state": "streaming", "message": "streaming", "source": "adb logcat",
+        "app": "com.example.app", "model": "Pixel 8", "os": "Android 15",
+        "updated_at": "2026-10-14T09:00:01+07:00",
+    }))
+    failed = make_flow("/boom", status=500)
+    refused = tflow.tflow(err=True)
+    ok = make_flow("/ok", status=200)
+    failed.response.timestamp_end = 10
+    refused.error.timestamp = 20
+    seen = {}
+
+    async def body(ui, client, tctx):
+        live = ui.qatools()
+        live._rules = qa_tools.Rules(rules=(SimpleNamespace(enabled=True), SimpleNamespace(enabled=False)))
+        ui.device_file.poll()
+        ui.hub.track(ok)
+        ui.hub.track(failed)
+        ui.hub.track(refused)
+        ui.maybe_write_status(1_000.0)
+        path = folder / session.STATUS
+        raw = path.read_text(encoding="utf-8")
+        data = json.loads(raw)
+        seen["data"] = data
+        seen["mode"] = path.stat().st_mode & 0o777
+        seen["raw"] = raw
+        seen["token"] = ui.token
+        assert data["errors"] == 2 and data["last_error"] == refused.id
+        assert data["requests"] == ui.state()["flow_count"] == 3
+        assert data["rules_on"] == ui.state()["rules_on"] == 1
+        assert data["device_state"] == "streaming" and data["device_model"] == "Pixel 8"
+        ui.hub.track(make_flow("/later", status=404))
+        ui.maybe_write_status(1_000.5)
+        assert json.loads(path.read_text())["errors"] == 2
+        ui.maybe_write_status(1_001.0)
+        later = json.loads(path.read_text())
+        assert later["errors"] == 3 and later["updated_at"] == 1_001.0
+        ui.maybe_write_status(1_002.0)
+        assert json.loads(path.read_text())["updated_at"] == 1_001.0
+        ui.maybe_write_status(1_003.0)
+        assert json.loads(path.read_text())["updated_at"] == 1_003.0
+
+    scenario(body, folder=folder)
+    assert not (folder / session.STATUS).exists()
+    assert not (folder / (session.STATUS + ".tmp")).exists()
+    assert set(seen["data"]) == set(wiretrace_ui.STATUS_KEYS)
+    assert seen["mode"] == 0o600
+    raw = seen["raw"]
+    assert seen["token"] not in raw and "api.example.com" not in raw and "/boom" not in raw
+    assert "authorization" not in raw.lower() and "Bearer" not in raw
+
+
+def test_a_flow_in_progress_is_not_an_error_and_a_400_is():
+    assert wiretrace_ui.is_error_flow(make_flow(status=400))
+    assert wiretrace_ui.is_error_flow(make_flow(status=500))
+    assert wiretrace_ui.is_error_flow(tflow.tflow(err=True))
+    assert not wiretrace_ui.is_error_flow(make_flow(status=200))
+    assert not wiretrace_ui.is_error_flow(make_flow(status=399))
+    assert not wiretrace_ui.is_error_flow(tflow.tflow(resp=False))

@@ -318,7 +318,9 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - `--no-ui` runs in the Terminal only (mitmdump) instead of opening mitmweb.
 - `--ui wiretrace` opens Wiretrace's own window instead of mitmweb (a preview; see *Wiretrace
   window (preview)* below). The Rules view is only in that window. It cannot be combined with
-  `--no-ui`.
+  `--no-ui`. While that window runs, Wiretrace also puts an item in the menu bar (see *Menu bar*
+  below). `--no-menu-bar` leaves the item out; the banner says `Menu bar: off (--no-menu-bar)`.
+  With `--ui mitmweb` or `--no-ui` there is no menu bar, and `--no-menu-bar` changes nothing.
 - `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
   Wi-Fi proxy to `<Mac IP>:8080`. With `--ui wiretrace`, the setup wizard shows the proxy
   steps for the device you pick instead of the WireGuard QR code:
@@ -601,6 +603,20 @@ token is refused: this includes a private window, another browser, and another c
 window only answers on this Mac and cannot be reached from the network. If you closed the tab,
 copy the link from the Terminal again. Do not paste the link into a chat or a ticket: the
 window shows requests with their tokens, and the phone's WireGuard configuration.
+
+**Menu bar.** With `--ui wiretrace`, a **● Wiretrace** item appears in the macOS menu bar
+(no Dock icon). After a request fails it reads **● Wiretrace · N**, where N is the same count
+as the window's *Errors* filter. The menu shows the preset, the device (target, mode, and the
+phone's model when logs are streaming), how long the session has been running, and the request,
+error and rules-on counts. **Open Wiretrace** (⌘O) opens the window again, including after you
+quit the browser; each click opens a new tab. **Show last error** (⌘R) opens the window with
+the latest failed request selected; it is greyed out when N is 0. **Stop session** is the same
+as Ctrl+C in the Terminal: Wiretrace prints "Stopping…", writes `flows.har` and the item goes
+away. **Quit** removes the item only; the Terminal prints
+`Menu bar: closed; capture continues (Ctrl+C here to stop)` and capture goes on until you
+press Ctrl+C. If the menu cannot start (PyObjC is missing, or there is no logged-in desktop,
+such as an SSH session), the banner says `Menu bar: off (<reason>)` and capture runs as usual.
+`./wiretrace doctor` prints `Menu bar: available` or tells you to run `scripts/setup-mac.sh`.
 
 **What each area does.**
 

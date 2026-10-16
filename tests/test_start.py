@@ -280,12 +280,22 @@ def launch(tmp_path):
 
 # State machine, with a fake child
 
-def test_sigint_stops_child_then_writes_har(launch):
+@pytest.mark.parametrize("sender", ["terminal", "menu"])
+def test_sigint_stops_child_then_writes_har(launch, sender):
     run = launch("normal")
     run.wait_started()
-    os.kill(run.proc.pid, signal.SIGINT)  # the launcher only, as `kill -INT` would
+    if sender == "terminal":
+        os.kill(run.proc.pid, signal.SIGINT)  # the launcher only, as `kill -INT` would
+    else:
+        # A SIGINT from another process, as the menu child's Stop does.
+        subprocess.run(
+            [sys.executable, "-c", "import os, signal, sys; os.kill(int(sys.argv[1]), signal.SIGINT)",
+             str(run.proc.pid)],
+            check=True,
+        )
 
     assert run.finish() == 0, run.output
+    assert "Stopping…" in run.output
     # The child got the launcher's SIGINT; HAR conversion ran only after the child had exited.
     assert run.events() == ["started", "SIGINT", "exit", "har child-gone"]
     [folder] = run.folders()
@@ -1092,13 +1102,15 @@ def run_wiretrace(tmp_path, monkeypatch, **kwargs):
     seen = {}
 
     def supervise(cmd, har_cmd, folder, *args, **kw):
-        seen.update(cmd=cmd, folder=folder)
+        seen.update(cmd=cmd, folder=folder, kw=kw)
         return 0
 
     monkeypatch.setattr(start, "supervise", supervise)
+    menu_available = kwargs.pop("menu_available", lambda: "PyObjC not installed (run scripts/setup-mac.sh)")
     code = start.run("staging", "android", "proxy", "wiretrace", presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"), **kwargs)
+                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                     menu_available=menu_available, **kwargs)
     return code, seen
 
 
@@ -1157,6 +1169,312 @@ def test_ui_defaults_to_mitmweb(monkeypatch):
 def test_ui_wiretrace_and_mitmweb_are_accepted(monkeypatch):
     assert parse_start(monkeypatch, "--ui", "wiretrace")[1]["ui"] == "wiretrace"
     assert parse_start(monkeypatch, "--ui", "mitmweb")[1]["ui"] == "mitmweb"
+
+
+def test_no_menu_bar_is_accepted_with_every_window(monkeypatch):
+    assert parse_start(monkeypatch, "--ui", "wiretrace", "--no-menu-bar")[1]["no_menu_bar"] is True
+    assert parse_start(monkeypatch, "--ui", "mitmweb", "--no-menu-bar")[1]["no_menu_bar"] is True
+    _, kwargs = parse_start(monkeypatch, "--no-ui", "--no-menu-bar")
+    assert kwargs["ui"] == "none" and kwargs["no_menu_bar"] is True
+
+
+def test_the_banner_names_the_menu_bar_only_for_the_wiretrace_window():
+    text = start.banner(PRESET_WITH_FILTER, "android", "wireguard", "wiretrace", Path("/s"), menu_bar="on")
+    assert "Menu bar: on" in text
+    assert "Menu bar: off (--no-menu-bar)" in start.banner(
+        PRESET_WITH_FILTER, "android", "wireguard", "wiretrace", Path("/s"), menu_bar="off (--no-menu-bar)")
+    for ui in ("mitmweb", "none", True, False):
+        assert "Menu bar:" not in start.banner(PRESET_WITH_FILTER, "android", "proxy", ui, Path("/s"))
+
+
+def test_wiretrace_starts_the_menu_and_gives_mitmdump_the_token(tmp_path, monkeypatch, capsys):
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=8123, menu_available=lambda: None)
+    assert code == 0
+    kw = seen["kw"]
+    token = kw["menu_token"]
+    assert start.menu_bar_text("wiretrace", False, None) == "on"
+    assert token and len(token) == 43 and token not in " ".join(kw["menu_cmd"])
+    assert kw["menu_cmd"][:3] == [sys.executable, "-m", "menubar"]
+    assert kw["menu_cmd"][1:] == ["-m", "menubar", str(os.getpid()), "8123", str(seen["folder"] / session.STATUS)]
+    assert kw["child_env"]["WIRETRACE_UI_TOKEN"] == token
+    assert "Menu bar: on" in capsys.readouterr().out
+
+
+def test_no_menu_bar_still_gives_mitmdump_the_token_and_starts_no_menu(tmp_path, monkeypatch, capsys):
+    code, seen = run_wiretrace(
+        tmp_path, monkeypatch, ui_port=8123, no_menu_bar=True,
+        menu_available=lambda: pytest.fail("must not probe"),
+    )
+    assert code == 0 and seen["kw"]["menu_cmd"] is None
+    assert seen["kw"]["child_env"]["WIRETRACE_UI_TOKEN"]
+    assert "Menu bar: off (--no-menu-bar)" in capsys.readouterr().out
+
+
+def test_a_menu_bar_that_cannot_start_is_only_a_banner_line(tmp_path, monkeypatch, capsys):
+    code, seen = run_wiretrace(tmp_path, monkeypatch, ui_port=8123, menu_available=lambda: "no window server")
+    assert code == 0 and seen["kw"]["menu_cmd"] is None
+    assert seen["kw"]["child_env"]["WIRETRACE_UI_TOKEN"]
+    assert "Menu bar: off (no window server)" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("ui", ["mitmweb", "none"])
+@pytest.mark.parametrize("no_menu_bar", [False, True])
+def test_other_windows_start_no_menu_and_print_no_menu_line(tmp_path, monkeypatch, capsys, ui, no_menu_bar):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    seen = {}
+    monkeypatch.setattr(start, "busy_ports", lambda ports: [])
+    monkeypatch.setattr(start, "supervise", lambda cmd, har_cmd, folder, *a, **k: seen.update(kw=k) or 0)
+    monkeypatch.setattr(start, "_menu_problem", lambda: pytest.fail("must not probe"))
+    code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                     ui_port=free_port(), no_menu_bar=no_menu_bar)
+    assert code == 0 and seen["kw"]["menu_cmd"] is None and seen["kw"]["child_env"] is None
+    assert "Menu bar:" not in capsys.readouterr().out
+
+
+def _script(tmp_path: Path, name: str, body: str) -> Path:
+    path = tmp_path / name
+    path.write_text(body)
+    return path
+
+
+def _menu_body(mode: str) -> str:
+    head = ("import os, sys\n"
+            "with open(sys.argv[2], 'w') as handle:\n"
+            "    handle.write(str(os.getpid()))\n")
+    if mode == "exit":
+        return head + "raise SystemExit(1)\n"
+    if mode == "ignore":
+        return head + ("import signal, time\n"
+                       "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+                       "while True:\n"
+                       "    time.sleep(0.05)\n")
+    return head + "import time\nwhile True:\n    time.sleep(0.05)\n"
+
+
+def _child_body() -> str:
+    return """import signal, sys, time
+mode, flows = sys.argv[1], sys.argv[2]
+stopping = False
+
+def on_sigint(*_):
+    global stopping
+    stopping = True
+
+signal.signal(signal.SIGINT, on_sigint)
+if mode != "empty":
+    with open(flows, "wb") as handle:
+        handle.write(b"flows")
+if mode == "crash":
+    time.sleep(0.2)
+    raise SystemExit(1)
+while not (stopping and mode != "stubborn"):
+    time.sleep(0.05)
+"""
+
+
+def _har_body(fail: bool) -> str:
+    if fail:
+        return "import sys\nraise SystemExit(1)\n"
+    return """import sys
+args = sys.argv[1:]
+har = args[args.index("--set") + 1].split("=", 1)[1]
+open(har, "w").write('{"log": {"entries": [{}]}}')
+"""
+
+
+@pytest.mark.parametrize("menu_mode", ["exit", "term", "ignore"])
+@pytest.mark.parametrize("how", ["normal", "child_exit", "force", "har_fail"])
+def test_no_exit_path_leaves_the_menu_running(tmp_path, menu_mode, how):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    pidfile = tmp_path / f"menu-{menu_mode}-{how}.pid"
+    child = _script(tmp_path, f"child-{how}.py", _child_body())
+    menu = _script(tmp_path, f"menu-{menu_mode}.py", _menu_body(menu_mode))
+    har = _script(tmp_path, f"har-{how}.py", _har_body(how == "har_fail"))
+    stops: list[int] = []
+    if how == "force":
+        child_mode = "stubborn"
+    elif how == "child_exit":
+        child_mode = "crash"
+    else:
+        child_mode = "normal"
+    if how != "child_exit":
+        def stop_when_ready() -> None:
+            flows = folder / session.FLOWS
+            deadline = time.monotonic() + 5
+            while not flows.is_file() and time.monotonic() < deadline:
+                time.sleep(0.02)
+            stops.append(signal.SIGINT)
+            if how == "force":
+                time.sleep(0.3)
+                stops.append(signal.SIGINT)
+
+        threading.Thread(target=stop_when_ready, daemon=True).start()
+    code = start.supervise(
+        [sys.executable, str(child), child_mode, str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, stops, menu_cmd=[sys.executable, str(menu), menu_mode, str(pidfile)], menu_token="menu-token",
+    )
+    pid = int(pidfile.read_text())
+    assert process_gone(pid)
+    if how == "normal":
+        assert code == 0 and session.read_meta(folder)["status"] == "stopped"
+        assert (folder / session.HAR).is_file()
+    elif how == "har_fail":
+        assert code == 1 and session.read_meta(folder)["status"] == "stopped"
+        assert not (folder / session.HAR).is_file()
+    elif how == "child_exit":
+        assert code == 1 and session.read_meta(folder)["status"] == "exited"
+    else:
+        assert code == 1 and session.read_meta(folder)["status"] == "killed"
+
+
+def test_a_menu_that_exits_prints_the_closed_line_once_and_capture_continues(tmp_path, capsys):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    pidfile = tmp_path / "menu.pid"
+    child = _script(tmp_path, "child.py", _child_body())
+    menu = _script(tmp_path, "menu.py", _menu_body("exit"))
+    har = _script(tmp_path, "har.py", _har_body(False))
+    stops: list[int] = []
+
+    def stop_when_ready() -> None:
+        flows = folder / session.FLOWS
+        deadline = time.monotonic() + 5
+        while not flows.is_file() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        time.sleep(0.3)
+        stops.append(signal.SIGINT)
+
+    threading.Thread(target=stop_when_ready, daemon=True).start()
+    code = start.supervise(
+        [sys.executable, str(child), "normal", str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, stops, menu_cmd=[sys.executable, str(menu), "exit", str(pidfile)], menu_token="menu-token",
+    )
+    assert code == 0, capsys.readouterr()
+    assert capsys.readouterr().out.count(start.MENU_CLOSED) == 1
+    assert session.read_meta(folder)["status"] == "stopped"
+    assert (folder / session.HAR).is_file()
+    assert process_gone(int(pidfile.read_text()))
+
+
+def test_stopping_the_menu_does_not_print_the_closed_line(tmp_path, capsys):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    pidfile = tmp_path / "menu.pid"
+    child = _script(tmp_path, "child.py", _child_body())
+    menu = _script(tmp_path, "menu.py", _menu_body("term"))
+    har = _script(tmp_path, "har.py", _har_body(False))
+    stops: list[int] = []
+
+    def stop_when_ready() -> None:
+        flows = folder / session.FLOWS
+        deadline = time.monotonic() + 5
+        while not flows.is_file() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        stops.append(signal.SIGINT)
+
+    threading.Thread(target=stop_when_ready, daemon=True).start()
+    code = start.supervise(
+        [sys.executable, str(child), "normal", str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, stops, menu_cmd=[sys.executable, str(menu), "term", str(pidfile)], menu_token="menu-token",
+    )
+    assert code == 0
+    assert start.MENU_CLOSED not in capsys.readouterr().out
+    assert process_gone(int(pidfile.read_text()))
+
+
+def test_the_menu_gets_the_token_on_stdin_only_and_in_its_own_session(tmp_path):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    record = tmp_path / "menu.txt"
+    envfile = tmp_path / "mitm-token.txt"
+    token = "a" * 43
+    menu_body = (
+        "import os, sys, time\n"
+        "token = sys.stdin.readline().rstrip('\\n')\n"
+        f"with open({str(record)!r}, 'w') as out:\n"
+        "    out.write('\\n'.join([\n"
+        "        ' '.join(sys.argv),\n"
+        "        'env ' + ('yes' if 'WIRETRACE_UI_TOKEN' in os.environ else 'no'),\n"
+        "        'stdin ' + token,\n"
+        "        'pgrp ' + str(os.getpgrp()),\n"
+        "        'pid ' + str(os.getpid()),\n"
+        "    ]))\n"
+        "while True:\n"
+        "    time.sleep(0.05)\n"
+    )
+    child_body = """import os, signal, sys, time
+mode, flows, envfile = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(envfile, "w") as handle:
+    handle.write(os.environ.get("WIRETRACE_UI_TOKEN", ""))
+stopping = False
+
+def on_sigint(*_):
+    global stopping
+    stopping = True
+
+signal.signal(signal.SIGINT, on_sigint)
+with open(flows, "wb") as handle:
+    handle.write(b"flows")
+while not stopping:
+    time.sleep(0.05)
+"""
+    child = _script(tmp_path, "child.py", child_body)
+    menu = _script(tmp_path, "menu.py", menu_body)
+    har = _script(tmp_path, "har.py", _har_body(False))
+    stops: list[int] = []
+
+    def stop_when_ready() -> None:
+        flows = folder / session.FLOWS
+        deadline = time.monotonic() + 5
+        while not (flows.is_file() and envfile.is_file()) and time.monotonic() < deadline:
+            time.sleep(0.02)
+        stops.append(signal.SIGINT)
+
+    threading.Thread(target=stop_when_ready, daemon=True).start()
+    code = start.supervise(
+        [sys.executable, str(child), "normal", str(folder / session.FLOWS), str(envfile)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, stops,
+        menu_cmd=[sys.executable, str(menu)], menu_token=token,
+        child_env={**os.environ, "WIRETRACE_UI_TOKEN": token},
+    )
+    assert code == 0
+    text = record.read_text()
+    argv, env_line, stdin_line, pgrp_line, pid_line = text.splitlines()
+    assert token not in argv
+    assert env_line == "env no"
+    assert stdin_line == "stdin " + token
+    assert int(pgrp_line.split()[1]) != os.getpgrp()
+    assert process_gone(int(pid_line.split()[1]))
+    assert envfile.read_text() == token
+
+
+def test_a_menu_command_that_cannot_start_does_not_stop_capture(tmp_path, capsys):
+    folder = session.create("staging", "android", {"preset": "staging", "status": "running"}, tmp_path / "sessions")
+    child = _script(tmp_path, "child.py", _child_body())
+    har = _script(tmp_path, "har.py", _har_body(False))
+    stops: list[int] = []
+
+    def stop_when_ready() -> None:
+        flows = folder / session.FLOWS
+        deadline = time.monotonic() + 5
+        while not flows.is_file() and time.monotonic() < deadline:
+            time.sleep(0.02)
+        stops.append(signal.SIGINT)
+
+    threading.Thread(target=stop_when_ready, daemon=True).start()
+    code = start.supervise(
+        [sys.executable, str(child), "normal", str(folder / session.FLOWS)],
+        [sys.executable, str(har), "--set", f"hardump={folder / session.HAR_TMP}"],
+        folder, stops, menu_cmd=["/no/such/wiretrace-menubar"], menu_token="tok",
+    )
+    assert code == 0
+    assert "Menu bar: off (could not start)" in capsys.readouterr().out
+    assert session.read_meta(folder)["status"] == "stopped"
+    assert (folder / session.HAR).is_file()
 
 
 def test_no_ui_is_unchanged(monkeypatch):

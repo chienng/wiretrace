@@ -8,6 +8,10 @@ A second child, the device log collector (`python -m collectors`), runs in its o
 process group so one killpg ends it and the tools it started. A Terminal Ctrl+C no
 longer reaches it, so the launcher forwards every stop. It never decides the state.
 
+With `--ui wiretrace`, a third child (`python -m menubar`) is the menu bar item.
+It is also in its own session. It may send one SIGINT here, which is the same stop
+as Ctrl+C. The launcher stops that child on every exit path.
+
 States (docs/specs/002-start-launcher-presets-sessions.md, 004-log-collectors-and-app-log-receiver.md):
 PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> ABORTED.
 """
@@ -17,6 +21,7 @@ from __future__ import annotations
 import ipaddress
 import json
 import os
+import secrets
 import shutil
 import signal
 import subprocess
@@ -36,7 +41,9 @@ PROXY_PORT = 8080
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STILL_STOPPING_S = 15
 COLLECTOR_STOP_S = 3
+MENU_STOP_S = 2
 POLL_S = 0.1
+MENU_CLOSED = "Menu bar: closed; capture continues (Ctrl+C here to stop)"
 WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 # Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
@@ -207,8 +214,38 @@ def count_mocks(mocks_dir: Path) -> int:
     return sum(1 for p in mocks_dir.rglob("*.json") if p.is_file()) if mocks_dir.is_dir() else 0
 
 
+def make_token() -> str:
+    return secrets.token_urlsafe(32)
+
+
+def menu_bar_text(kind: str, no_menu_bar: bool, problem: str | None) -> str | None:
+    """The banner's menu bar phrase, or None when this window has no menu bar."""
+    if kind != WIRETRACE:
+        return None
+    if no_menu_bar:
+        return "off (--no-menu-bar)"
+    if problem:
+        return f"off ({problem})"
+    return "on"
+
+
+def menu_command(launcher_pid: int, port: int, status_path: Path) -> list[str]:
+    """Argv for the menu process. The token is not here; it is written to stdin."""
+    return [sys.executable, "-m", "menubar", str(launcher_pid), str(port), str(status_path)]
+
+
+def mitm_env(token: str | None) -> dict[str, str] | None:
+    """The mitmdump environment, with the window token, or None to inherit the launcher's."""
+    if not token:
+        return None
+    env = os.environ.copy()
+    env["WIRETRACE_UI_TOKEN"] = token
+    return env
+
+
 def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
-           proxy_port: int = PROXY_PORT, mock_count: int = 0, device_logs: str = "off") -> str:
+           proxy_port: int = PROXY_PORT, mock_count: int = 0, device_logs: str = "off",
+           menu_bar: str | None = None) -> str:
     kind = ui_kind(ui)
     lines = [
         f"Wiretrace {__version__}: preset {preset.name}, target {target}",
@@ -240,6 +277,8 @@ def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
         lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
     lines.append(TARGET_HINTS[target])
     lines.append(f"Saving to {folder}")
+    if menu_bar:
+        lines.append(f"Menu bar: {menu_bar}")
     lines.append("Press Ctrl+C to stop and write flows.har.\n")
     return "\n".join(lines)
 
@@ -251,11 +290,17 @@ def _mitmproxy_version() -> str | None:
         return None
 
 
+def _menu_problem() -> str | None:
+    from menubar import availability
+    return availability()
+
+
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool | str = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
         bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-        ui_port: int = UI_PORT, clients: Sequence[str] = (),
-        collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command) -> int:
+        ui_port: int = UI_PORT, clients: Sequence[str] = (), no_menu_bar: bool = False,
+        collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command,
+        menu_available: Callable[[], str | None] | None = None) -> int:
     problem = client_problem(clients)
     if problem:
         say(problem, err=True)
@@ -313,7 +358,15 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         else:
             session.update_meta(folder, device_logs_off=problem)
             device_logs = f"off ({problem})"
-        say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs))
+        token = make_token() if kind == WIRETRACE else None
+        menu_problem = None
+        menu_cmd = None
+        if kind == WIRETRACE and not no_menu_bar:
+            menu_problem = (menu_available or _menu_problem)()
+            if menu_problem is None and token:
+                menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS)
+        say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
+                   menu_bar_text(kind, no_menu_bar, menu_problem)))
         return supervise(
             build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients),
             har_command(bin_dir, flows, folder / session.HAR_TMP),
@@ -321,6 +374,9 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             stops,
             collector_cmd,
             rules,
+            menu_cmd=menu_cmd,
+            menu_token=token,
+            child_env=mitm_env(token),
         )
     finally:
         for sig, handler in previous.items():
@@ -394,42 +450,133 @@ class _Collector:
         self.proc.wait()
 
 
+class _MenuBar:
+    """The menu bar item: its own session, so a Terminal Ctrl+C reaches the launcher, not it.
+
+    The token is the first line on stdin and is not in argv or the environment.
+    """
+
+    def __init__(self, proc: subprocess.Popen) -> None:
+        self.proc = proc
+        self.exit_reported = False
+        self.closed = False
+        self._err: str | None = None
+
+    @classmethod
+    def start(cls, cmd: list[str], token: str) -> _MenuBar | None:
+        pythonpath = os.pathsep.join(p for p in (str(WIRETRACE_DIR), os.environ.get("PYTHONPATH")) if p)
+        env = os.environ.copy()
+        env.pop("WIRETRACE_UI_TOKEN", None)
+        env["PYTHONPATH"] = pythonpath
+        try:
+            proc = subprocess.Popen(
+                cmd, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                start_new_session=True, env=env,
+            )
+        except OSError:
+            say("Menu bar: off (could not start)")
+            return None
+        try:
+            assert proc.stdin is not None
+            proc.stdin.write((token + "\n").encode())
+            proc.stdin.close()
+        except OSError:
+            proc.kill()
+            proc.wait()
+            say("Menu bar: off (could not start)")
+            return None
+        return cls(proc)
+
+    def _reason(self) -> str:
+        if self._err is not None:
+            return self._err or "could not start"
+        if self.proc.stderr is None:
+            self._err = ""
+            return "could not start"
+        try:
+            text = self.proc.stderr.read().decode(errors="replace").strip()
+        except OSError:
+            text = ""
+        self._err = text.splitlines()[-1].strip() if text else ""
+        return self._err or "could not start"
+
+    def notice_exit(self) -> None:
+        """The menu ended by itself while RUNNING: say so once and do not start it again."""
+        code = self.proc.poll()
+        if code is None or self.exit_reported:
+            return
+        self.exit_reported = True
+        if code == 2:
+            say(f"Menu bar: off ({self._reason()})")
+        else:
+            say(MENU_CLOSED)
+
+    def stop(self) -> None:
+        """After the session is saved: SIGTERM, wait up to MENU_STOP_S, SIGKILL, reap."""
+        if self.closed:
+            return
+        self.closed = True
+        if self.proc.poll() is None:
+            try:
+                self.proc.send_signal(signal.SIGTERM)
+            except OSError:
+                pass
+            deadline = time.monotonic() + MENU_STOP_S
+            while self.proc.poll() is None and time.monotonic() < deadline:
+                time.sleep(POLL_S / 2)
+            if self.proc.poll() is None:
+                try:
+                    self.proc.kill()
+                except OSError:
+                    pass
+        self.proc.wait()
+        self._reason()
+
+
 def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: list[int],
-              collector_cmd: list[str] | None = None, rules: redact.Rules | None = None) -> int:
+              collector_cmd: list[str] | None = None, rules: redact.Rules | None = None, *,
+              menu_cmd: list[str] | None = None, menu_token: str | None = None,
+              child_env: dict[str, str] | None = None) -> int:
     """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`."""
     tool = Path(child_cmd[0]).name
     try:
-        child = subprocess.Popen(child_cmd)
+        child = subprocess.Popen(child_cmd, env=child_env)
     except OSError as e:
         session.remove(folder)
         say(f"Could not start {tool}: {e.strerror or e}", err=True)
         return 1
 
     collector = None
+    menu = None
     try:
         # Invariant 2: only after the child started; a collector that cannot start is skipped.
         if collector_cmd:
             collector = _Collector.start(collector_cmd)
             if collector is None:
                 session.update_meta(folder, device_logs=None, device_logs_off="the collector could not start")
-        state = _wait(child, stops, collector)
+        if menu_cmd and menu_token:
+            menu = _MenuBar.start(menu_cmd, menu_token)
+        state = _wait(child, stops, collector, menu)
         ended_at = session.timestamp()
         if state == RUNNING:
             say(f"{tool} exited on its own (exit code {child.returncode}).", err=True)
         if collector:
             collector.stop(stops, state == KILLED)
+        # The menu stays up through the HAR write, then the finally block stops it.
+        return _finalize(folder, har_cmd, STATUS[state], ended_at, stops, rules or redact.rules_for(None))
     finally:
-        # Invariant 1: no exit path leaves the child, or anything in the collector's group, running.
+        # Invariant 1: no exit path leaves the child, the collector's group, or the menu running.
         if child.poll() is None:
             child.kill()
             child.wait()
         if collector:
             collector.close()
+        if menu:
+            menu.stop()
 
-    return _finalize(folder, har_cmd, STATUS[state], ended_at, stops, rules or redact.rules_for(None))
 
-
-def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | None = None) -> str:
+def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | None = None,
+          menu: _MenuBar | None = None) -> str:
     """Return the state the child exited in."""
     state, stopping_since, warned = RUNNING, 0.0, False
     while True:
@@ -453,6 +600,8 @@ def _wait(child: subprocess.Popen, stops: list[int], collector: _Collector | Non
             warned = True
         if collector and state == RUNNING:
             collector.notice_exit()
+        if menu and state == RUNNING:
+            menu.notice_exit()
         try:
             child.wait(timeout=POLL_S)
         except subprocess.TimeoutExpired:
