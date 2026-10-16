@@ -3,30 +3,35 @@ import markUrl from '../assets/mark.svg';
 import { devicePill } from '../logic/device';
 import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
-import { OFF_WHILE_VIEWING, presetMenuState } from '../logic/presets';
+import { OFF_WHILE_VIEWING, presetMenuState, presetRowsState } from '../logic/presets';
 import { useNow } from '../hooks';
 import { useData, useDispatch, useStore } from '../store';
 import type { PresetInfo } from '../types';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { PresetSheet } from './PresetSheet';
 import { SwitchPresetDialog } from './SwitchPresetDialog';
 
 interface Props {
   newCount: number;
 }
 
-/** The preset label: a menu of `presets/*.yaml`. Another preset is confirmed in a dialog first. */
+/** The preset label: a menu of `presets/*.yaml`. Another preset is confirmed in a dialog first; the sheet edits them. */
 function PresetMenu({ current, target, viewing }: { current: string; target: string; viewing: string | null }) {
   const [open, setOpen] = useState(false);
   const [presets, setPresets] = useState<PresetInfo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chosen, setChosen] = useState<PresetInfo | null>(null);
+  /** The sheet is open: on this preset, or on a blank form for null. */
+  const [sheet, setSheet] = useState<{ initial: string | null } | null>(null);
   const box = useRef<HTMLDivElement>(null);
   const menu = presetMenuState(viewing);
+  const rows = presetRowsState(viewing);
 
   useEffect(() => {
     if (viewing) {
       setOpen(false);
       setChosen(null);
+      setSheet(null);
     }
   }, [viewing]);
 
@@ -56,6 +61,11 @@ function PresetMenu({ current, target, viewing }: { current: string; target: str
   const choose = (preset: PresetInfo) => {
     setOpen(false);
     if (preset.name !== current) setChosen(preset);
+  };
+
+  const openSheet = (initial: string | null) => {
+    setOpen(false);
+    setSheet({ initial });
   };
 
   return (
@@ -93,10 +103,19 @@ function PresetMenu({ current, target, viewing }: { current: string; target: str
               {preset.name === current && <span className="state ok">In use</span>}
             </button>
           ))}
+          <div className="pop-rows">
+            <button type="button" role="menuitem" className="pop-row" disabled={rows.disabled} title={rows.title} onClick={() => openSheet(current)}>
+              Edit presets…
+            </button>
+            <button type="button" role="menuitem" className="pop-row" disabled={rows.disabled} title={rows.title} onClick={() => openSheet(null)}>
+              New preset…
+            </button>
+          </div>
           <div className="pop-foot plain">Another preset saves this session and starts a new one. The phone stays connected.</div>
         </div>
       )}
       {chosen && <SwitchPresetDialog preset={chosen} target={target} onClose={() => setChosen(null)} />}
+      {sheet && <PresetSheet current={current} initial={sheet.initial} onClose={() => setSheet(null)} />}
     </div>
   );
 }

@@ -113,8 +113,9 @@ cd ~/wiretrace
 ### Your own preset (optional)
 
 A preset tells Wiretrace which hosts to decrypt: only the hosts under its `api_hosts:` are
-decrypted. The steps above use the `default` preset (`presets/default.yaml`). For another
-project or environment, create one:
+decrypted. The steps above use the `default` preset (`presets/default.yaml`). In the
+Wiretrace window, **Preset → Edit presets…** changes its hosts and **New preset…** creates
+another. Or, in Terminal, for another project or environment:
 
 ```bash
 cd ~/wiretrace
@@ -148,7 +149,7 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 | Mockup | Status |
 |---|---|
-| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected (editing or adding a preset, screen 7, is not built). Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
+| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |

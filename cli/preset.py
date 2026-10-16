@@ -7,7 +7,12 @@ features still load; inside `redact` they are an error, because a typo would tur
 
 from __future__ import annotations
 
+import hashlib
+import json
+import os
 import re
+import secrets
+import unicodedata
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
@@ -217,3 +222,248 @@ def allow_hosts_regex(host: str) -> str:
 
 def allow_hosts_regexes(preset: Preset) -> list[str]:
     return [allow_hosts_regex(host) for host in preset.api_hosts]
+
+
+# The window's form (spec 013, extension A). It edits fields; the file is rendered whole from them.
+
+TEMPLATE = "example"
+MAX_NAME = 64
+MAX_ENTRIES = 50
+MAX_FILTER = 512
+STRING_FIELDS = ("android_package", "ios_process", "request_id_header", "default_filter")
+LIST_FIELDS = ("api_hosts", "redact_headers", "redact_fields")
+# Top-level keys the form shows; every other key of an old file is kept.
+_FORM_KEYS = ("name", "api_hosts", "default_filter", "request_id_header", "app", "redact")
+_APP_KEYS = ("android_package", "ios_process")
+_HEADER_LINES = ("# Written by the Wiretrace window.", "# Every key is explained in presets/example.yaml.")
+
+
+class FieldError(PresetError):
+    """A form value that cannot be saved. `field` names the form field, or is None."""
+
+    def __init__(self, message: str, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+@dataclass(frozen=True)
+class PresetFile:
+    revision: str
+    fields: dict
+    # The `load_preset` message, or None when the file loads.
+    error: str | None
+    # The parsed YAML, or None when it does not parse; the rendering keeps what the form does not show.
+    data: object
+
+
+def empty_fields() -> dict:
+    return {"api_hosts": [], "android_package": "", "ios_process": "", "request_id_header": "",
+            "default_filter": "", "redact_headers": [], "redact_fields": []}
+
+
+def fields_shape_ok(fields: object) -> bool:
+    if not isinstance(fields, dict) or set(fields) != set(STRING_FIELDS + LIST_FIELDS):
+        return False
+    return (all(isinstance(fields[key], str) for key in STRING_FIELDS)
+            and all(isinstance(fields[key], list) and all(isinstance(item, str) for item in fields[key])
+                    for key in LIST_FIELDS))
+
+
+def fields_from_data(data: object) -> dict:
+    """The form's values in a parsed file; a value of the wrong type counts as not set."""
+    data = data if isinstance(data, dict) else {}
+    app = data.get("app") if isinstance(data.get("app"), dict) else {}
+    redact = data.get("redact") if isinstance(data.get("redact"), dict) else {}
+
+    def text(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
+    def names(value: object) -> list[str]:
+        return [item for item in value if isinstance(item, str)] if isinstance(value, list) else []
+
+    return {"api_hosts": names(data.get("api_hosts")), "android_package": text(app.get("android_package")),
+            "ios_process": text(app.get("ios_process")), "request_id_header": text(data.get("request_id_header")),
+            "default_filter": text(data.get("default_filter")), "redact_headers": names(redact.get("headers")),
+            "redact_fields": names(redact.get("json_fields"))}
+
+
+def file_revision(raw: bytes) -> str:
+    return hashlib.sha256(raw).hexdigest()
+
+
+def name_problem(name: object) -> str | None:
+    if not (isinstance(name, str) and len(name) <= MAX_NAME and _NAME.fullmatch(name)):
+        return (f"The name must be letters, digits, '_' and '-', starting with a letter or a digit, "
+                f"at most {MAX_NAME} characters")
+    return None
+
+
+def preset_path(presets_dir: Path, name: object) -> Path:
+    """The file of a preset named `name`; a name that breaks the file-name rule never becomes a path."""
+    problem = name_problem(name)
+    if problem:
+        raise FieldError(problem, "name")
+    return presets_dir / f"{name}.yaml"
+
+
+def is_listed(presets_dir: Path, name: str) -> bool:
+    """Whether a file of exactly this name exists: a case-insensitive disk would also open `Staging`."""
+    return f"{name}.yaml" in os.listdir(presets_dir)
+
+
+def read_preset_file(path: Path) -> PresetFile:
+    """The file's revision, its error, and the form values that can be read from it, however broken it is."""
+    import yaml
+
+    raw = path.read_bytes()
+    revision = file_revision(raw)
+    where = f"{path.parent.name}/{path.name}"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return PresetFile(revision, empty_fields(), f"{where}: not valid UTF-8 text", None)
+    try:
+        parse_preset(text, path)
+        error = None
+    except PresetError as e:
+        error = str(e)
+    except ValueError:
+        error = f"{where}: not valid YAML"
+    try:
+        data = yaml.safe_load(text)
+    except (yaml.YAMLError, ValueError):
+        data = None
+    return PresetFile(revision, fields_from_data(data), error, data)
+
+
+def check_fields(path: Path, fields: dict) -> None:
+    """Every form value against the rule `parse_preset` applies to it, in the form's order.
+
+    The messages are `parse_preset`'s; `FieldError.field` names the form field.
+    """
+    where = f"{path.parent.name}/{path.name}"
+    hosts = fields["api_hosts"]
+    if not hosts:
+        raise FieldError(f"{where}: 'api_hosts' must be a non-empty list of host names", "api_hosts")
+    if len(hosts) > MAX_ENTRIES:
+        raise FieldError(f"{where}: 'api_hosts' has more than {MAX_ENTRIES} hosts", "api_hosts")
+    for host in hosts:
+        problem = host_problem(host)
+        if problem:
+            raise FieldError(f"{where}: api_hosts entry {host!r} {problem}", "api_hosts")
+    for key in _APP_KEYS:
+        if fields[key]:
+            problem = app_problem({key: fields[key]})
+            if problem:
+                raise FieldError(f"{where}: {problem}", key)
+    if fields["request_id_header"]:
+        problem = header_problem(fields["request_id_header"])
+        if problem:
+            raise FieldError(f"{where}: 'request_id_header' {problem}", "request_id_header")
+    expr = fields["default_filter"]
+    if len(expr) > MAX_FILTER:
+        raise FieldError(f"{where}: 'default_filter' must be at most {MAX_FILTER} characters", "default_filter")
+    if any(unicodedata.category(c) in ("Cc", "Cs", "Zl", "Zp") for c in expr):
+        raise FieldError(f"{where}: 'default_filter' must not contain control characters", "default_filter")
+    for field_name, key in (("redact_headers", "headers"), ("redact_fields", "json_fields")):
+        if len(fields[field_name]) > MAX_ENTRIES:
+            raise FieldError(f"{where}: 'redact.{key}' has more than {MAX_ENTRIES} names", field_name)
+        problem = redact_problem({key: fields[field_name]})
+        if problem:
+            raise FieldError(f"{where}: {problem}", field_name)
+
+
+def _quote(value: str) -> str:
+    # A JSON string is a YAML double-quoted scalar: no value can end the scalar and start another key.
+    return json.dumps(value, ensure_ascii=False)
+
+
+def render_preset(name: str, fields: dict, old: object = None) -> str:
+    """The whole file for `fields`. Keys of `old` that the form does not show are written under 'Kept'."""
+    import yaml
+
+    old = old if isinstance(old, dict) else {}
+    lines = [*_HEADER_LINES, f"name: {_quote(name)}"]
+    if fields["api_hosts"]:
+        lines += ["api_hosts:", *(f"  - {_quote(host)}" for host in fields["api_hosts"])]
+    for key in ("default_filter", "request_id_header"):
+        if fields[key]:
+            lines.append(f"{key}: {_quote(fields[key])}")
+    app = [f"  {key}: {_quote(fields[key])}" for key in _APP_KEYS if fields[key]]
+    if isinstance(old.get("app"), dict):
+        other_app = {k: v for k, v in old["app"].items() if k not in _APP_KEYS}
+        if other_app:
+            app += [f"  {line}" for line in yaml.safe_dump(other_app, sort_keys=False).splitlines()]
+    if app:
+        lines += ["app:", *app]
+    redact = [(key, fields[field_name]) for key, field_name in
+              (("headers", "redact_headers"), ("json_fields", "redact_fields")) if fields[field_name]]
+    if redact:
+        lines.append("redact:")
+        for key, names in redact:
+            lines += [f"  {key}:", *(f"    - {_quote(item)}" for item in names)]
+    kept = {k: v for k, v in old.items() if k not in _FORM_KEYS}
+    if kept:
+        lines += ["", "# Kept from the file:", *yaml.safe_dump(kept, sort_keys=False).splitlines()]
+    return "\n".join(lines) + "\n"
+
+
+def render_file(path: Path, fields: dict, old: object = None) -> str:
+    """The text to write, or a FieldError. Invariant A1: it passes `parse_preset` and reads back as `fields`."""
+    import yaml
+
+    check_fields(path, fields)
+    text = render_preset(path.stem, fields, old)
+    try:
+        parse_preset(text, path)
+        data = yaml.safe_load(text)
+    except PresetError as e:
+        raise FieldError(str(e)) from None
+    except (yaml.YAMLError, ValueError):
+        raise FieldError(f"{path.parent.name}/{path.name}: the values could not be saved as entered") from None
+    if fields_from_data(data) != fields:
+        raise FieldError(f"{path.parent.name}/{path.name}: the values could not be saved as entered")
+    return text
+
+
+def _remove(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
+def _write_temp(path: Path, text: str) -> Path:
+    """A new file next to `path`, never a file or link that already exists (A2)."""
+    tmp = path.with_name(f".{path.stem}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(text.encode("utf-8"))
+            f.flush()
+            os.fsync(f.fileno())
+    except BaseException:
+        _remove(tmp)
+        raise
+    return tmp
+
+
+def replace_file(path: Path, text: str) -> None:
+    """Invariant A2: the file is replaced whole, or not at all, and no temporary file is left."""
+    tmp = _write_temp(path, text)
+    try:
+        os.replace(tmp, path)
+    except BaseException:
+        _remove(tmp)
+        raise
+
+
+def create_file(path: Path, text: str) -> None:
+    """Invariant A3: FileExistsError when the name is taken, also by a name that differs only in capitals."""
+    if any(entry.casefold() == path.name.casefold() for entry in os.listdir(path.parent)):
+        raise FileExistsError(path.name)
+    tmp = _write_temp(path, text)
+    try:
+        os.link(tmp, path)
+    finally:
+        _remove(tmp)

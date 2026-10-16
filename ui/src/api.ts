@@ -4,6 +4,8 @@ import type {
   FlowSummary,
   LogLine,
   LogSource,
+  PresetDetail,
+  PresetFields,
   PresetInfo,
   ReportBox,
   ReportDraft,
@@ -32,6 +34,11 @@ export class ApiError extends Error {
     super(message);
     this.status = status;
     this.data = data;
+  }
+  /** The form field a rejected preset save names (`field` in the 400 body); null when it names none. */
+  get field(): string | null {
+    const field = this.data && typeof this.data === 'object' ? (this.data as { field?: unknown }).field : null;
+    return typeof field === 'string' ? field : null;
   }
 }
 
@@ -116,6 +123,15 @@ export const api = {
   /** `{switching}` once mitmdump is shutting down; null when that preset is already in use. */
   switchPreset: (name: string) =>
     request<{ switching: string } | null>('/api/preset', { method: 'POST', body: JSON.stringify({ name }) }),
+  presetDetail: (name: string) => request<PresetDetail>(`/api/presets/${encodeURIComponent(name)}`),
+  createPreset: (name: string, fields: PresetFields) =>
+    request<{ name: string; revision: string }>('/api/presets', { method: 'POST', body: JSON.stringify({ name, fields }) }),
+  /** `{switching}` (202) when `restart` saved the preset in use and mitmdump is shutting down; else `{revision}`. */
+  savePreset: (name: string, revision: string, fields: PresetFields, restart: boolean) =>
+    request<{ revision?: string; switching?: string }>(`/api/presets/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify(restart ? { revision, fields, restart: true } : { revision, fields }),
+    }),
   rules: () => request<RulesPayload>('/api/rules'),
   putRules: (revision: string, rules: Rule[]) =>
     request<RulesPayload>('/api/rules', { method: 'PUT', body: JSON.stringify({ revision, rules }) }),

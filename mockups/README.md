@@ -94,7 +94,7 @@ Shows recording state and error count in the macOS menu bar, with shortcuts to o
 
 ![Presets](screens/07-presets.png)
 
-Opened from **Preset** in the title bar. Not built yet. Source: the last screen in [`wiretrace-mockup.html`](wiretrace-mockup.html).
+Opened from **Preset** in the title bar (*Edit presets…*, *New preset…*). Built (spec 013, extension A). Differences: the extra names to hide are two lists, headers and fields, as in the file; `example` opens read-only; choosing another preset stays in the menu. Source: the last screen in [`wiretrace-mockup.html`](wiretrace-mockup.html).
 
 | Action | What it does |
 |---|---|

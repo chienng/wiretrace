@@ -138,7 +138,9 @@ continue.
 A preset tells Wiretrace which API hosts to decrypt: only the hosts under its `api_hosts:`
 are decrypted. It is one file per project and environment in `~/wiretrace/presets/`.
 Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
-and start with `--preset default`. For another project or environment, start from the
+and start with `--preset default`. With `--ui wiretrace` you can also do this in the window:
+**Preset → Edit presets…** to put your app's hosts into `default`, or **New preset…** (see
+*Editing and creating presets* under the Wiretrace window). In Terminal, start from the
 example:
 
 ```bash
@@ -656,6 +658,24 @@ stays connected: the WireGuard tunnel (or the Wi-Fi proxy) does not need to be s
 Each session has one preset, so the new one gets its own session folder, rules
 (`rules/<preset>.json`) and mocks. The menu is off while a previous session is open. Ctrl+C,
 or *Stop session* in the menu bar, still ends Wiretrace and never starts the chosen preset.
+
+**Editing and creating presets.** In the same menu, *Edit presets…* opens the *Presets* sheet
+with the preset in use selected, and *New preset…* opens it on a blank form. The form has the
+API hosts (one per line), the Android package, the iOS process, the request ID header, the
+starting filter, and the extra header and field names to hide. Each value is checked the way
+`./wiretrace start` checks the file; a refused value is marked and nothing is written.
+
+- *Create preset* writes `presets/<name>.yaml`. This session keeps running; choose the new
+  preset from the menu to switch to it.
+- *Save* on another preset rewrites its file. This session keeps running.
+- *Save and restart* on the preset in use asks first, then saves the file and switches to it
+  as above: this session is saved, a new one starts with the new settings, and the phone stays
+  connected.
+
+The sheet writes the file in its own layout. Settings the form does not show, such as
+`mocks_dir`, are kept; comments in the file are not. `example` is the template and opens
+read-only: use *New preset*. If the file was changed in TextEdit while the sheet showed it,
+the save is refused and the sheet loads the new file. The name of a preset cannot be changed.
 
 **What each area does.**
 

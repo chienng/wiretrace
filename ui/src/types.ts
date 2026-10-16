@@ -42,6 +42,30 @@ export interface PresetInfo {
   app: string | null;
 }
 
+/** The form's values for a preset file. An empty string or list is left out of the file. `name` is not here. */
+export interface PresetFields {
+  api_hosts: string[];
+  android_package: string;
+  ios_process: string;
+  request_id_header: string;
+  default_filter: string;
+  redact_headers: string[];
+  redact_fields: string[];
+}
+
+/** The form fields a rejected save can name; null when the message is about the whole file. */
+export type PresetFieldName = 'name' | keyof PresetFields;
+
+/** One preset as the sheet edits it. `error` is why the file does not load; `revision` guards the save. */
+export interface PresetDetail {
+  name: string;
+  revision: string;
+  fields: PresetFields;
+  in_use: boolean;
+  read_only: boolean;
+  error: string | null;
+}
+
 export interface ViewResult {
   viewing: string | null;
   cut_off?: boolean;

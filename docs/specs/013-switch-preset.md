@@ -3,10 +3,10 @@
 - **Summary**: the title bar's preset label becomes a menu. Choosing another preset saves
   the current session and starts a new one with that preset, the same target and mode, and
   the phone's tunnel left up. One preset per session. The window does not edit a preset
-  in place.
+  in place. The extension at the end adds editing and creating presets from the window.
 - **Date**: 2026-10-16
 - **Repo**: wiretrace
-- **Status**: approved (2026-10-16)
+- **Status**: approved (2026-10-16). Extension A (edit and create presets): approved (2026-10-16).
 - **Tier**: L (a window action stops the capture process; the next process gets a new
   token; the launcher's stop/start loop changes). Gates E, A, B, C, R, P, D.
 - **Branch**: `feature/switch-preset` (from `main`)
@@ -197,7 +197,8 @@ Order: the decision and the loop, then the API, then the window, then the docs.
 
 - A Mac app, Tauri, or a window that stays open across the restart. The old tab stops
   and a new tab opens.
-- Editing, creating, or deleting a preset file from the window.
+- Editing, creating, or deleting a preset file from the window. Extension A adds editing and
+  creating; deleting stays out.
 - Changing target or mode from the window.
 - A preset menu in the menu bar.
 - Applying the new hosts to the session that is already open.
@@ -220,3 +221,216 @@ About 5 minutes, with two presets and an Android phone or emulator already conne
 The list in **Tests derived from the invariants**. `pytest` for `tests/test_start.py`
 and `tests/test_wiretrace_ui.py`, and the UI unit test for the disabled control. No
 device and no live mitmproxy are required for those.
+
+---
+
+## Extension A: edit and create presets
+
+- **Status**: approved (2026-10-16)
+- **Tier**: L, like the spec it extends: a new write path from the window into `presets/`,
+  which decides what is decrypted, and a save that restarts the session. Gates E, A, B, C,
+  R, P, D.
+- **Branch**: `feature/preset-editor` (from `feature/app-launcher`, which is not merged yet)
+- **Related**: mockup screen 7 (`mockups/README.md`, *Presets — switch, edit, or add*);
+  spec 014 (the Wiretrace app lists `presets/*.yaml` except `example`); the shipped
+  `presets/default.yaml`
+
+### Goal
+
+Setup ships `presets/default.yaml`, and the Wiretrace app starts it. Its `api_hosts` are
+the example's, so nothing of the tester's app is decrypted until the file is edited, and
+today that needs TextEdit and YAML. The tester should be able to put in the app's hosts,
+and create a preset for another environment, from the window.
+
+### Acceptance criteria
+
+- [ ] The preset menu gets two rows under the list: **Edit presets…** opens the *Presets*
+      sheet with the preset in use selected; **New preset…** opens it on a blank form. Both
+      are off while a previous session is open, as the menu is.
+- [ ] The sheet follows mockup screen 7: the presets on the left (*In use* marked,
+      `example` marked *Template*), the form on the right: Name, API hosts (one per line,
+      add and remove), Android package, iOS process, Request ID header, Starting filter,
+      Extra headers to hide, Extra fields to hide. The mockup's single *Extra names to
+      hide* becomes the two lists the file has (`redact.headers`, `redact.json_fields`).
+- [ ] Every value is checked by the rules the file already has: the message is the one
+      `parse_preset` gives, shown above the buttons, and the field it names is marked.
+      The starting filter must also parse as a mitmproxy filter. Nothing is written when a
+      check fails.
+- [ ] **Create preset** writes `presets/<name>.yaml` and leaves this session running. The
+      name follows the file-name rule (letters, digits, `_` and `-`, first a letter or a
+      digit, at most 64 characters). A name that already exists, including one that
+      differs only in capital letters, is refused and nothing is overwritten. The new
+      preset is in the menu at once, and in the Wiretrace app's list.
+- [ ] **Save** on a preset that is not in use rewrites its file. This session keeps
+      running.
+- [ ] **Save and restart** on the preset in use asks first ("This session is saved and a
+      new one starts with these settings. The phone stays connected."). Confirm writes
+      the file, then switches exactly as choosing another preset does, to the same name:
+      the session is saved, a new one starts with the new hosts, the same target and
+      mode. Cancel writes nothing.
+- [ ] If the file changed on disk after the sheet loaded it, the save is refused, the
+      sheet says the file changed and loads it again. Nothing is written.
+- [ ] A preset that does not load opens with its error at the top and the values
+      Wiretrace could read. A valid form saved over it replaces the file.
+- [ ] `example` opens read-only (the release replaces it): no Save button, and the sheet
+      says to use **New preset**.
+- [ ] Saving writes the file in Wiretrace's own layout. Keys the form does not show
+      (`mocks_dir`, keys for later features, other `app:` keys) keep their values;
+      comments are not kept. The sheet says so under the buttons.
+- [ ] Hosts and other preset values are not written to the Terminal, a log line, or the
+      bug-report zip by this feature.
+- [ ] `--ui mitmweb` and `--no-ui` are unchanged.
+
+### Approach
+
+The form edits fields, not YAML text. The server renders the whole file from the fields,
+parses the rendered text with `parse_preset` (the same check `./wiretrace start` runs), and
+writes it only if that passes and reads back to the same values. The existing switch path
+does the restart.
+
+API, all behind the existing guards (Host, token cookie, `X-Wiretrace: 1` on writes):
+
+| Request | Answer |
+|---|---|
+| `GET /api/presets/<name>` | `{name, revision, fields, in_use, read_only, error}`. `revision` is the SHA-256 of the file's bytes. `error` is the `load_preset` message or null. |
+| `POST /api/presets` `{name, fields}` | 201 `{name, revision}`. 409 if the name exists. |
+| `PUT /api/presets/<name>` `{revision, fields}` | 200 `{revision}`. For the preset in use the body must also have `"restart": true`, and the answer is 202 `{switching}`, then mitmdump shuts down as in spec 013. |
+
+`fields` is `{api_hosts: [], android_package, ios_process, request_id_header,
+default_filter, redact_headers: [], redact_fields: []}`; an empty string or list means the
+key is left out of the file. A 400 is `{error, field}`, `field` naming the form field or
+null.
+
+The rendered file: a two-line header comment (written by the Wiretrace window; every key
+is explained in `presets/example.yaml`), then `name`, `api_hosts`, `default_filter`,
+`request_id_header`, `app`, `redact`, in that order, then every other key from the old file
+under a `# Kept from the file:` line. Strings are written as JSON strings (a JSON string is
+a valid YAML double-quoted scalar), so no value can start a new key; the kept keys are
+written with `yaml.safe_dump`.
+
+Rejected:
+
+- **Keeping comments with `ruamel.yaml`**: a new package on every QA Mac, through the
+  pinned install, for comments that `example.yaml` already carries. Hand-written comments
+  are rare; the sheet says they are not kept.
+- **A YAML text box**: no per-field checks, and indentation mistakes are the reason
+  testers avoid the file.
+- **Applying the new hosts to the running session**: rejected by this spec already (one
+  HAR would hold two environments).
+- **Renaming**: the name is the key for the session folder, `rules/<name>.json` and
+  `mocks/<name>`.
+
+### Design that needs care
+
+The restart reuses spec 013's machine unchanged; the new part is the order of checks and
+writes for the preset in use.
+
+`PUT` on the preset in use:
+
+| Step | On failure |
+|---|---|
+| 1. The spec 013 refusals: a previous session open, no session folder, a switch already in flight | 409, nothing written |
+| 2. `restart` is not true | 409 "This preset is in use: saving it restarts the session", nothing written |
+| 3. The revision matches the file on disk | 409 "The file changed", nothing written |
+| 4. Render, `parse_preset`, read back, filter check | 400 `{error, field}`, nothing written |
+| 5. Replace `presets/<name>.yaml` | 500, the old file is still whole |
+| 6. Write `.switch.json` with the same name | 500 "Saved, but the session could not restart: stop and start again" |
+| 7. 202, then `ctx.master.shutdown()` | — |
+
+Invariants (A1–A9, beside spec 013's 1–10, which hold unchanged):
+
+- **A1.** Nothing is written unless the rendered text passes `parse_preset` and reads back
+  to the submitted fields.
+- **A2.** A preset file is replaced whole: a temporary file in `presets/` opened with
+  `O_CREAT | O_EXCL | O_NOFOLLOW`, then `os.replace`. The temporary file is removed on
+  every failure.
+- **A3.** A new preset is created with `os.link(tmp, path)`, which fails if the name exists,
+  so an existing file, or its case-insensitive twin on APFS, is never overwritten.
+- **A4.** A save rewrites only when the SHA-256 of the file now equals the revision the
+  sheet loaded. A missing file is a mismatch. The window of time between that check and
+  the replace is accepted: one tester, one Mac.
+- **A5.** For the preset in use, steps 1–3 run before step 5, so a refused restart writes
+  nothing. Once step 5 has run, a failure says the file is saved.
+- **A6.** Saving a preset that is not in use never shuts mitmdump down.
+- **A7.** `POST` and `PUT` are refused with 409 while a previous session is open, and `PUT`
+  on `example` is refused with 409.
+- **A8.** The name comes from the path or body and must match the file-name rule before any
+  path is built. Bodies are at most 64 KiB; at most 50 hosts and 50 names per hide list; a
+  starting filter is at most 512 characters with no control characters.
+- **A9.** Log lines for this feature name only the exception type, never a host, a name to
+  hide, or a filter.
+
+### Tests derived from the invariants
+
+1. Render then `parse_preset` round-trips every field; empty fields leave their keys out.
+2. A value with a quote, `#`, `: ` or a newline cannot add a key (rejected or kept as text).
+3. Kept keys (`mocks_dir`, an unknown key, another `app:` key) survive a save.
+4. An invalid host, package, process, header or hide name → 400 with `field`, file unchanged.
+5. An invalid starting filter → 400, `field` is `default_filter`.
+6. Create writes the file; creating the same name again, or the same name in other
+   capitals, → 409 and the first file is unchanged.
+7. A wrong or stale revision → 409, file unchanged.
+8. Save of a preset not in use → 200, no switch file, shutdown not called.
+9. Save of the preset in use without `restart` → 409, nothing written.
+10. Save of the preset in use with `restart` → the file is new, `.switch.json` names the
+    preset, 202, shutdown called.
+11. Save of the preset in use while a switch is in flight, or while a previous session is
+    open → 409, file unchanged.
+12. `PUT` on `example` → 409.
+13. A name with `/`, `..` or a dot in the path or body → 400 or 404, nothing written.
+14. A body over 64 KiB, or 51 hosts → 400.
+15. Writes without `X-Wiretrace` → 403.
+16. A symlink at the temporary path is not followed; a failed replace leaves no temporary
+    file.
+17. `GET` on a preset that does not load → its error and the values that could be read.
+18. UI: the button reads *Create preset*, *Save*, or *Save and restart*; read-only for
+    `example`; the menu rows are off while a previous session is open.
+
+### Files expected to change
+
+Order: the file format, then the API, then the window, then the docs.
+
+- `cli/preset.py`: the form's field list, reading fields from a file's data, rendering a
+  file, the file revision, and the create / replace writes (A1–A4).
+- `addons/wiretrace_ui.py`: `GET` and `PUT /api/presets/<name>`, `POST /api/presets`; the
+  spec 013 refusals shared between `switch_preset` and the in-use save; the filter check.
+- `ui/src/types.ts`, `ui/src/api.ts`: the preset detail and the three calls.
+- `ui/src/logic/presets.ts` (+ `presets.test.ts`): the form state, the button label,
+  read-only, the menu rows.
+- `ui/src/components/PresetSheet.tsx` (new): the list, the form, the restart confirmation.
+- `ui/src/components/TitleBar.tsx`: the two menu rows; opens the sheet.
+- `ui/src/styles.css`: the sheet's layout from mockup screen 7, from existing tokens.
+- `ui/dist/`: rebuilt and committed.
+- `tests/test_preset.py`, `tests/test_wiretrace_ui.py`: the tests above.
+- `docs/user-guide.md`: Part 1, Step 6 and the Wiretrace window part: edit or create a
+  preset from **Preset → Edit presets…**.
+- `README.md`: *Your own preset* says it can be done in the window; the design table's
+  main-window row no longer says editing is not built.
+- `mockups/README.md`: screen 7 is built, with the two hide lists as the difference.
+
+### Out of scope
+
+- Deleting or renaming a preset; editing `example`.
+- Editing `mocks_dir` in the form (it is kept as it is).
+- Keeping hand-written comments.
+- A preset editor in mitmweb, the menu bar, or the Wiretrace app.
+
+### Manual test
+
+About 5 minutes, with an Android phone or emulator connected and `--ui wiretrace`.
+
+1. Start with `--preset default`. **Preset → Edit presets…**. Replace the hosts with the
+   app's API host, **Save and restart**, confirm. A new tab opens; the Terminal prints the
+   new host; the app's requests are decrypted.
+2. **New preset…**, name `qa2`, one host, **Create preset**. The session keeps running.
+   `presets/qa2.yaml` exists and loads with `./wiretrace start --preset qa2`.
+3. Edit `presets/qa2.yaml` in TextEdit while the sheet shows it, then save in the sheet:
+   it says the file changed and reloads.
+4. Enter `https://api.example.com` as a host: the message names the host, nothing is
+   written.
+
+### Automated tests
+
+The list in **Tests derived from the invariants**: `pytest` for `tests/test_preset.py` and
+`tests/test_wiretrace_ui.py`, `vitest` for `ui/src/logic/presets.test.ts`, `tsc --noEmit`.
+No device and no live mitmproxy are required.

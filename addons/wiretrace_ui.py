@@ -42,6 +42,7 @@ if str(ROOT) not in sys.path:
 
 from cli import __version__, report, report_text, screenshot, session  # noqa: E402
 from cli import bodies  # noqa: E402
+from cli import preset as presetfile  # noqa: E402
 from cli.preset import PRESETS_DIR, PresetError, list_presets, load_preset  # noqa: E402
 from cli.start import APP_KEYS, DEVICE_LOGS  # noqa: E402
 
@@ -861,9 +862,61 @@ class Mocks(Guarded):
         self.write({"files": list_mocks(self.addon.mocks_dir())})
 
 
-class Presets(Guarded):
+class PresetForm(Guarded):
+    """What the preset form's calls share: a body of at most 64 KiB, and a 400 that names the form field."""
+
+    def preset_body(self) -> dict | None:
+        """The JSON object sent, or None after a 400 (A8: the size is checked before the body is parsed)."""
+        if len(self.request.body) > MAX_REQUEST_BYTES:
+            self.bad("The request is larger than 64 KiB")
+            return None
+        body = self.small_json()
+        if not isinstance(body, dict):
+            self.bad("The body is not a JSON object")
+            return None
+        return body
+
+    def bad(self, message: str, field: str | None = None) -> None:
+        self.reply(400, {"error": message, "field": field})
+
+    def reply(self, status: int, payload: dict) -> Any:
+        self.set_status(status)
+        return self.finish(payload)
+
+
+class Presets(PresetForm):
     async def get(self) -> None:
         self.write({"presets": await self.addon.list_presets()})
+
+    async def post(self) -> None:
+        body = self.preset_body()
+        if body is None:
+            return
+        if not isinstance(body.get("name"), str) or not presetfile.fields_shape_ok(body.get("fields")):
+            return self.bad("The body must be {name, fields}")
+        status, payload = await self.addon.create_preset(body["name"], body["fields"])
+        self.reply(status, payload)
+
+
+class PresetDetail(PresetForm):
+    """One preset as the form shows it (spec 013, extension A)."""
+
+    async def get(self, name: str) -> None:
+        status, payload = await self.addon.preset_detail(name)
+        self.reply(status, payload)
+
+    async def put(self, name: str) -> None:
+        body = self.preset_body()
+        if body is None:
+            return
+        if not isinstance(body.get("revision"), str) or not presetfile.fields_shape_ok(body.get("fields")):
+            return self.bad("The body must be {revision, fields}")
+        status, payload = await self.addon.save_preset(name, body["revision"], body["fields"],
+                                                       body.get("restart") is True)
+        await self.reply(status, payload)
+        if status == 202:
+            # Only once the page has its answer: the launcher saves this session and starts the next.
+            ctx.master.shutdown()
 
 
 class PresetSwitch(Guarded):
@@ -1140,6 +1193,8 @@ class WiretraceUI:
         self.presets_dir = PRESETS_DIR
         # The preset `.switch.json` names once it is written; mitmdump is then shutting down.
         self.switching: str | None = None
+        # One preset write at a time, so a refused restart never writes a file another request is racing for.
+        self.preset_lock = asyncio.Lock()
         self.started_at = time.time()
         # Setup: when a device last connected, and failed TLS handshakes with API hosts. Nothing about the peer.
         self.device_seen_at: float | None = None
@@ -1244,6 +1299,7 @@ class WiretraceUI:
                 (r"/api/view", View, handler_args),
                 (r"/api/mocks", Mocks, handler_args),
                 (r"/api/presets", Presets, handler_args),
+                (r"/api/presets/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", PresetDetail, handler_args),
                 (r"/api/preset", PresetSwitch, handler_args),
                 (r"/api/rules", RulesApi, handler_args),
                 (r"/api/rules/test", RuleTest, handler_args),
@@ -1562,13 +1618,23 @@ class WiretraceUI:
 
         return await asyncio.to_thread(entries)
 
-    async def switch_preset(self, name: str) -> tuple[int, dict]:
-        """Invariants 2, 4 and 5: check the preset, then write `.switch.json`. A 202 means shut down now."""
+    def switch_refusal(self) -> tuple[int, dict] | None:
+        """The 409s of a switch that come before anything else: a previous session is open, or no session folder."""
         if self.viewed is not None:
             return 409, {"error": "Switching the preset is off while a previous session is open"}
-        folder = ctx.options.qa_ui_session_dir
-        if not folder:
+        if not ctx.options.qa_ui_session_dir:
             return 409, {"error": "No session folder: start Wiretrace with ./wiretrace start"}
+        return None
+
+    def switch_in_flight(self) -> bool:
+        """The file's presence is the lock (invariant 5)."""
+        return self.switching is not None or os.path.lexists(Path(ctx.options.qa_ui_session_dir) / session.SWITCH)
+
+    async def switch_preset(self, name: str) -> tuple[int, dict]:
+        """Invariants 2, 4 and 5: check the preset, then write `.switch.json`. A 202 means shut down now."""
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
         try:
             await asyncio.to_thread(load_preset, name, self.presets_dir)
         except PresetError as e:
@@ -1576,20 +1642,125 @@ class WiretraceUI:
         except OSError:
             return 400, {"error": "Could not read that preset file"}
         # Other requests ran while the preset was read.
-        if self.viewed is not None:
-            return 409, {"error": "Switching the preset is off while a previous session is open"}
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
         if name == str(self.meta().get("preset") or ""):
             return 204, {}
-        path = Path(folder) / session.SWITCH
-        if self.switching is not None or os.path.lexists(path):
+        return self.start_switch(name)
+
+    def start_switch(self, name: str) -> tuple[int, dict]:
+        """Write `.switch.json`; no await between the in-flight check and the write."""
+        if self.switch_in_flight():
             return 409, {"error": "Wiretrace is already switching to another preset"}
         try:
-            write_switch_file(path, name)
+            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name)
         except OSError as e:
             logger.error("Wiretrace UI: could not write the switch request (%s)", type(e).__name__)
             return 500, {"error": "Could not switch: the session folder cannot be written"}
         self.switching = name
         return 202, {"switching": name}
+
+    # Editing and creating presets (spec 013, extension A).
+
+    def in_use(self, name: str) -> bool:
+        return name == str(self.meta().get("preset") or "")
+
+    async def preset_detail(self, name: str) -> tuple[int, dict]:
+        path = self.presets_dir / f"{name}.yaml"
+
+        def read() -> presetfile.PresetFile | None:
+            return presetfile.read_preset_file(path) if presetfile.is_listed(self.presets_dir, name) else None
+
+        try:
+            found = await asyncio.to_thread(read)
+        except OSError as e:
+            logger.error("Wiretrace UI: could not read a preset (%s)", type(e).__name__)
+            return 500, {"error": "Could not read that preset file"}
+        if found is None:
+            return 404, {"error": f"Unknown preset {name!r}"}
+        return 200, {"name": name, "revision": found.revision, "fields": found.fields, "in_use": self.in_use(name),
+                     "read_only": name == presetfile.TEMPLATE, "error": found.error}
+
+    def checked_text(self, path: Path, fields: dict, old: object) -> str:
+        """The text to write. A FieldError for any value that a check refuses (A1)."""
+        presetfile.check_fields(path, fields)
+        expr = fields["default_filter"]
+        if expr:
+            try:
+                valid = bool(flowfilter.parse(expr))
+                reason = "is not a valid filter"
+            except ValueError as e:
+                valid, reason = False, f"is not a valid filter: {e}"
+            if not valid:
+                raise presetfile.FieldError(f"{path.parent.name}/{path.name}: 'default_filter' {reason}",
+                                            "default_filter")
+        return presetfile.render_file(path, fields, old)
+
+    async def create_preset(self, name: str, fields: dict) -> tuple[int, dict]:
+        if self.viewed is not None:
+            return 409, {"error": "Editing presets is off while a previous session is open"}
+
+        def create() -> tuple[int, dict]:
+            path = presetfile.preset_path(self.presets_dir, name)
+            text = self.checked_text(path, fields, None)
+            try:
+                presetfile.create_file(path, text)
+            except FileExistsError:
+                return 409, {"error": f"A preset named {name!r} already exists"}
+            return 201, {"name": name, "revision": presetfile.file_revision(text.encode("utf-8"))}
+
+        async with self.preset_lock:
+            return await self.write_preset(create)
+
+    async def save_preset(self, name: str, revision: str, fields: dict, restart: bool) -> tuple[int, dict]:
+        """Steps 1 to 7 of the save. Only the preset in use may restart the session, and only with `restart`."""
+        if self.viewed is not None:
+            return 409, {"error": "Editing presets is off while a previous session is open"}
+        if name == presetfile.TEMPLATE:
+            return 409, {"error": "example is a template and cannot be saved: use New preset"}
+        in_use = self.in_use(name)
+
+        def replace() -> tuple[int, dict]:
+            path = self.presets_dir / f"{name}.yaml"
+            if not presetfile.is_listed(self.presets_dir, name):
+                return 409, {"error": "The file changed"}
+            current = presetfile.read_preset_file(path)
+            if current.revision != revision:
+                return 409, {"error": "The file changed"}
+            text = self.checked_text(path, fields, current.data)
+            presetfile.replace_file(path, text)
+            return 200, {"revision": presetfile.file_revision(text.encode("utf-8"))}
+
+        async with self.preset_lock:
+            if in_use:
+                refusal = self.switch_refusal()
+                if refusal is None and self.switch_in_flight():
+                    refusal = 409, {"error": "Wiretrace is already switching to another preset"}
+                if refusal:
+                    return refusal
+                if not restart:
+                    return 409, {"error": "This preset is in use: saving it restarts the session"}
+            status, payload = await self.write_preset(replace)
+            if status != 200 or not in_use:
+                return status, payload
+            # Other requests ran while the file was written; the preset is saved either way.
+            refusal = self.switch_refusal()
+            if refusal is None:
+                status, payload = self.start_switch(name)
+                if status == 202:
+                    return status, payload
+            return 500, {"error": "Saved, but the session could not restart: stop and start again"}
+
+    async def write_preset(self, work: Any) -> tuple[int, dict]:
+        """Run a file step off the event loop; a refused value is a 400, a failed write a 500 (type only logged)."""
+        try:
+            return await asyncio.to_thread(work)
+        except presetfile.FieldError as e:
+            return 400, {"error": str(e), "field": e.field}
+        except OSError as e:
+            logger.error("Wiretrace UI: could not write a preset (%s)", type(e).__name__)
+            return 500, {"error": "Could not save the preset: the file on disk is unchanged"}
 
     # Rules: the live QA addon validates and applies them; the window writes the file.
 
