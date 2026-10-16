@@ -400,6 +400,7 @@ ol.instr .kbd { overflow-wrap: anywhere; }
 .addr { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; }
 .confbox { margin-top: 16px; }
 .confhead { display: flex; align-items: center; justify-content: space-between; }
+.confacts { display: flex; align-items: center; gap: 8px; }
 .conf { margin: 0; padding: 10px 12px; max-height: 120px; overflow: auto; font: 11.5px/1.5 var(--mono); background: #fbfbfc; border: 1px solid var(--line); border-radius: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .waiting {
   display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 10px;

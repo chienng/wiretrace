@@ -4,6 +4,9 @@ import {
   appChecks,
   appHint,
   beforeYouStart,
+  confFileSteps,
+  confOpen,
+  confTitle,
   connectWhy,
   deviceFromTarget,
   DEVICES,
@@ -86,7 +89,26 @@ describe('setup wizard', () => {
     }
     expect(proxySteps('iphone', '192.0.2.7', 8080).map((s) => s.text).join(' ')).toContain('Server 192.0.2.7, port 8080');
     expect(proxySteps('android-emu', '192.0.2.7', 8081)[0]?.code).toBe('adb shell settings put global http_proxy 10.0.2.2:8081');
-    expect(tunnelSteps('android-emu').map((s) => s.code).filter(Boolean)).toEqual(['adb push wiretrace.conf /sdcard/Download/']);
+    expect(tunnelSteps('android-emu').map((s) => s.code).filter(Boolean)).toEqual(['adb push ~/Downloads/wiretrace.conf /sdcard/Download/']);
+  });
+
+  it('keeps the configuration closed on phones until the QR code cannot be used', () => {
+    expect(confOpen('iphone', false)).toBe(false);
+    expect(confOpen('android', false)).toBe(false);
+    expect(confOpen('iphone', true)).toBe(true);
+    expect(confOpen('android-emu', false)).toBe(true);
+    expect(confTitle('android-emu')).toBe('wiretrace.conf (for the emulator)');
+    expect(confTitle('iphone')).toBe('Set up with wiretrace.conf instead');
+  });
+
+  it('sets a phone up from wiretrace.conf and says to delete it afterwards', () => {
+    for (const kind of ['iphone', 'android'] as const) {
+      const steps = confFileSteps(kind);
+      expect(steps[0]?.text).toContain('Download wiretrace.conf');
+      expect(steps.at(-1)?.text).toMatch(/delete wiretrace\.conf from the Mac/i);
+    }
+    expect(confFileSteps('android').map((s) => s.code).filter(Boolean)).toEqual(['adb push ~/Downloads/wiretrace.conf /sdcard/Download/']);
+    expect(confFileSteps('android-emu')).toEqual([]);
   });
 
   it('turns green only for a request to an API host, not the certificate page', () => {

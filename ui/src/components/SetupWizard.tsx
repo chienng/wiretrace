@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { copyText } from '../clipboard';
+import { download } from '../download';
 import { useNow } from '../hooks';
 import { certificateSteps } from '../logic/certificate';
 import { devicePill, STATE_LABELS } from '../logic/device';
@@ -9,6 +10,10 @@ import {
   appHint,
   beforeYouStart,
   CERTIFICATE_WHY,
+  CONF_FILE,
+  confFileSteps,
+  confOpen,
+  confTitle,
   connectWhy,
   deviceChoice,
   deviceFromTarget,
@@ -40,7 +45,7 @@ import { useDispatch, useStore } from '../store';
 import type { AppState } from '../types';
 import { Modal } from './Modal';
 
-function Qr({ text }: { text: string }) {
+function Qr({ text, onFail }: { text: string; onFail: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -51,12 +56,16 @@ function Qr({ text }: { text: string }) {
         if (cancelled || !canvas) return;
         return QR.toCanvas(canvas, text, { width: 202, margin: 0, errorCorrectionLevel: 'L' });
       })
-      .catch(() => !cancelled && setFailed(true));
+      .catch(() => {
+        if (cancelled) return;
+        setFailed(true);
+        onFail();
+      });
     return () => {
       cancelled = true;
     };
-  }, [text]);
-  if (failed) return <div className="qr note warn">The QR code could not be drawn. Copy the configuration text instead.</div>;
+  }, [text, onFail]);
+  if (failed) return <div className="qr note warn">The QR code could not be drawn. Use {CONF_FILE} below instead.</div>;
   return (
     <div className="qr">
       <canvas ref={ref} width={202} height={202} role="img" aria-label="WireGuard configuration QR code" />
@@ -197,6 +206,9 @@ function Connection({ state, since }: { state: AppState; since: number }) {
 
 function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: DeviceKind; setKind: (k: DeviceKind) => void; copy: Copy }) {
   const [since] = useState(() => Date.now());
+  const [confShown, setConfShown] = useState(false);
+  const [qrFailed, setQrFailed] = useState(false);
+  const onQrFail = useCallback(() => setQrFailed(true), []);
   const wg = state.mode === 'wireguard';
   const name = deviceChoice(kind).label;
   const macIp = state.mac_ip ?? '<Mac IP>';
@@ -237,6 +249,8 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
   const conf = state.wireguard_conf;
   const shown = conf && kind === 'android-emu' ? emulatorConf(conf) : conf;
   const endpoint = endpointOf(shown);
+  const forced = confOpen(kind, qrFailed);
+  const steps = confFileSteps(kind);
   return (
     <>
       <h4>Connect your {name} to this Mac</h4>
@@ -244,7 +258,7 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
       <DeviceCards kind={kind} onPick={setKind} />
       <div className="connect">
         <div>
-          {shown ? <Qr text={shown} /> : <div className="qr note">The WireGuard configuration is not available yet.</div>}
+          {shown ? <Qr text={shown} onFail={onQrFail} /> : <div className="qr note">The WireGuard configuration is not available yet.</div>}
           {endpoint && (
             <div className="qrcap">
               {kind === 'android-emu' ? 'Emulator address' : 'Mac address'} {endpoint.host} · UDP {endpoint.port}
@@ -256,18 +270,37 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
           <Connection state={state} since={since} />
         </div>
       </div>
-      {shown && (
-        <div className="confbox">
-          <div className="confhead">
-            <span className="sec-h">Configuration text</span>
-            <button type="button" className="btn small" onClick={() => copy(shown, 'Configuration')}>
-              Copy
-            </button>
+      {shown &&
+        (forced || confShown ? (
+          <div className="confbox">
+            <div className="confhead">
+              <span className="sec-h">{confTitle(kind)}</span>
+              <span className="confacts">
+                {!forced && (
+                  <button type="button" className="linkbtn" onClick={() => setConfShown(false)}>
+                    Hide
+                  </button>
+                )}
+                <button type="button" className="btn small" onClick={() => download(CONF_FILE, shown, 'application/octet-stream')}>
+                  Download {CONF_FILE}
+                </button>
+                <button type="button" className="btn small" onClick={() => copy(shown, 'Configuration')}>
+                  Copy text
+                </button>
+              </span>
+            </div>
+            {steps.length > 0 && <Steps steps={steps} copy={copy} />}
+            <pre className="conf">{shown}</pre>
+            <div className="tip">This holds the device's private key. Do not share it or show it in a screenshot.</div>
           </div>
-          <pre className="conf">{shown}</pre>
-          <div className="tip">This text contains the device's private key. Do not share it.</div>
-        </div>
-      )}
+        ) : (
+          <p className="tip">
+            <button type="button" className="linkbtn" onClick={() => setConfShown(true)}>
+              Can't scan the QR code?
+            </button>{' '}
+            Set the tunnel up from a file instead.
+          </p>
+        ))}
     </>
   );
 }

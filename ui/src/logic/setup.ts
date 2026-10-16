@@ -74,6 +74,42 @@ export interface Step {
   code?: string;
 }
 
+/** The name the WireGuard configuration is downloaded as. */
+export const CONF_FILE = 'wiretrace.conf';
+const PUSH_CONF = `adb push ~/Downloads/${CONF_FILE} /sdcard/Download/`;
+
+/** The configuration box is open where the QR code cannot be used; elsewhere it waits behind a link. */
+export function confOpen(kind: DeviceKind, qrFailed: boolean): boolean {
+  return kind === 'android-emu' || qrFailed;
+}
+
+export function confTitle(kind: DeviceKind): string {
+  return kind === 'android-emu' ? `${CONF_FILE} (for the emulator)` : `Set up with ${CONF_FILE} instead`;
+}
+
+/** A phone that cannot scan the QR code imports the same configuration from a file. */
+export function confFileSteps(kind: DeviceKind): Step[] {
+  switch (kind) {
+    case 'iphone':
+      return [
+        { text: `Click Download ${CONF_FILE}. It goes to the Mac's Downloads folder.` },
+        { text: 'AirDrop the file to the iPhone and open it with WireGuard.' },
+        { text: 'Name the tunnel "Wiretrace", allow adding the VPN configuration, and switch the tunnel on.' },
+        { text: `Delete ${CONF_FILE} from the Mac: it holds the private key.` },
+      ];
+    case 'android':
+      return [
+        { text: `Click Download ${CONF_FILE}. It goes to the Mac's Downloads folder.` },
+        { text: 'Copy it to the phone over USB:', code: PUSH_CONF },
+        { text: `In WireGuard tap + → Import from file or archive, and pick Download/${CONF_FILE}.` },
+        { text: `Switch the tunnel on, then delete ${CONF_FILE} from the Mac and from the phone: it holds the private key.` },
+      ];
+    case 'android-emu':
+    case 'ios-sim':
+      return [];
+  }
+}
+
 export function tunnelSteps(kind: DeviceKind): Step[] {
   switch (kind) {
     case 'iphone':
@@ -93,9 +129,9 @@ export function tunnelSteps(kind: DeviceKind): Step[] {
     case 'android-emu':
       return [
         { text: 'Install WireGuard in the emulator from Google Play (a system image with Google Play).' },
-        { text: 'Save the configuration text below as wiretrace.conf, then copy it to the emulator:', code: 'adb push wiretrace.conf /sdcard/Download/' },
-        { text: 'In WireGuard tap + → Import from file or archive, and pick Download/wiretrace.conf.' },
-        { text: 'Switch the tunnel on, then delete wiretrace.conf from the Mac: it holds the private key.' },
+        { text: `Click Download ${CONF_FILE} below, then copy the file to the emulator:`, code: PUSH_CONF },
+        { text: `In WireGuard tap + → Import from file or archive, and pick Download/${CONF_FILE}.` },
+        { text: `Switch the tunnel on, then delete ${CONF_FILE} from the Mac: it holds the private key.` },
       ];
     case 'ios-sim':
       return [];
