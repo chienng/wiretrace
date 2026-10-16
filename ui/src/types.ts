@@ -182,3 +182,40 @@ export interface ReportResult {
 }
 
 export type Phase = 'connecting' | 'loading' | 'live' | 'reconnecting' | 'forbidden';
+
+export type ReportFormat = 'markdown' | 'jira';
+export type ReportBox = 'others' | 'device' | 'app';
+export type ReportFileKind = 'har' | 'device-log' | 'app-log' | 'zip';
+
+export interface ReportFile {
+  kind: ReportFileKind;
+  name: string;
+  size: number;
+}
+
+/** A screenshot in the session's screenshots/ folder; `name` is made by the server. */
+export interface Screenshot {
+  name: string;
+  size: number;
+  /** HH:MM:SS, when it was taken. */
+  time: string;
+}
+
+/** `manual` is a real iPhone: the tester takes the screenshot on the phone. */
+export interface ScreenshotState {
+  state: 'available' | 'off' | 'manual';
+  reason: string | null;
+  items: Screenshot[];
+}
+
+/** The bug report form's draft (spec 012). Every captured value in it is masked by the server. */
+export interface ReportDraft {
+  title: string;
+  description: string;
+  format: ReportFormat;
+  lead: { request: string | null; at: string | null; device: string | null; session: string };
+  counts: Record<ReportBox, number>;
+  masked: { headers: string[]; fields: string[] };
+  files: ReportFile[];
+  screenshots: ScreenshotState;
+}

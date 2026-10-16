@@ -1,7 +1,8 @@
 // Dev only (`vite serve`): answers /api/* from dev/fixtures/*.json and fakes the update socket.
 // Never part of the build. Env: WIRETRACE_FIXTURE_BULK=<n> adds n extra flows,
 // WIRETRACE_FIXTURE_MODE=proxy switches the setup dialog to proxy mode,
-// WIRETRACE_FIXTURE_403=1 answers every /api request with 403.
+// WIRETRACE_FIXTURE_403=1 answers every /api request with 403,
+// WIRETRACE_FIXTURE_NO_DEVICE=1 turns the report form's screenshots off.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,7 @@ import { bulkFlows, liveFlow, liveLines } from './live.mjs';
 
 const dir = path.dirname(fileURLToPath(import.meta.url));
 const read = (name) => JSON.parse(fs.readFileSync(path.join(dir, 'fixtures', name), 'utf8'));
+const SAMPLE_PNG = fs.readFileSync(path.join(dir, 'fixtures', 'screenshot.png'));
 const TS_KEYS = new Set(['ts', 'start', 'request_end', 'response_start', 'response_end', 'started_at']);
 
 function shiftTimes(value, shift) {
@@ -104,7 +106,7 @@ export default function fixtures() {
     const p = url.pathname;
     const method = req.method;
     if (process.env.WIRETRACE_FIXTURE_403) return [403, { error: 'forbidden' }];
-    if ((method === 'PUT' || method === 'POST') && req.headers['x-wiretrace'] !== '1') return [403, { error: 'missing header' }];
+    if ((method === 'PUT' || method === 'POST' || method === 'DELETE') && req.headers['x-wiretrace'] !== '1') return [403, { error: 'missing header' }];
     if (method === 'GET' && p === '/api/state') return [200, { ...state, flow_count: allFlows().length }];
     if (method === 'GET' && p === '/api/flows') return [200, { flows: allFlows() }];
     if (method === 'GET' && p.startsWith('/api/flows/')) {
@@ -149,7 +151,84 @@ export default function fixtures() {
       ];
     }
     if (method === 'POST' && p === '/api/report/reveal') return [200, { ok: true }];
+    if (method === 'GET' && p === '/api/report/draft') return [200, reportDraft(url.searchParams)];
+    if (method === 'GET' && p.startsWith('/api/report/file/')) {
+      const kind = p.slice('/api/report/file/'.length);
+      const file = reportFiles(url.searchParams)[kind];
+      if (!file) return [404, { error: 'Nothing to report with these boxes' }];
+      return ['raw', 200, kind === 'zip' ? 'application/zip' : 'text/plain; charset=utf-8', Buffer.from(file.text), file.name];
+    }
+    if (method === 'POST' && p === '/api/report/screenshot') {
+      if (process.env.WIRETRACE_FIXTURE_NO_DEVICE) return [422, { error: 'No Android device connected' }];
+      const now = new Date();
+      const pad = (n) => String(n).padStart(2, '0');
+      const name = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+      if (screenshots.some((s) => s.name === name)) return [409, { error: 'A screenshot is already being taken' }];
+      screenshots.push({ name, size: SAMPLE_PNG.length, time: `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}` });
+      return ['later', () => [200, { name, screenshots }]];
+    }
+    if (p.startsWith('/api/report/screenshot/')) {
+      const name = decodeURIComponent(p.slice('/api/report/screenshot/'.length));
+      const index = screenshots.findIndex((s) => s.name === name);
+      if (index < 0) return [404, { error: 'unknown screenshot' }];
+      if (method === 'DELETE') {
+        screenshots.splice(index, 1);
+        return [200, { screenshots }];
+      }
+      if (method === 'GET') return ['raw', 200, 'image/png', SAMPLE_PNG, url.searchParams.get('download') ? `example-screenshot-${name.slice(9, 15)}.png` : null];
+    }
     return [404, { error: 'not found' }];
+  }
+
+  const screenshots = [];
+
+  function reportFiles(params) {
+    const include = new Set((params.get('include') ?? '').split(',').filter(Boolean));
+    const session = state.session ?? 'example';
+    const files = {
+      har: { name: `${session}-requests.har`, text: JSON.stringify({ log: { entries: include.has('others') ? allFlows() : allFlows().slice(0, 1) } }) },
+    };
+    if (include.has('device')) files['device-log'] = { name: `${session}-device-log.txt`, text: allLogs('device').map((l) => `${l.level} ${l.tag} ${l.message}`).join('\n') };
+    if (include.has('app')) files['app-log'] = { name: `${session}-app-log.txt`, text: allLogs('app').map((l) => `${l.level} ${l.tag} ${l.message}`).join('\n') };
+    files.zip = { name: `${session}-report.zip`, text: 'fixture zip, not a real archive' };
+    return files;
+  }
+
+  function reportDraft(params) {
+    const flowId = params.get('flow');
+    const f = flowId ? allFlows().find((x) => x.id === flowId) : null;
+    const jira = params.get('format') === 'jira';
+    const h = (text) => (jira ? `h2. ${text}` : `## ${text}`);
+    const status = f ? (f.status ?? 'no response') : null;
+    const description = [
+      h('Steps to reproduce'), jira ? '# ' : '1. ', '',
+      h('Expected'), '', h('Actual'), '',
+      h('Environment'),
+      `${jira ? '*' : '-'} Preset: ${state.preset} · Target: ${state.target} · Mode: ${state.mode}`,
+      `${jira ? '*' : '-'} Device: Pixel 8 · Android 15 · Wiretrace 0.8.0`, '',
+      ...(f ? [h('Failed request'), `${jira ? '*' : '-'} ${f.method} ${f.host}${f.path.split('?')[0]} → ${status} · ${f.duration_ms ?? '—'} ms`, ''] : []),
+      'Log lines are masked by pattern only; check them before sharing.',
+    ].join('\n');
+    const files = reportFiles(params);
+    return {
+      title: f ? `${f.method} ${f.path.split('?')[0]} ${f.status === null ? 'gets no response' : `returns ${f.status}`}` : `Bug in session ${state.session ?? 'example'}`,
+      description,
+      format: jira ? 'jira' : 'markdown',
+      lead: {
+        request: f ? `${f.method} ${f.path.split('?')[0]} → ${status}` : null,
+        at: f ? new Date(f.ts * 1000).toTimeString().slice(0, 8) : null,
+        device: 'Pixel 8 · Android 15',
+        session: state.session ?? 'example',
+      },
+      counts: { others: allFlows().length - (f ? 1 : 0), device: allLogs('device').length, app: allLogs('app').length },
+      masked: { headers: ['Authorization', 'Cookie', 'Set-Cookie'], fields: ['accessToken', 'refreshToken', 'password', 'otp'] },
+      files: Object.entries(files).map(([kind, file]) => ({ kind, name: file.name, size: Buffer.byteLength(file.text) })),
+      screenshots: params.get('session')
+        ? { state: 'off', reason: 'Screenshots are off for a previous session', items: screenshots }
+        : process.env.WIRETRACE_FIXTURE_NO_DEVICE
+          ? { state: 'off', reason: 'No Android device connected', items: screenshots }
+          : { state: 'available', reason: null, items: screenshots },
+    };
   }
 
   return {
@@ -183,7 +262,14 @@ export default function fixtures() {
             res.end(JSON.stringify(payload));
           };
           const result = route(req, url, body);
-          if (result[0] === 'later') setTimeout(() => send(result[1]()), 900);
+          if (result[0] === 'raw') {
+            const [, status, type, data, filename] = result;
+            res.statusCode = status;
+            res.setHeader('Content-Type', type);
+            res.setHeader('Cache-Control', 'no-store');
+            if (filename) res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+            res.end(data);
+          } else if (result[0] === 'later') setTimeout(() => send(result[1]()), 900);
           else send(result);
         });
       });

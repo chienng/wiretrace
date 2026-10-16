@@ -24,6 +24,8 @@ DEVICE_STATUS = "device.status.json"
 # Counts for the menu bar. Not a report member. No token, host, path, header or body.
 STATUS = ".status.json"
 META = "meta.json"
+# Screenshots taken from the bug report form (0700, files 0600). Not a report member.
+SCREENSHOTS = "screenshots"
 # The unmasked HAR exists only under this name, and is removed on every exit path.
 HAR_TMP = ".flows.har.tmp"
 HAR_MASKED = ".flows.har.masked"

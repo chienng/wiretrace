@@ -70,6 +70,20 @@ Opened from a failed request or log line. It pre-fills the title and context (de
 
 The default destination is **YouTrack**: pick the project, type, and priority, and the tool creates the issue, attaches the redacted report and screenshot, adds the `wiretrace` tag, and shows the issue link. The QA engineer's personal YouTrack token is stored in the macOS Keychain. Jira and "Save .zip" are alternative destinations. Details: `PLAN.md` section 9.8.
 
+## 5a. Bug report form — copy and download (U10, first version)
+
+![Bug report form](screens/05a-bug-report-form.png)
+
+The first version of screen 5 ([spec 012](../docs/specs/012-bug-report-form.md)), without the tracker integration. Wiretrace sends nothing anywhere.
+
+| Area | What it does |
+|---|---|
+| Title | Pre-filled from the failed request, editable; the copy icon copies it. |
+| Description | Pre-filled with steps, expected, actual, environment, the failed request, the masked response body and linked log lines; editable. **Markdown** (YouTrack, Jira Cloud) or **Jira wiki** (Data Center) changes what the copy icon copies. |
+| Logs | Boxes for the requests and log lines within ±30 s; each file (masked HAR, device log, app log) has a download icon. |
+| Screenshots | **Take screenshot** through `adb` (Android phone or emulator) or `simctl` (iOS Simulator), up to 5, each with a download icon. On a real iPhone, the tester takes it on the phone. |
+| Footer | **Download all (.zip)**: the files above plus `summary.md`. |
+
 ## 6. Menu-bar status (U1)
 
 ![Menu-bar status](screens/06-menu-bar.png)

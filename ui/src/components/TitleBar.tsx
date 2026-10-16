@@ -82,7 +82,7 @@ export function TitleBar({ newCount }: Props) {
       <button type="button" className="btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
         Setup
       </button>
-      <button type="button" className="btn primary" onClick={() => patch({ dialog: 'report' })}>
+      <button type="button" className="btn primary" onClick={() => dispatch({ type: 'openReport' })}>
         Report bug
       </button>
     </header>

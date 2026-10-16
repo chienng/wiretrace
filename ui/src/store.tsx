@@ -3,6 +3,7 @@ import type { InitialData } from './connection';
 import type { QuickFilter } from './logic/filters';
 import { LEVELS, type Level } from './logic/logs';
 import { applyMessages, mergeFlows, mergeLogSets, type LogSets } from './logic/merge';
+import { reportFlowId } from './logic/report';
 import type { AppState, FlowSummary, LogSource, Phase, RulesPayload, ServerMessage } from './types';
 
 export type View = 'traffic' | 'logs' | 'rules';
@@ -38,6 +39,8 @@ export interface UiState {
   /** Crash lines (by log key) whose stack trace is shown whole. */
   logsExpanded: ReadonlySet<string>;
   dialog: Dialog;
+  /** The request the bug report form was opened for, fixed when it opened; null for the whole session. */
+  reportFlow: string | null;
   toast: { id: number; text: string } | null;
   /** A request to pre-fill a new rule from (Traffic > New rule). */
   ruleSeed: FlowSummary | null;
@@ -79,6 +82,7 @@ export type Action =
   | { type: 'logsResume' }
   | { type: 'logsClear' }
   | { type: 'openFlow'; id: string }
+  | { type: 'openReport'; flowId?: string }
   | { type: 'viewOpened'; view: ViewedSession }
   | { type: 'viewClosed' }
   | { type: 'toast'; text: string };
@@ -116,6 +120,7 @@ export const initialStore: Store = {
     logsFrozen: null,
     logsExpanded: new Set(),
     dialog: null,
+    reportFlow: null,
     toast: null,
     ruleSeed: null,
   },
@@ -208,6 +213,10 @@ export function reducer(store: Store, action: Action): Store {
         ...store,
         ui: { ...store.ui, view: 'traffic', selectedFlowId: action.id, quick: 'all', host: null, search: '', hidden, frozen },
       };
+    }
+    case 'openReport': {
+      const reportFlow = action.flowId ?? reportFlowId(store.ui.selectedFlowId, store.view ? store.view.flows : store.flows);
+      return { ...store, ui: { ...store.ui, dialog: 'report', reportFlow } };
     }
     case 'toast':
       return { ...store, ui: { ...store.ui, toast: { id: ++toastId, text: action.text } } };

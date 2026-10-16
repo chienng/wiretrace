@@ -1,13 +1,16 @@
+import io as std_io
 import json
+import re
 import zipfile
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 from mitmproxy import io
 from mitmproxy.test import tflow
 
-from cli import report, session
+from cli import report, report_text, session
 
 NOW = datetime(2026, 10, 14, 12, 0, 0)
 NAME = "2026-10-14_091500_staging_android"
@@ -435,3 +438,249 @@ def test_a_report_of_a_gzip_bomb_keeps_the_placeholder(env):
     content = har["log"]["entries"][0]["response"]["content"]
     assert content["text"] == PLACEHOLDER
     assert "X" * 100 not in content["text"]
+
+
+# The bug report form (spec 012): window, boxes, renderers, masking
+
+T0 = 1_791_900_000.0
+JWT = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2lnbmF0dXJl"
+SECRETS = ("fake-auth-value", "fake-pw-value", "fake-query-token", "fake-body-token", JWT, "fake-log-pw")
+
+
+def at(f, offset: float, duration: float = 0.25):
+    f.request.timestamp_start = T0 + offset
+    f.request.timestamp_end = T0 + offset + 0.01
+    if f.response is not None:
+        f.response.timestamp_start = T0 + offset + duration - 0.01
+        f.response.timestamp_end = T0 + offset + duration
+    if f.error is not None:
+        f.error.timestamp = T0 + offset + duration
+    return f
+
+
+def iso(offset: float) -> str:
+    return datetime.fromtimestamp(T0 + offset).astimezone().isoformat(timespec="milliseconds")
+
+
+def log(offset: float | None, message: str, **extra) -> str:
+    record = {"message": message, "level": "I", "tag": "Net", **extra}
+    if offset is not None:
+        record["ts"] = iso(offset)
+    return json.dumps(record)
+
+
+def har_paths(data: bytes) -> list[str]:
+    return [urlsplit(entry["request"]["url"]).path for entry in json.loads(data)["log"]["entries"]]
+
+
+def draft(env, include, fmt="markdown"):
+    return report.draft(env[0] / NAME, env[1], include, fmt, now=NOW)
+
+
+def export(env, kind, include):
+    return report.export(env[0] / NAME, env[1], kind, include, now=NOW)
+
+
+# Window and boxes
+
+def test_without_window_or_include_build_is_the_0_8_0_report_and_all_boxes_without_a_request_match_it(env):
+    folder = make_session(env[0], [at(flow("/a"), 0), at(flow("/b", 500), 90)],
+                          logs={session.DEVICE_LOG: [log(0, "d")], session.APP_LOG: [log(None, "no time")]})
+    members, flows, lines, _ = report.build(folder, env[1])
+    assert sorted(members) == sorted(["summary.md", session.HAR, session.DEVICE_LOG, session.APP_LOG, session.META])
+    assert (flows.requests, lines) == (2, 2)
+    assert report.build(folder, env[1], None, report.Include())[0] == members
+    with zipfile.ZipFile(std_io.BytesIO(export(env, "zip", report.Include())[1])) as archive:
+        assert sorted(archive.namelist()) == sorted(f"{NAME}/{m}" for m in members)
+        assert {n.split("/", 1)[1]: archive.read(n) for n in archive.namelist()} == members
+
+
+def test_the_window_includes_its_bounds_and_nothing_past_them(env):
+    chosen = at(flow("/chosen", 500), 0)
+    flows = [chosen, at(flow("/minus30"), -30), at(flow("/plus30"), 30),
+             at(flow("/past-minus"), -30.001), at(flow("/past-plus"), 30.001)]
+    logs = [log(-30, "in-a"), log(30, "in-b"), log(-30.01, "out-a"), log(30.01, "out-b"), log(None, "no time")]
+    make_session(env[0], flows, logs={session.DEVICE_LOG: logs})
+    include = report.Include(chosen.id)
+    assert sorted(har_paths(export(env, "har", include)[1])) == ["/chosen", "/minus30", "/plus30"]
+    device = export(env, "device-log", include)[1].decode()
+    assert "in-a" in device and "in-b" in device
+    assert not any(word in device for word in ("out-a", "out-b", "no time"))
+    assert draft(env, include)["counts"] == {"others": 2, "device": 2, "app": 0}
+
+
+def test_the_boxes_limit_the_files_and_the_reported_request_is_always_in(env):
+    chosen = at(flow("/chosen", 500), 0)
+    make_session(env[0], [chosen, at(flow("/other"), 5)],
+                 logs={session.DEVICE_LOG: [log(1, "d")], session.APP_LOG: [log(2, "a")]})
+    alone = report.Include(chosen.id, others=False, device=False, app=True)
+    assert har_paths(export(env, "har", alone)[1]) == ["/chosen"]
+    assert export(env, "device-log", alone) is None
+    kinds = [f["kind"] for f in draft(env, alone)["files"]]
+    assert kinds == ["har", "app-log", "zip"]
+    with zipfile.ZipFile(std_io.BytesIO(export(env, "zip", alone)[1])) as archive:
+        names = archive.namelist()
+    assert f"{NAME}/{session.DEVICE_LOG}" not in names and f"{NAME}/{session.APP_LOG}" in names
+    # The counts say what a box would add, whether it is on or not.
+    assert draft(env, alone)["counts"] == {"others": 1, "device": 1, "app": 1}
+
+
+def test_a_session_with_no_request_and_every_box_off_offers_no_file(env):
+    make_session(env[0], [at(flow("/a"), 0)])
+    assert draft(env, report.Include(None, False, False, False))["files"] == []
+    assert export(env, "zip", report.Include(None, False, False, False)) is None
+
+
+def test_an_unknown_request_is_said_so(env):
+    make_session(env[0], [at(flow("/a"), 0)])
+    with pytest.raises(report.UnknownRequest):
+        draft(env, report.Include("not-a-saved-id"))
+
+
+def test_file_sizes_in_the_draft_are_the_downloaded_bytes(env):
+    chosen = at(flow("/chosen", 500, body=b'{"error": "x"}'), 0)
+    make_session(env[0], [chosen, at(flow("/other"), 3)],
+                 logs={session.DEVICE_LOG: [log(1, "d")], session.APP_LOG: [log(2, "a")]})
+    include = report.Include(chosen.id)
+    files = draft(env, include)["files"]
+    assert [f["name"] for f in files] == [f"{NAME}-requests.har", f"{NAME}-device-log.txt",
+                                          f"{NAME}-app-log.txt", f"{NAME}-report.zip"]
+    for item in files:
+        name, data = export(env, item["kind"], include)
+        assert (name, len(data)) == (item["name"], item["size"])
+
+
+# Text logs
+
+def test_text_logs_are_time_level_tag_message_one_per_line():
+    line = report.text_log_line(json.dumps({"ts": iso(0), "level": "E", "tag": "Checkout",
+                                            "message": "order failed\nsecond line"}))
+    clock = datetime.fromtimestamp(T0).strftime("%Y-%m-%d %H:%M:%S.000")
+    assert line == f"{clock} E Checkout order failed second line"
+    assert report.text_log_line('{"message": {"code": 1}}') == '- - - {"code": 1}'
+    assert report.text_log_line("not json") == "not json"
+
+
+# Invariant 1: masked everywhere
+
+def secret_session(env):
+    chosen = at(flow(
+        "/api/v1/orders?token=fake-query-token&page=2", 500, method="POST",
+        request_headers={"Authorization": "Bearer fake-auth-value", "X-Request-ID": "req-0010"},
+        request_body=json.dumps({"password": "fake-pw-value"}).encode(),
+        response_headers={"Content-Type": "application/json"},
+        body=json.dumps({"error": "ORDER_FAILED", "token": "fake-body-token"}).encode()), 0)
+    logs = {session.DEVICE_LOG: [log(1, f"auth {JWT}", request_id="req-0010")],
+            session.APP_LOG: [log(2, "login password=fake-log-pw req-0010")]}
+    make_session(env[0], [chosen, at(flow("/other", request_headers={"Authorization": "fake-auth-value"}), 4)],
+                 logs=logs)
+    return report.Include(chosen.id)
+
+
+def test_no_secret_reaches_the_title_description_or_any_download(env):
+    include = secret_session(env)
+    texts = []
+    for fmt in report_text.FORMATS:
+        data = draft(env, include, fmt)
+        texts += [data["title"], data["description"], json.dumps(data["lead"])]
+        assert "returns 500" in data["title"] and "?" not in data["title"]
+    for kind in ("har", "device-log", "app-log"):
+        texts.append(export(env, kind, include)[1].decode())
+    with zipfile.ZipFile(std_io.BytesIO(export(env, "zip", include)[1])) as archive:
+        texts += [archive.read(n).decode() for n in archive.namelist() if not n.endswith(session.META)]
+    for text in texts:
+        for secret in SECRETS:
+            assert secret not in text
+    description = draft(env, include)["description"]
+    assert "token=***" in description and "page=2" in description
+    assert "req-0010" in description
+
+
+def test_the_description_has_the_sections_and_linked_log_lines(env):
+    include = secret_session(env)
+    (env[0] / NAME / session.DEVICE_STATUS).write_text(json.dumps({"state": "streaming", "model": "Pixel 8",
+                                                                    "os": "Android 15"}))
+    data = draft(env, include)
+    text = data["description"]
+    for heading in ("## Steps to reproduce", "## Expected", "## Actual", "## Environment", "## Failed request",
+                    "## Response body", "## Log lines"):
+        assert heading in text
+    assert "\n1. \n" in text
+    assert "- Preset: staging · Target: android · Mode: proxy" in text
+    assert "- Device: Pixel 8 · Android 15 · Wiretrace 0.5.0" in text
+    assert "`POST api.example.com/api/v1/orders?token=***&page=2` → 500 · 250 ms · request ID `req-0010`" in text
+    assert text.rstrip().endswith(report_text.LOG_NOTE)
+    logged = text.split("## Log lines", 1)[1]
+    assert "auth ***" in logged and "password=***" in logged
+    assert data["lead"] == {"request": "POST /api/v1/orders → 500", "at": datetime.fromtimestamp(T0).strftime("%H:%M:%S"),
+                            "device": "Pixel 8 · Android 15", "session": NAME}
+    assert "Authorization" in data["masked"]["headers"] and "otp" in data["masked"]["fields"]
+
+
+def test_no_more_than_20_linked_lines_and_none_without_a_request_id(env):
+    chosen = at(flow("/a", 500, request_headers={"X-Request-ID": "rid-1"}), 0)
+    plain = at(flow("/b", 500), 1)
+    make_session(env[0], [chosen, plain], logs={session.APP_LOG: [log(1, f"n{i}", request_id="rid-1")
+                                                                  for i in range(25)]})
+    text = draft(env, report.Include(chosen.id))["description"]
+    assert "n19" in text and "n20" not in text
+    assert "no request ID" in draft(env, report.Include(plain.id))["description"]
+    off = draft(env, report.Include(chosen.id, device=False, app=False))["description"]
+    assert "n0" not in off and "Device and app logs are not included." in off
+
+
+# Rendering
+
+@pytest.mark.parametrize("fmt", report_text.FORMATS)
+def test_captured_text_stays_inside_one_block(env, fmt):
+    body = "start\n```\n``````` long run\n{code}\n{noformat}\n{CODE:java}\nend"
+    chosen = at(flow("/x", 500, body=body.encode(), response_headers={"Content-Type": "text/plain"}), 0)
+    make_session(env[0], [chosen])
+    text = draft(env, report.Include(chosen.id), fmt)["description"]
+    section = text.split("Response body", 1)[1].split("Log lines", 1)[0]
+    if fmt == "markdown":
+        fence = re.search(r"^(`{3,})", section.split("\n", 2)[2], re.M).group(1)
+        assert len(fence) == 8
+        inner = section.split(fence)[1]
+        assert "start" in inner and "end" in inner
+        assert section.count(fence) == 2
+    else:
+        assert len(re.findall(r"(?<!\\)\{(?:code|noformat)", section, re.IGNORECASE)) == 2
+        assert "\\{code}" in section and "\\{noformat}" in section and "\\{CODE:java}" in section
+
+
+def test_the_body_is_cut_at_4_kb_on_a_character_boundary(env):
+    body = "a" + "€" * 2000
+    chosen = at(flow("/x", 500, body=body.encode(), response_headers={"Content-Type": "text/plain; charset=utf-8"}), 0)
+    make_session(env[0], [chosen])
+    text = draft(env, report.Include(chosen.id))["description"]
+    block = text.split("```\n", 1)[1].split("\n```", 1)[0]
+    assert block == "a" + "€" * 1365 and len(block.encode()) <= report.BODY_LIMIT
+    assert f"```\n{report_text.CUT_NOTE}" in text
+
+
+def test_jira_for_a_request_with_no_response(env):
+    chosen = at(flow("/gone", error=True), 0)
+    make_session(env[0], [chosen])
+    data = draft(env, report.Include(chosen.id), "jira")
+    assert data["title"] == "GET /gone gets no response"
+    assert "h2. Response body" not in data["description"] and "h2. Failed request" in data["description"]
+    assert "h2. Steps to reproduce" in data["description"] and "\n# \n" in data["description"]
+    assert data["lead"]["request"] == "GET /gone → no response"
+
+
+def test_markdown_inline_code_cannot_be_closed_by_a_backtick():
+    assert report_text.md_code("a`b") == "``a`b``"
+    assert report_text.md_code("`x`") == "`` `x` ``"
+    assert report_text.jira_code("a*b{c}|d") == "{{a\\*b\\{c\\}\\|d}}"
+
+
+def test_the_whole_session_draft_lists_every_failed_request(env):
+    make_session(env[0], [at(flow("/ok"), 0), at(flow("/bad", 500), 1), at(flow("/gone", error=True), 2)])
+    data = draft(env, report.Include())
+    assert data["title"] == f"2 failed requests in session {NAME}"
+    assert data["lead"]["request"] is None and data["lead"]["session"] == NAME
+    rows = [line for line in data["description"].splitlines() if line.startswith("| ")][1:]
+    assert len(rows) == 2 and "/bad" in rows[0] and "/gone" in rows[1]
+    jira = draft(env, report.Include(), "jira")["description"]
+    assert "||Time||Method||Host||Path||Status||Duration||Request ID||Wiretrace note||" in jira

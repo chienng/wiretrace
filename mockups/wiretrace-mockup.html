@@ -271,6 +271,39 @@
   .phone i.e { background: var(--red-soft); height: 26px; border: 1px solid #f7b9bf; }
   .sheet-foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
 
+  /* ---------- report form (5a) ---------- */
+  .sheet.wide { width: 860px; }
+  .note-local { display: flex; gap: 8px; align-items: center; background: var(--blue-soft); color: #0b4a9e; border-radius: 8px; padding: 8px 12px; font-size: 12.5px; margin: 0 0 4px; }
+  .ico { width: 28px; height: 28px; flex: none; display: inline-grid; place-items: center; border-radius: 7px; border: 1px solid var(--line-strong); background: #fff; color: var(--muted); }
+  .ico svg { width: 15px; height: 15px; }
+  .ico.done { color: var(--green); border-color: #b7e1c3; background: var(--green-soft); }
+  .with-ico { display: flex; gap: 8px; align-items: center; }
+  .with-ico .input { flex: 1; }
+  .desc-h { display: flex; align-items: center; gap: 10px; margin-bottom: 5px; }
+  .desc-h label { margin: 0 !important; }
+  .copied { color: var(--green); font-size: 11.5px; font-weight: 500; }
+  .desc { border: 1px solid var(--line-strong); border-radius: 8px; font: 11.5px/1.55 var(--mono); padding: 10px 12px; background: #fbfbfc; white-space: pre; height: 352px; overflow: hidden; position: relative; color: #3a3a3c; }
+  .desc::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 36px; background: linear-gradient(transparent, #fbfbfc); }
+  .desc .h { color: var(--blue); font-weight: 600; }
+  .desc .m { color: var(--green); }
+  .desc .t { color: var(--faint); }
+  .grid-form { display: grid; grid-template-columns: 1fr 300px; gap: 22px; }
+  .file { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-top: 1px solid var(--line); }
+  .file:first-of-type { border-top: none; }
+  .file .fn { font-family: var(--mono); font-size: 11.5px; }
+  .file .sz { color: var(--muted); font-size: 11.5px; margin-left: auto; }
+  .shots { display: flex; gap: 10px; }
+  .thumb { border: 1px solid var(--line); border-radius: 10px; background: #f5f5f7; padding: 8px 8px 6px; display: flex; flex-direction: column; align-items: center; gap: 6px; position: relative; }
+  .thumb .phone { width: 64px; height: 124px; border-radius: 12px; padding: 10px 6px; gap: 5px; }
+  .thumb .phone i { height: 6px; }
+  .thumb .phone i.e { height: 18px; }
+  .thumb .cap { font-size: 11px; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+  .thumb .cap .ico { width: 24px; height: 24px; }
+  .thumb .x { position: absolute; top: 4px; right: 6px; color: var(--faint); font-size: 13px; }
+  .take { border: 1.5px dashed var(--line-strong); border-radius: 10px; width: 82px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; color: var(--blue); font-size: 11.5px; text-align: center; }
+  .take b { font-size: 20px; font-weight: 400; line-height: 1; }
+  .sub { color: var(--muted); font-size: 11.5px; margin-top: 6px; }
+
   /* ---------- menu bar ---------- */
   .menubar-stage { position: relative; height: 430px; width: 720px; border-radius: 12px; overflow: hidden; border: 1px solid #c8c8cc; background: linear-gradient(135deg, #5b7fa8, #8aa6c4); }
   .menubar { height: 26px; background: rgba(240,240,245,.85); display: flex; align-items: center; justify-content: flex-end; gap: 16px; padding: 0 14px; font-size: 13px; }
@@ -928,6 +961,107 @@ traceId=b81f0c7d44e2a913</div>
         <span class="spacer"></span>
         <button class="btn">Cancel</button>
         <button class="btn primary">Create YouTrack issue</button>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-report-form">
+  <h2>5a. Bug report form — copy and download (U10, first version)</h2>
+  <p>Spec 012. The same dialog without the tracker integration: Wiretrace fills in a form shaped like a YouTrack or Jira issue, the tester reviews it, then copies the title and description and downloads the screenshots and logs into her own tracker. Nothing is sent anywhere.</p>
+
+  <div class="stage" style="width: 1060px; height: 1050px;">
+    <div class="ghost-win"></div>
+    <div class="dim"></div>
+    <div class="sheet wide">
+      <h3>Report bug</h3>
+      <p class="lead">From request <span class="kbd">POST /api/v1/orders → 500</span> at 19:41:18 · Pixel 8 · Android 15</p>
+      <div class="note-local">Nothing is sent anywhere. Copy the title and description, download the files, and add them to your YouTrack or Jira issue.</div>
+
+      <div class="field" style="margin-top: 14px;">
+        <label>Title</label>
+        <div class="with-ico">
+          <div class="input">POST /api/v1/orders returns 500</div>
+          <span class="ico" title="Copy title"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></span>
+        </div>
+      </div>
+
+      <div class="field" style="margin-top: 14px;">
+        <div class="desc-h">
+          <label>Description</label>
+          <span class="spacer"></span>
+          <span class="seg sm"><span class="on">Markdown (YouTrack, Jira Cloud)</span><span>Jira wiki (Data Center)</span></span>
+          <span class="copied">✓ Copied</span>
+          <span class="ico done" title="Copy description"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5"/><path d="M10.5 3.5V3a1.5 1.5 0 0 0-1.5-1.5H4A1.5 1.5 0 0 0 2.5 3v5A1.5 1.5 0 0 0 4 9.5h.5"/></svg></span>
+        </div>
+<div class="desc"><span class="h">## Steps to reproduce</span>
+1. Open Cart, apply promo code SUMMER25
+2. Tap Place order
+
+<span class="h">## Expected</span>
+The order is placed.
+
+<span class="h">## Actual</span>
+A generic error is shown.
+
+<span class="h">## Environment</span>
+- Preset: staging · Target: android · Mode: wireguard
+- Device: Pixel 8 · Android 15 · Wiretrace 0.8.0
+
+<span class="h">## Failed request</span>
+- POST api.example.com/api/v1/orders → 500 · 842 ms · request ID req-0010
+
+<span class="h">## Response body</span>
+```json
+{"error": {"code": "ORDER_CREATE_FAILED", "traceId": "test-trace-0001"}, "token": "<span class="m">***</span>"}
+```</div>
+        <div class="sub">Editable. Your text stays until you change the format or a box below; Wiretrace asks before replacing it.</div>
+      </div>
+
+      <div class="grid-form">
+        <div>
+          <div class="sec">
+            <div class="sec-h">Logs</div>
+            <div class="check"><span class="cb on"></span>Other requests ±30 s<span class="d">14 requests</span></div>
+            <div class="check"><span class="cb on"></span>Device logs (same window)<span class="d">42 lines</span></div>
+            <div class="check"><span class="cb on"></span>App logs (same window)<span class="d">8 lines</span></div>
+          </div>
+          <div class="sec" style="margin-top: 8px;">
+            <div class="file"><span class="fn">staging-android-requests.har</span><span class="sz">96 KB</span><span class="ico" title="Download"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg></span></div>
+            <div class="file"><span class="fn">staging-android-device-log.txt</span><span class="sz">7 KB</span><span class="ico" title="Download"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg></span></div>
+            <div class="file"><span class="fn">staging-android-app-log.txt</span><span class="sz">2 KB</span><span class="ico" title="Download"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg></span></div>
+          </div>
+          <div class="sec">
+            <div class="sec-h">Masked before export</div>
+            <div class="redact"><span>Authorization</span><span>Cookie</span><span>Set-Cookie</span><span>accessToken</span><span>refreshToken</span><span>password</span><span>otp</span></div>
+          </div>
+        </div>
+
+        <div class="sec">
+          <div class="sec-h">Screenshots <span style="font-weight: 400; text-transform: none; letter-spacing: 0;">· 2 of 5</span></div>
+          <div class="shots">
+            <div class="thumb">
+              <span class="x">×</span>
+              <div class="phone"><i style="width:60%"></i><i></i><i style="width:80%"></i><i class="e"></i><i style="width:70%"></i><i></i></div>
+              <div class="cap">19:41:20<span class="ico" title="Download"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg></span></div>
+            </div>
+            <div class="thumb">
+              <span class="x">×</span>
+              <div class="phone"><i style="width:50%"></i><i class="e"></i><i style="width:80%"></i><i></i><i style="width:40%"></i><i></i></div>
+              <div class="cap">19:41:34<span class="ico" title="Download"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg></span></div>
+            </div>
+            <div class="take"><b>+</b>Take screenshot</div>
+          </div>
+          <div class="sub">Taken from the phone through adb. On a real iPhone, take it on the phone instead.</div>
+        </div>
+      </div>
+
+      <div class="sheet-foot">
+        <span class="tip" style="margin: 0; align-self: center;">Log lines are masked by pattern only; check them before sharing.</span>
+        <span class="spacer"></span>
+        <button class="btn">Close</button>
+        <button class="btn primary"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.5v8M4.5 7 8 10.5 11.5 7M3 13.5h10"/></svg>Download all (.zip)</button>
       </div>
     </div>
   </div>
