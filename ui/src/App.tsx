@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { setForbiddenListener } from './api';
 import { CompareDialog } from './components/CompareDialog';
 import { LogsView } from './components/LogsView';
@@ -11,6 +11,7 @@ import { TrafficView } from './components/TrafficView';
 import { Connection } from './connection';
 import { useServerFilter } from './hooks';
 import { applyFilters, hostCounts, quickCounts } from './logic/filters';
+import { flowLinkChoice } from './logic/flowLink';
 import { useData, useDispatch, useStore } from './store';
 import type { FlowSummary } from './types';
 import { backToLive } from './viewing';
@@ -51,8 +52,24 @@ function ViewingBanner({ name, cutOff }: { name: string; cutOff: boolean }) {
   );
 }
 
+function useFlowLink() {
+  const dispatch = useDispatch();
+  const { loaded, flows } = useStore();
+  const handled = useRef(false);
+  useEffect(() => {
+    if (!loaded || handled.current) return;
+    handled.current = true;
+    const choice = flowLinkChoice(window.location.hash, flows.map((flow) => flow.id));
+    if (choice.clear) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search);
+    }
+    if (choice.id) dispatch({ type: 'openFlow', id: choice.id });
+  }, [loaded, flows, dispatch]);
+}
+
 export function App() {
   useConnection();
+  useFlowLink();
   const { phase, loaded, ui, view } = useStore();
   const { flows, viewing } = useData();
 

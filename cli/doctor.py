@@ -98,6 +98,21 @@ def check_packages(names: list[str] = PACKAGES) -> list[Result]:
     return [Result(OK, "Python packages", ", ".join(found))]
 
 
+# 4b. Menu bar (PyObjC). INFO only: capture does not need it.
+
+def check_menu_bar(probe: Callable[[], str | None] | None = None) -> list[Result]:
+    """``available``, or why the menu bar cannot start. Never a FAIL: capture runs either way."""
+    if probe is None:
+        from menubar import availability
+        probe = availability
+    reason = probe()
+    if reason is None:
+        return [Result(INFO, "Menu bar", "available")]
+    if reason.startswith("PyObjC not installed"):
+        return [Result(INFO, "Menu bar", "PyObjC not installed (run scripts/setup-mac.sh)")]
+    return [Result(INFO, "Menu bar", reason)]
+
+
 # 4. adb
 
 def find_adb(home: Path | None = None) -> str | None:
@@ -288,6 +303,7 @@ def run_all() -> list[Result]:
         ("Python", check_python),
         ("mitmproxy", check_mitmproxy),
         ("Python packages", check_packages),
+        ("Menu bar", check_menu_bar),
         ("adb", lambda: check_adb(adb)),
         ("Ports", check_ports),
         ("CA", check_ca),

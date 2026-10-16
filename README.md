@@ -118,7 +118,7 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
 | 5. Send a bug report to YouTrack or Jira | Not built yet. Today: `./wiretrace report` writes a zip. |
-| 6. Menu-bar app | Not built yet. |
+| 6. Menu-bar app | Built: status item while `./wiretrace start --ui wiretrace` runs (`--no-menu-bar` turns it off). Differences: no *Pause recording* (the window's Pause only freezes its list); *Show last error* instead of *Report last error*; the device line is target, mode and model. |
 
 **1. Main window** (design mockup)
 
@@ -140,7 +140,7 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 ![Design mockup: bug report to YouTrack or Jira](mockups/screens/05-bug-report.png)
 
-**6. Menu-bar app** (design mockup, not built yet)
+**6. Menu-bar app** (design mockup)
 
 ![Design mockup: menu-bar app](mockups/screens/06-menu-bar.png)
 
@@ -177,8 +177,10 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   and logs on one screen, a log timeline with the device's status, earlier sessions, search in
   headers and bodies, replay and compare, the setup wizard and the Rules view. It is only
   reachable from the same Mac, with a new
-  token at every start. mitmweb stays the default, so without `--ui wiretrace` you get mitmweb
-  and no Rules view; `--no-ui` runs in the Terminal only.
+  token at every start. While it runs, the menu bar shows that Wiretrace is recording and how
+  many requests failed; from there you can open the window, jump to the last error, or stop
+  the session. `--no-menu-bar` leaves that item out. mitmweb stays the default, so without
+  `--ui wiretrace` you get mitmweb and no Rules view; `--no-ui` runs in the Terminal only.
 - **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
   `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
   SHA-256 checksum, from one commit.

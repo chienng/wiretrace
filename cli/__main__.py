@@ -31,6 +31,8 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--client", action="append", default=[], metavar="ADDR",
                            help="IP address allowed to use the proxy, besides this Mac (repeatable). "
                                 "Without it, only the first other device that connects is accepted")
+    start_cmd.add_argument("--no-menu-bar", action="store_true",
+                           help="with --ui wiretrace, do not show the menu bar item")
 
     report_cmd = commands.add_parser(
         "report", help="write a bug report zip of a session (secrets masked) into its folder")
@@ -42,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         return doctor.main()
     if args.command == "start":
         return start.run(args.preset, args.target, args.mode, ui=start.NO_UI if args.no_ui else args.ui,
-                         clients=tuple(args.client))
+                         clients=tuple(args.client), no_menu_bar=args.no_menu_bar)
     if args.command == "report":
         return report.run(args.session, session.SESSIONS_DIR, PRESETS_DIR)
     return 2

@@ -29,7 +29,7 @@ The main thing to avoid is **Homebrew**: its standard installation requires an a
 | Homebrew | **Yes** (initial install into `/opt/homebrew`) | Not used. Replaced by `uv` and direct downloads. |
 | `uv` (Python package/version manager) | No | Installs into `~/.local/bin`. |
 | Python 3.12 | No | `uv python install` puts it in `~/.local/share/uv`. |
-| mitmproxy, pyyaml, pymobiledevice3 | No | Installed into a project virtual environment. |
+| mitmproxy, pyyaml, pymobiledevice3, PyObjC | No | Installed into a project virtual environment. PyObjC is the menu bar item; its wheels need no compiler and no admin. |
 | mitmproxy CA certificate | No | Generated in `~/.mitmproxy` on first run. |
 | Listening on UDP 51820, TCP 8080, TCP 8081 | No | Only ports below 1024 need root. |
 | mitmproxy **WireGuard mode** | No | WireGuard server runs inside the mitmproxy process; the phone runs the WireGuard client. |
@@ -74,7 +74,7 @@ cd ~/wiretrace
 
 `doctor` prints one line per check, marked `OK`, `WARN`, `FAIL` or `INFO`, and exits with `1` if any check is `FAIL`:
 
-- Python 3.12 or newer, mitmproxy 11 or newer (with `mitmweb`), and the other packages in `requirements.txt` are installed.
+- Python 3.12 or newer, mitmproxy 11 or newer (with `mitmweb`), PyObjC (the menu bar) and the other packages in `requirements.txt` are installed.
 - `adb` is found on `PATH` or in `~/tools/platform-tools` (`WARN` if not: Android testing is unavailable).
 - Ports 51820/udp, 8080/tcp, and 8081/tcp are free.
 - `~/.mitmproxy` contains a CA (`INFO` until mitmproxy creates it on first start), and its private key is readable by you only.

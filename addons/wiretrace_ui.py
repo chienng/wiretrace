@@ -79,6 +79,12 @@ TEXT_TYPES = {"application/json", "application/xml", "application/javascript", "
 BINARY_PREFIXES = ("image/", "audio/", "video/", "font/")
 BINARY_TYPES = {"application/octet-stream", "application/zip", "application/gzip", "application/pdf",
                 "application/x-protobuf", "application/protobuf", "application/grpc"}
+# secrets.token_urlsafe(32): 32 bytes, base64url without padding, 43 characters.
+_UI_TOKEN = re.compile(r"[A-Za-z0-9_-]{43}")
+STATUS_MIN_S = 1.0
+STATUS_HEARTBEAT_S = 2.0
+STATUS_KEYS = ("v", "updated_at", "started_at", "preset", "target", "mode", "device_state",
+               "device_model", "requests", "errors", "rules_on", "last_error")
 
 
 # Plain data
@@ -126,6 +132,63 @@ def is_api_host(host: str, api_hosts: list[str] | tuple[str, ...]) -> bool:
 def mime_of(message: http.Message) -> str | None:
     value = message.headers.get("content-type")
     return clean(value.split(";", 1)[0].strip().lower()) if value else None
+
+
+def take_ui_token() -> str | None:
+    """The launcher's token. It is removed from the environment so a child of mitmdump does not inherit it.
+
+    Anything that is not a 32-byte urlsafe token is discarded and the addon makes its own.
+    """
+    raw = os.environ.pop("WIRETRACE_UI_TOKEN", None)
+    if raw and _UI_TOKEN.fullmatch(raw):
+        return raw
+    return None
+
+
+def is_error_flow(flow: http.HTTPFlow) -> bool:
+    """The window's Errors filter: a status of 400 or higher, or a failure with no response."""
+    response = flow.response
+    status = response.status_code if response is not None else None
+    return (status is not None and status >= 400) or flow.error is not None
+
+
+def flow_ended(flow: http.HTTPFlow) -> float:
+    if flow.response is not None and flow.response.timestamp_end:
+        return flow.response.timestamp_end
+    if flow.error is not None and getattr(flow.error, "timestamp", None):
+        return flow.error.timestamp
+    return flow.request.timestamp_start or 0.0
+
+
+def error_tally(flows: dict[str, http.HTTPFlow]) -> tuple[int, str | None]:
+    """How many listed requests failed, and the id of the one that failed last."""
+    count = 0
+    last_id: str | None = None
+    last_at = -1.0
+    for flow in flows.values():
+        if not isinstance(flow, http.HTTPFlow) or not is_error_flow(flow):
+            continue
+        count += 1
+        ended = flow_ended(flow)
+        if last_id is None or ended >= last_at:
+            last_at = ended
+            last_id = flow.id
+    return count, last_id
+
+
+def write_status_file(path: Path, payload: dict) -> None:
+    """Atomically replace the status file. The temporary file is removed if the replace fails."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, separators=(",", ":")) + "\n", encoding="utf-8")
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def summary(flow: http.HTTPFlow) -> dict:
@@ -913,6 +976,10 @@ class WiretraceUI:
         self._rules_sent: tuple = ()
         self._server: httpserver.HTTPServer | None = None
         self._tasks: list[asyncio.Task] = []
+        # Status file: last write, and the fields apart from updated_at, so a quiet session still heartbeats.
+        self._status_at = 0.0
+        self._status_body: tuple | None = None
+        self._closed = False
 
     # Options
 
@@ -932,7 +999,7 @@ class WiretraceUI:
     async def running(self) -> None:
         if self._server is not None:
             return
-        self.token = secrets.token_urlsafe(32)
+        self.token = take_ui_token() or secrets.token_urlsafe(32)
         folder = Path(ctx.options.qa_ui_session_dir) if ctx.options.qa_ui_session_dir else None
         self.tails = {name: LogTail(folder / file if folder else None, name) for name, file in SOURCES.items()}
         self.device_file = StatusFile(folder / session.DEVICE_STATUS if folder else None)
@@ -971,10 +1038,12 @@ class WiretraceUI:
                 logger.error("Wiretrace UI: could not open the browser; open the link above")
 
     async def done(self) -> None:
+        self._closed = True
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks = []
+        self.remove_status()
         for client in list(self.hub.clients):
             client.close()
         if self._server is not None:
@@ -1065,6 +1134,10 @@ class WiretraceUI:
         while True:
             await asyncio.sleep(BATCH_S)
             try:
+                self.maybe_write_status()
+            except Exception as e:
+                logger.error("Wiretrace UI: could not write status (%s)", type(e).__name__)
+            try:
                 self.flush_rules()
                 self.hub.flush(self.state)
             except Exception as e:
@@ -1137,6 +1210,67 @@ class WiretraceUI:
             "viewing": self.viewed.name if self.viewed else None,
             "viewing_cut_off": bool(self.viewed and self.viewed.cut_off),
         }
+
+    def status_payload(self, now: float) -> dict:
+        """Version 1 of the menu bar file: counts only, nothing a report would have to hide."""
+        meta = self.meta()
+        started = parse_ts(meta.get("started_at"))
+        device = self.device_file.status or {}
+        model = device.get("model") if isinstance(device.get("model"), str) else ""
+        device_state = device.get("state") if isinstance(device.get("state"), str) else ""
+        mode = meta.get("mode") if isinstance(meta.get("mode"), str) else ""
+        errors, last_error = error_tally(self.hub.flows)
+        live = self.qatools()
+        rules_on = sum(1 for rule in live.rules.rules if rule.enabled) if live is not None else 0
+        return {
+            "v": 1,
+            "updated_at": now,
+            "started_at": started if started is not None else self.started_at,
+            "preset": str(meta.get("preset") or ""),
+            "target": str(meta.get("target") or ""),
+            "mode": mode,
+            "device_state": device_state or None,
+            "device_model": model.strip() or None,
+            "requests": len(self.hub.flows),
+            "errors": errors,
+            "rules_on": rules_on,
+            "last_error": last_error,
+        }
+
+    def maybe_write_status(self, now: float | None = None) -> None:
+        """Write when a value changed, at most once a second, and at least every two seconds."""
+        if self._closed:
+            return
+        folder = ctx.options.qa_ui_session_dir
+        if not folder:
+            return
+        now = time.time() if now is None else now
+        payload = self.status_payload(now)
+        body = tuple(payload[key] for key in STATUS_KEYS if key != "updated_at")
+        elapsed = now - self._status_at
+        if self._status_at:
+            if elapsed < STATUS_MIN_S:
+                return
+            if body == self._status_body and elapsed < STATUS_HEARTBEAT_S:
+                return
+        try:
+            write_status_file(Path(folder) / session.STATUS, payload)
+        except OSError as e:
+            logger.error("Wiretrace UI: could not write status (%s)", type(e).__name__)
+            return
+        self._status_at = now
+        self._status_body = body
+
+    def remove_status(self) -> None:
+        folder = ctx.options.qa_ui_session_dir
+        if not folder:
+            return
+        path = Path(folder) / session.STATUS
+        for leftover in (path, path.with_name(path.name + ".tmp")):
+            try:
+                leftover.unlink(missing_ok=True)
+            except OSError:
+                logger.error("Wiretrace UI: could not remove status (%s)", "OSError")
 
     # Previous sessions. Invariant 5: a session is found in the listing by its name, never by a path from the page.
 

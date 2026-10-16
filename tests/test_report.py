@@ -90,6 +90,14 @@ def test_members_and_folder_name(env):
     assert not (folder / f"{NAME}-report.zip.tmp").exists()
 
 
+def test_the_status_file_is_never_packed(env):
+    folder = make_session(env[0], [flow()])
+    (folder / session.STATUS).write_text('{"v": 1, "last_error": "flow-1"}\n')
+    assert run(env) == 0
+    with open_zip(folder) as archive:
+        assert all(not name.endswith(session.STATUS) for name in archive.namelist())
+
+
 def test_flows_mitm_is_never_in_the_zip_and_log_files_only_when_they_have_lines(env):
     folder = make_session(env[0], [flow()], logs={session.DEVICE_LOG: ["", "  "]})
     assert run(env) == 0

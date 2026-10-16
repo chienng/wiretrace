@@ -224,3 +224,13 @@ def test_setup_asks_uv_for_the_python_of_that_cpu():
     assert '"$UV" python install "$PYTHON_REQUEST"' in script
     assert '"$UV" venv --python "$PYTHON_REQUEST" .venv' in script
     assert 'if [ "$venv_cpu" != "$cpu" ]; then' in script
+
+
+def test_menu_bar_check_reports_availability_as_info():
+    available = doctor.check_menu_bar(lambda: None)
+    assert available == [Result(INFO, "Menu bar", "available")]
+    assert "INFO  Menu bar: available" in doctor.render(available)
+    missing = doctor.check_menu_bar(lambda: "PyObjC not installed (run scripts/setup-mac.sh)")
+    assert missing == [Result(INFO, "Menu bar", "PyObjC not installed (run scripts/setup-mac.sh)")]
+    assert "INFO  Menu bar: PyObjC not installed (run scripts/setup-mac.sh)" in doctor.render(missing)
+    assert doctor.exit_code(doctor.check_menu_bar(lambda: "no window server")) == 0
