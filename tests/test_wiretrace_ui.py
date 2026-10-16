@@ -177,10 +177,11 @@ def test_the_browser_opens_the_link_only_when_asked(monkeypatch, capsys):
 PAGES = ["/", "/index.html", f"/assets/{ASSET.name}", "/api/state", "/api/flows", "/api/flows/x",
          "/api/filter?expr=~u%20x", "/api/logs?source=app", "/api/mocks", "/api/nothing", "/api/sessions",
          "/api/search?q=orders", "/api/report/draft", "/api/report/file/har",
-         "/api/report/screenshot/20261014-090000.png"]
+         "/api/report/screenshot/20261014-090000.png", "/api/presets"]
 MUTATIONS = [("/api/rules/test", "POST"), ("/api/rules/abcdef/rearm", "POST"), ("/api/report", "POST"),
              ("/api/report/reveal", "POST"), ("/api/view", "POST"), ("/api/flows/x/replay", "POST"),
-             ("/api/report/screenshot", "POST"), ("/api/report/screenshot/20261014-090000.png", "DELETE")]
+             ("/api/report/screenshot", "POST"), ("/api/report/screenshot/20261014-090000.png", "DELETE"),
+             ("/api/preset", "POST")]
 
 
 @pytest.mark.parametrize("cookie", [False, "wrong", ""])
@@ -2234,3 +2235,157 @@ def test_nothing_captured_is_printed_or_logged(tmp_path, monkeypatch, caplog, ca
     for text in ("ORDER_FAILED", "/api/v1/orders", "auth ***", "Steps to reproduce", *FORM_SECRETS):
         assert text not in output
     assert shown and "ORDER_FAILED" in shown[1]
+
+
+# Switching the preset (spec 013)
+
+SWITCH_PRESETS = {
+    "staging": "name: staging\napi_hosts:\n  - api.example.com\napp:\n  android_package: com.example.app\n",
+    "other": ("name: other\napi_hosts:\n  - other.example.com\n  - cdn.example.com\napp:\n  ios_process: Example\n"
+              "default_filter: '~d other'\nredact:\n  headers: [X-Secret]\n"),
+    "broken": "name: broken\napi_hosts: https://not-a-list\n",
+}
+
+
+def switch_session(tmp_path: Path, target: str = "android") -> tuple[Path, Path]:
+    presets = tmp_path / "presets"
+    presets.mkdir()
+    for name, text in SWITCH_PRESETS.items():
+        (presets / f"{name}.yaml").write_text(text)
+    folder = write_session(tmp_path / "sessions" / f"2026-10-14_090000_staging_{target}", target=target)
+    return presets, folder
+
+
+def switch_scenario(body, tmp_path, target="android"):
+    presets, folder = switch_session(tmp_path, target)
+
+    async def wrapped(ui, client, tctx):
+        ui.presets_dir = presets
+        tctx.master.shutdown = mock.Mock()
+        await body(ui, client, tctx, folder)
+
+    scenario(wrapped, folder=folder)
+
+
+def test_presets_lists_names_hosts_and_device_logs_for_this_target_and_nothing_else(tmp_path):
+    async def body(ui, client, tctx, folder):
+        listed = (await client.json("/api/presets"))["presets"]
+        assert [p["name"] for p in listed] == ["broken", "other", "staging"]
+        assert all(set(p) == {"name", "api_hosts", "device_logs", "app"} for p in listed)
+        by_name = {p["name"]: p for p in listed}
+        assert by_name["staging"] == {"name": "staging", "api_hosts": ["api.example.com"], "device_logs": True,
+                                      "app": "com.example.app"}
+        assert by_name["other"] == {"name": "other", "api_hosts": ["other.example.com", "cdn.example.com"],
+                                    "device_logs": False, "app": None}
+        assert by_name["broken"] == {"name": "broken", "api_hosts": [], "device_logs": False, "app": None}
+
+    switch_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("target, logs", [("ios-sim", {"other": "Example"}), ("device", {})])
+def test_presets_device_logs_follow_the_target(tmp_path, target, logs):
+    async def body(ui, client, tctx, folder):
+        listed = (await client.json("/api/presets"))["presets"]
+        assert {p["name"]: p["app"] for p in listed if p["device_logs"]} == logs
+
+    switch_scenario(body, tmp_path, target)
+
+
+@pytest.mark.parametrize("name, message", [("nope", "Unknown preset 'nope'"), ("../etc", "Unknown preset '../etc'"),
+                                           ("broken", "presets/broken.yaml: 'api_hosts' must be a non-empty list")])
+def test_switching_to_a_preset_that_does_not_load_is_a_400_and_nothing_stops(tmp_path, name, message):
+    async def body(ui, client, tctx, folder):
+        response = await client.fetch("/api/preset", "POST", body={"name": name})
+        assert response.code == 400 and json.loads(response.body)["error"].startswith(message)
+        tctx.master.shutdown.assert_not_called()
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+
+    switch_scenario(body, tmp_path)
+
+
+def test_switching_to_the_current_preset_does_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        response = await client.fetch("/api/preset", "POST", body={"name": "staging"})
+        assert response.code == 204 and response.body == b""
+        tctx.master.shutdown.assert_not_called()
+        assert not (folder / session.SWITCH).exists()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_switching_is_refused_while_a_previous_session_is_open(tmp_path):
+    async def body(ui, client, tctx, folder):
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_android", {}, {"device": [], "app": []})
+        response = await client.fetch("/api/preset", "POST", body={"name": "other"})
+        assert response.code == 409 and "previous session" in json.loads(response.body)["error"]
+        tctx.master.shutdown.assert_not_called()
+        assert not (folder / session.SWITCH).exists()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_a_switch_writes_only_the_name_owner_only_then_shuts_mitmdump_down(tmp_path):
+    async def body(ui, client, tctx, folder):
+        response = await client.fetch("/api/preset", "POST", body={"name": "other"})
+        assert response.code == 202 and json.loads(response.body) == {"switching": "other"}
+        path = folder / session.SWITCH
+        assert json.loads(path.read_text()) == {"name": "other"}
+        assert (path.stat().st_mode & 0o777) == 0o600
+        assert ui.token not in path.read_text()
+        assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
+        tctx.master.shutdown.assert_called_once()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_a_second_switch_is_a_409_and_there_is_one_file(tmp_path):
+    async def body(ui, client, tctx, folder):
+        first, second = await asyncio.gather(
+            client.fetch("/api/preset", "POST", body={"name": "other"}),
+            client.fetch("/api/preset", "POST", body={"name": "other"}))
+        assert sorted([first.code, second.code]) == [202, 409]
+        assert (await client.fetch("/api/preset", "POST", body={"name": "other"})).code == 409
+        assert [p.name for p in folder.iterdir() if p.name.startswith(session.SWITCH)] == [session.SWITCH]
+        tctx.master.shutdown.assert_called_once()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_a_switch_file_left_on_disk_is_the_lock(tmp_path):
+    async def body(ui, client, tctx, folder):
+        (folder / session.SWITCH).write_text('{"name": "other"}')
+        assert (await client.fetch("/api/preset", "POST", body={"name": "other"})).code == 409
+        tctx.master.shutdown.assert_not_called()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_a_switch_without_the_x_wiretrace_header_is_refused_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        for headers in ({}, {"X-Wiretrace": "0"}):
+            response = await client.fetch("/api/preset", "POST", mutate=False, headers=headers, body={"name": "other"})
+            assert response.code == 403
+        assert (await client.fetch("/api/preset", "POST", cookie="wrong", body={"name": "other"})).code == 403
+        tctx.master.shutdown.assert_not_called()
+        assert not (folder / session.SWITCH).exists()
+
+    switch_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("sent", [{}, {"name": 3}, "not json", []])
+def test_a_malformed_switch_body_is_a_400(tmp_path, sent):
+    async def body(ui, client, tctx, folder):
+        assert (await client.fetch("/api/preset", "POST", body=sent)).code == 400
+        tctx.master.shutdown.assert_not_called()
+
+    switch_scenario(body, tmp_path)
+
+
+def test_the_switch_file_is_not_a_report_member(tmp_path):
+    presets, folder = switch_session(tmp_path)
+    (folder / session.FLOWS).write_bytes(b"")
+    (folder / session.SWITCH).write_text('{"name": "other"}')
+    (folder / session.APP_LOG).write_text('{"message": "app"}\n')
+    created = report.create(folder, presets)
+    with zipfile.ZipFile(created.zip) as archive:
+        assert not [n for n in archive.namelist() if session.SWITCH in n]

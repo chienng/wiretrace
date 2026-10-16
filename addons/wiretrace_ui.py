@@ -3,7 +3,7 @@
 A Tornado application on mitmproxy's own asyncio loop, so every hook and every request runs
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
-Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md.
+Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -42,7 +42,8 @@ if str(ROOT) not in sys.path:
 
 from cli import __version__, report, report_text, screenshot, session  # noqa: E402
 from cli import bodies  # noqa: E402
-from cli.preset import PRESETS_DIR  # noqa: E402
+from cli.preset import PRESETS_DIR, PresetError, list_presets, load_preset  # noqa: E402
+from cli.start import APP_KEYS, DEVICE_LOGS  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +192,36 @@ def write_status_file(path: Path, payload: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def write_switch_file(path: Path, name: str) -> None:
+    """`{"name": ...}` and nothing else, 0600 from the start, replaced whole (spec 013, invariant 4)."""
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"name": name}, f)
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def preset_entry(name: str, presets_dir: Path, target: str) -> dict:
+    """The preset menu's line: its hosts, and the app whose device logs this target would collect.
+
+    A preset that does not load is listed with no hosts; choosing it shows `load_preset`'s message.
+    """
+    try:
+        preset = load_preset(name, presets_dir)
+    except (PresetError, OSError):
+        return {"name": name, "api_hosts": [], "device_logs": False, "app": None}
+    source = DEVICE_LOGS.get(target)
+    app = preset.app.get(APP_KEYS[source]) if source else None
+    app = app if isinstance(app, str) and app else None
+    return {"name": name, "api_hosts": list(preset.api_hosts), "device_logs": app is not None, "app": app}
 
 
 def summary(flow: http.HTTPFlow) -> dict:
@@ -830,6 +861,26 @@ class Mocks(Guarded):
         self.write({"files": list_mocks(self.addon.mocks_dir())})
 
 
+class Presets(Guarded):
+    async def get(self) -> None:
+        self.write({"presets": await self.addon.list_presets()})
+
+
+class PresetSwitch(Guarded):
+    async def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or not isinstance(body.get("name"), str):
+            return self.fail(400, "The body must be {name}")
+        status, payload = await self.addon.switch_preset(body["name"])
+        self.set_status(status)
+        if status == 204:
+            return self.finish()
+        await self.finish(payload)
+        if status == 202:
+            # Only once the page has its answer: the launcher saves this session and starts the next.
+            ctx.master.shutdown()
+
+
 @tornado.web.stream_request_body
 class LargeBody(Guarded):
     """A JSON body up to MAX_RULES_REQUEST_BYTES; the limit is raised only once `Guarded.prepare` passed."""
@@ -1086,6 +1137,9 @@ class WiretraceUI:
         self.report_running = False
         self.screenshot_running = False
         self.last_report: Path | None = None
+        self.presets_dir = PRESETS_DIR
+        # The preset `.switch.json` names once it is written; mitmdump is then shutting down.
+        self.switching: str | None = None
         self.started_at = time.time()
         # Setup: when a device last connected, and failed TLS handshakes with API hosts. Nothing about the peer.
         self.device_seen_at: float | None = None
@@ -1185,6 +1239,8 @@ class WiretraceUI:
                 (r"/api/sessions", Sessions, handler_args),
                 (r"/api/view", View, handler_args),
                 (r"/api/mocks", Mocks, handler_args),
+                (r"/api/presets", Presets, handler_args),
+                (r"/api/preset", PresetSwitch, handler_args),
                 (r"/api/rules", RulesApi, handler_args),
                 (r"/api/rules/test", RuleTest, handler_args),
                 (r"/api/rules/([a-z0-9]{6,32})/rearm", RuleRearm, handler_args),
@@ -1490,6 +1546,46 @@ class WiretraceUI:
             return 409, {"error": "mitmproxy did not accept this request for replay"}
         self.track(copy)
         return 200, {"id": copy.id}
+
+    # Switching the preset (spec 013): one preset per session, so the launcher starts the next one.
+
+    async def list_presets(self) -> list[dict]:
+        target = str(self.meta().get("target") or "")
+        presets_dir = self.presets_dir
+
+        def entries() -> list[dict]:
+            return [preset_entry(name, presets_dir, target) for name in list_presets(presets_dir)]
+
+        return await asyncio.to_thread(entries)
+
+    async def switch_preset(self, name: str) -> tuple[int, dict]:
+        """Invariants 2, 4 and 5: check the preset, then write `.switch.json`. A 202 means shut down now."""
+        if self.viewed is not None:
+            return 409, {"error": "Switching the preset is off while a previous session is open"}
+        folder = ctx.options.qa_ui_session_dir
+        if not folder:
+            return 409, {"error": "No session folder: start Wiretrace with ./wiretrace start"}
+        try:
+            await asyncio.to_thread(load_preset, name, self.presets_dir)
+        except PresetError as e:
+            return 400, {"error": str(e)}
+        except OSError:
+            return 400, {"error": "Could not read that preset file"}
+        # Other requests ran while the preset was read.
+        if self.viewed is not None:
+            return 409, {"error": "Switching the preset is off while a previous session is open"}
+        if name == str(self.meta().get("preset") or ""):
+            return 204, {}
+        path = Path(folder) / session.SWITCH
+        if self.switching is not None or os.path.lexists(path):
+            return 409, {"error": "Wiretrace is already switching to another preset"}
+        try:
+            write_switch_file(path, name)
+        except OSError as e:
+            logger.error("Wiretrace UI: could not write the switch request (%s)", type(e).__name__)
+            return 500, {"error": "Could not switch: the session folder cannot be written"}
+        self.switching = name
+        return 202, {"switching": name}
 
     # Rules: the live QA addon validates and applies them; the window writes the file.
 

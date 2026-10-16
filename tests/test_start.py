@@ -21,6 +21,7 @@ from cli.preset import Preset
 ROOT = Path(__file__).resolve().parent.parent
 VENV_BIN = Path(sys.prefix) / "bin"
 PRESET = "name: staging\napi_hosts:\n  - {host}\napp:\n  android_package: com.example.app\n"
+OTHER_PRESET = "name: other\napi_hosts:\n  - other.example.com\n"
 
 # Runs start.run() in its own process, so tests can signal it like a Terminal would.
 DRIVER = """\
@@ -36,18 +37,27 @@ def collector_for(preset, target, bin_dir, out):
         return a["collector"] + [str(out)], ""
     return None, "off (test)"
 
-sys.exit(start.run("staging", "android", "proxy", ui=False, presets_dir=Path(a["presets"]),
+sys.exit(start.run("staging", "android", "proxy", ui=a["ui"], presets_dir=Path(a["presets"]),
                    sessions_dir=Path(a["sessions"]), bin_dir=Path(a["bin"]), proxy_port=a["port"],
-                   wiretrace_dir=Path(a["wiretrace"]), collector_for=collector_for))
+                   wiretrace_dir=Path(a["wiretrace"]), collector_for=collector_for, ui_port=a["ui_port"],
+                   no_menu_bar=True))
 """
 
 # Stands in for mitmdump: records the signals it gets in FAKE_EVENTS. FAKE_MODE picks
-# how it behaves; with -r it plays the HAR conversion.
+# how it behaves, one comma-separated mode per child started; with -r it plays the HAR conversion.
+# `switch:<preset>` writes .switch.json and exits on its own, `switch-empty:` does too without
+# flows, `switch-wait:` writes it and then waits for SIGINT.
 FAKE_MITMDUMP = """\
 import json, os, signal, sys, time
 
 events = os.environ["FAKE_EVENTS"]
-mode = os.environ["FAKE_MODE"]
+modes = os.environ["FAKE_MODE"].split(",")
+try:
+    with open(events) as f:
+        children = sum(1 for line in f if line.strip() == "started")
+except FileNotFoundError:
+    children = 0
+mode = modes[min(children, len(modes) - 1)]
 args = sys.argv[1:]
 
 def log(event):
@@ -73,6 +83,9 @@ if "-r" in args:
             log("har collector-alive")
         except ProcessLookupError:
             log("har collector-gone")
+    if os.environ.get("FAKE_HAR_SLOW"):
+        log("har started")
+        time.sleep(1.5)
     har = value("--set").split("=", 1)[1]
     with open(har, "w") as f:
         f.write(os.environ.get("FAKE_HAR") or json.dumps({"log": {"entries": [{}]}}))
@@ -91,12 +104,22 @@ for flag in args:
             f.write('{"message": "app"}\\n' * int(os.environ["FAKE_APP_LINES"]))
 
 signal.signal(signal.SIGINT, on_sigint)
-if mode != "empty":
+if mode != "empty" and not mode.startswith("switch-empty:"):
     with open(value("--save-stream-file"), "wb") as f:
         f.write(b"flows")
 log(f"pid {os.getpid()}")
 log("started")
 
+if mode.startswith("switch"):
+    kind, name = mode.split(":", 1)
+    folder = os.path.dirname(value("--save-stream-file"))
+    with open(os.path.join(folder, ".switch.json"), "w") as f:
+        f.write(json.dumps({"name": name}))
+    log("switch-written")
+    if kind != "switch-wait":
+        time.sleep(0.2)
+        log("exit")
+        sys.exit(0)
 if mode == "crash":
     time.sleep(0.2)
     log("exit")
@@ -184,7 +207,7 @@ class Launch:
     def __init__(self, tmp_path: Path, fake_mode: str | None, host: str = "api.example.com",
                  bin_dir: Path | None = None, collector: str | list[str] | None = None,
                  collector_lines: int = 1, app_lines: int = 0, har: str = "", old_session: str = "", preset_extra: str = "",
-                 port: int | None = None):
+                 port: int | None = None, ui: bool | str = False, har_slow: bool = False):
         self.presets = tmp_path / "presets"
         self.sessions = tmp_path / "sessions"
         # Mocks are read from here, never from the real repo's mocks/ folder.
@@ -193,6 +216,7 @@ class Launch:
         self.collector_events_file = tmp_path / "collector-events.log"
         self.presets.mkdir()
         (self.presets / "staging.yaml").write_text(PRESET.format(host=host) + preset_extra)
+        (self.presets / "other.yaml").write_text(OTHER_PRESET)
         if bin_dir is None:
             bin_dir = tmp_path / "bin"
             bin_dir.mkdir()
@@ -216,13 +240,13 @@ class Launch:
         adb.chmod(0o755)
         args = {"presets": str(self.presets), "sessions": str(self.sessions),
                 "bin": str(bin_dir), "port": self.port, "wiretrace": str(self.wiretrace_dir),
-                "collector": command, "adb": str(adb)}
+                "collector": command, "adb": str(adb), "ui": ui, "ui_port": free_port()}
         env = {**os.environ, "PYTHONPATH": str(ROOT),
                "FAKE_EVENTS": str(self.events_file), "FAKE_MODE": fake_mode or "",
                "FAKE_COLLECTOR_EVENTS": str(self.collector_events_file),
                "FAKE_COLLECTOR_MODE": collector if isinstance(collector, str) else "",
                "FAKE_COLLECTOR_LINES": str(collector_lines), "FAKE_APP_LINES": str(app_lines),
-               "FAKE_HAR": har}
+               "FAKE_HAR": har, "FAKE_HAR_SLOW": "1" if har_slow else ""}
         self.proc = subprocess.Popen(
             [sys.executable, "-c", DRIVER, json.dumps(args)], cwd=ROOT, env=env,
             start_new_session=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
@@ -1558,3 +1582,233 @@ def test_a_start_writes_flows_mitm_readable_only_by_the_owner(launch):
         assert (folder / session.FLOWS).stat().st_mode & 0o777 == 0o600
     finally:
         os.umask(previous)
+
+
+# Switching the preset from the window (spec 013)
+
+def started_count(run: Launch) -> int:
+    return run.events().count("started")
+
+
+def no_switch_file(run: Launch) -> bool:
+    return not any(run.sessions.rglob(f"*{session.SWITCH}*")) if run.sessions.exists() else True
+
+
+def test_a_switch_saves_the_session_and_starts_the_named_preset(launch):
+    run = launch("switch:other,normal", ui="wiretrace")
+    wait_for(lambda: started_count(run) == 2)
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert started_count(run) == 2
+    # Both folders may carry the same second, so the name order is not the start order.
+    folders = run.folders()
+    assert len(folders) == 2
+    [first] = [f for f in folders if f.name.endswith("_staging_android")]
+    [second] = [f for f in folders if f.name.endswith("_other_android")]
+    assert no_switch_file(run)
+    old, new = session.read_meta(first), session.read_meta(second)
+    assert old["status"] == "stopped" and (first / session.HAR).is_file()
+    assert (new["preset"], new["api_hosts"], new["status"]) == ("other", ["other.example.com"], "stopped")
+    assert (old["target"], old["mode"]) == (new["target"], new["mode"]) == ("android", "proxy")
+    assert "Switching presets: saving this session first." in run.output
+    assert "exited on its own" not in run.output
+    assert "preset other, target android" in run.output and "Decrypting other.example.com" in run.output
+
+
+def test_a_stop_signal_wins_over_a_switch_file_on_disk(launch):
+    run = launch("switch-wait:other", ui="wiretrace")
+    wait_for(lambda: "switch-written" in run.events())
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert started_count(run) == 1
+    [folder] = run.folders()
+    assert session.read_meta(folder)["status"] == "stopped"
+    assert no_switch_file(run)
+    assert "Switching presets" not in run.output
+
+
+def test_a_stop_during_the_har_write_cancels_the_switch(launch):
+    run = launch("switch:other,normal", ui="wiretrace", har_slow=True)
+    wait_for(lambda: "har started" in run.events())
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 1, run.output
+    assert started_count(run) == 1
+    [folder] = run.folders()
+    assert folder.name.endswith("_staging_android")
+    assert no_switch_file(run)
+    assert "flows.har was not written (interrupted)" in run.output
+
+
+def test_a_wiretrace_child_that_exits_without_a_switch_file_is_one_session(launch):
+    run = launch("crash", ui="wiretrace")
+
+    assert run.finish() == 1, run.output
+    assert started_count(run) == 1
+    [folder] = run.folders()
+    assert session.read_meta(folder)["status"] == "exited"
+    assert "exited on its own (exit code 1)" in run.output
+
+
+def test_a_switch_to_an_unknown_preset_exits_1_and_starts_nothing(launch):
+    run = launch("switch:nope,normal", ui="wiretrace")
+
+    assert run.finish() == 1, run.output
+    assert started_count(run) == 1
+    assert "Unknown preset 'nope'. Available presets: other, staging" in run.output
+    [folder] = run.folders()
+    assert session.read_meta(folder)["status"] == "stopped"
+    assert no_switch_file(run)
+
+
+def test_an_empty_session_is_still_removed_and_the_next_preset_still_starts(launch):
+    run = launch("switch-empty:other,normal", ui="wiretrace")
+    wait_for(lambda: started_count(run) == 2)
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert "Nothing was captured; the session folder was removed." in run.output
+    [folder] = run.folders()
+    assert folder.name.endswith("_other_android")
+    assert no_switch_file(run)
+
+
+def test_without_the_wiretrace_window_a_switch_file_is_not_read_and_nothing_loops(launch):
+    run = launch("switch:other,normal", ui=False)
+
+    assert run.finish() == 1, run.output
+    assert started_count(run) == 1
+    [folder] = run.folders()
+    assert session.read_meta(folder)["status"] == "exited"
+    assert (folder / session.SWITCH).is_file()
+
+
+def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", **kwargs):
+    """start.run with a supervise double that reports `outcomes` in turn, then "no switch"."""
+    (tmp_path / "presets").mkdir(exist_ok=True)
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    (tmp_path / "presets" / "other.yaml").write_text(OTHER_PRESET)
+    calls = []
+    pending = list(outcomes)
+
+    def supervise(cmd, har_cmd, folder, *args, **kw):
+        calls.append({"cmd": cmd, "folder": folder, "kw": kw})
+        if pending:
+            kw["outcome"].state, kw["outcome"].switch_to = pending.pop(0)
+        return 0
+
+    monkeypatch.setattr(start, "supervise", supervise)
+    monkeypatch.setattr(start, "busy_ports", kwargs.pop("busy_ports", lambda ports: []))
+    code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", ui_port=free_port(),
+                     collector_for=kwargs.pop("collector_for", lambda *a: (None, "off (test)")),
+                     menu_available=lambda: None, **kwargs)
+    return code, calls
+
+
+def test_each_session_gets_its_own_folder_token_and_menu(tmp_path, monkeypatch):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")])
+    assert code == 0 and len(calls) == 2
+    first, second = (c["kw"] for c in calls)
+    assert calls[0]["folder"] != calls[1]["folder"]
+    assert first["menu_token"] != second["menu_token"]
+    assert first["child_env"]["WIRETRACE_UI_TOKEN"] == first["menu_token"]
+    assert second["child_env"]["WIRETRACE_UI_TOKEN"] == second["menu_token"]
+    assert second["menu_cmd"][-1] == str(calls[1]["folder"] / session.STATUS)
+    assert f"qa_rules_file={tmp_path / 'wiretrace' / 'rules' / 'other.json'}" in calls[1]["cmd"]
+    assert first["switch"] is True and second["switch"] is True
+
+
+@pytest.mark.parametrize("state", [start.STOPPING, start.KILLED, None])
+def test_only_a_child_that_exited_on_its_own_switches(tmp_path, monkeypatch, state):
+    code, calls = switching_run(tmp_path, monkeypatch, [(state, "other")])
+    assert code == 0 and len(calls) == 1
+
+
+def test_the_mitmweb_window_never_switches(tmp_path, monkeypatch):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")], ui="mitmweb")
+    assert code == 0 and len(calls) == 1 and calls[0]["kw"]["switch"] is False
+
+
+def test_a_busy_port_before_the_next_session_starts_nothing_more(tmp_path, monkeypatch, capsys):
+    checks = []
+
+    def busy_ports(ports):
+        checks.append(ports)
+        return [] if len(checks) == 1 else [start.doctor.Result(start.doctor.FAIL, "Port TCP 1 (proxy)", "in use")]
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")], busy_ports=busy_ports)
+    assert code == 1 and len(calls) == 1 and len(checks) == 2
+    assert "Not started." in capsys.readouterr().err
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
+def test_a_stop_signal_after_the_switch_was_decided_removes_the_new_folder(tmp_path, monkeypatch):
+    seen = []
+
+    def collector_for(preset, *args):
+        seen.append(preset.name)
+        if preset.name == "other":
+            os.kill(os.getpid(), signal.SIGINT)
+        return None, "off (test)"
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")], collector_for=collector_for)
+    assert code == 0 and len(calls) == 1 and seen == ["staging", "other"]
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
+def test_a_folder_name_taken_by_the_switch_is_tried_once_more(tmp_path, monkeypatch):
+    create = session.create
+    tries = []
+
+    def flaky(*args, **kwargs):
+        tries.append(args[0])
+        if len(tries) == 2:
+            raise FileExistsError
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(start, "SWITCH_RETRY_S", 0)
+    monkeypatch.setattr(session, "create", flaky)
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")])
+    assert code == 0 and len(calls) == 2 and tries == ["staging", "other", "other"]
+
+
+def test_a_folder_name_still_taken_after_the_retry_exits_1(tmp_path, monkeypatch, capsys):
+    create = session.create
+
+    def taken(*args, **kwargs):
+        if args[0] == "other":
+            raise FileExistsError
+        return create(*args, **kwargs)
+
+    monkeypatch.setattr(start, "SWITCH_RETRY_S", 0)
+    monkeypatch.setattr(session, "create", taken)
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")])
+    assert code == 1 and len(calls) == 1
+    assert "A session folder with this name already exists" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("raw", ['{"name": "other", "token": "x"}', '["other"]', '{"name": 3}', "not json",
+                                 '{"name": "' + "a" * 5000 + '"}'])
+def test_a_switch_file_that_is_not_one_name_is_no_switch_and_is_deleted(tmp_path, raw):
+    (tmp_path / session.SWITCH).write_text(raw)
+    assert start.take_switch(tmp_path) is None
+    assert not (tmp_path / session.SWITCH).exists()
+
+
+def test_a_symlinked_switch_file_is_not_followed(tmp_path):
+    target = tmp_path / "elsewhere.json"
+    target.write_text('{"name": "other"}')
+    (tmp_path / session.SWITCH).symlink_to(target)
+    assert start.take_switch(tmp_path) is None
+    assert not (tmp_path / session.SWITCH).exists() and target.is_file()
+
+
+def test_a_valid_switch_file_names_the_preset_and_is_deleted(tmp_path):
+    (tmp_path / session.SWITCH).write_text('{"name": "other"}')
+    assert start.take_switch(tmp_path) == "other"
+    assert not (tmp_path / session.SWITCH).exists()
+    assert start.take_switch(tmp_path) is None

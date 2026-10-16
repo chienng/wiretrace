@@ -16,14 +16,16 @@ import { useData, useDispatch, useStore } from './store';
 import type { FlowSummary } from './types';
 import { backToLive } from './viewing';
 
-function useConnection() {
+function useConnection(switching: string | null) {
   const dispatch = useDispatch();
+  const current = useRef<Connection | null>(null);
   useEffect(() => {
     const connection = new Connection({
       onPhase: (phase) => dispatch({ type: 'phase', phase }),
       onLoaded: (data, buffered) => dispatch({ type: 'loaded', data, buffered }),
       onMessage: (message) => dispatch({ type: 'message', message }),
     });
+    current.current = connection;
     setForbiddenListener(() => {
       connection.stop();
       dispatch({ type: 'phase', phase: 'forbidden' });
@@ -32,8 +34,13 @@ function useConnection() {
     return () => {
       setForbiddenListener(null);
       connection.stop();
+      current.current = null;
     };
   }, [dispatch]);
+  // This server is going away and the next one has another token: reconnecting could only fail.
+  useEffect(() => {
+    if (switching) current.current?.stop();
+  }, [switching]);
 }
 
 function ViewingBanner({ name, cutOff }: { name: string; cutOff: boolean }) {
@@ -68,9 +75,9 @@ function useFlowLink() {
 }
 
 export function App() {
-  useConnection();
+  const { phase, loaded, ui, view, switching } = useStore();
+  useConnection(switching);
   useFlowLink();
-  const { phase, loaded, ui, view } = useStore();
   const { flows, viewing } = useData();
 
   // Pause and Clear act on the live session only.
@@ -93,6 +100,15 @@ export function App() {
     () => (ui.selectedFlowId === null ? null : (flows.find((f) => f.id === ui.selectedFlowId) ?? null)),
     [flows, ui.selectedFlowId],
   );
+
+  if (switching) {
+    return (
+      <div className="fullpage" role="status">
+        <h1>Switching to {switching}…</h1>
+        <p>This session is being saved. A new window will open.</p>
+      </div>
+    );
+  }
 
   if (phase === 'forbidden') {
     return (

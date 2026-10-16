@@ -4,6 +4,7 @@ import type {
   FlowSummary,
   LogLine,
   LogSource,
+  PresetInfo,
   ReportBox,
   ReportDraft,
   ReportFileKind,
@@ -111,6 +112,10 @@ export const api = {
   logs: async (source: LogSource, session?: string | null) =>
     (await request<{ lines: LogLine[] }>(withSession('/api/logs', { source }, session))).lines,
   mocks: async () => (await request<{ files: string[] }>('/api/mocks')).files,
+  presets: async () => (await request<{ presets: PresetInfo[] }>('/api/presets')).presets,
+  /** `{switching}` once mitmdump is shutting down; null when that preset is already in use. */
+  switchPreset: (name: string) =>
+    request<{ switching: string } | null>('/api/preset', { method: 'POST', body: JSON.stringify({ name }) }),
   rules: () => request<RulesPayload>('/api/rules'),
   putRules: (revision: string, rules: Rule[]) =>
     request<RulesPayload>('/api/rules', { method: 'PUT', body: JSON.stringify({ revision, rules }) }),
