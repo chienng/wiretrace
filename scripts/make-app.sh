@@ -2,7 +2,8 @@
 # Builds ~/Applications/Wiretrace.app, which starts a session of this Wiretrace folder without
 # Terminal. Called by setup-mac.sh; safe to run again. Writes only that app and a temporary
 # folder next to it. The app is made here rather than downloaded, so it has no quarantine flag
-# and Gatekeeper does not check it (docs/specs/014-mac-app-install-and-launcher.md).
+# and Gatekeeper does not check it (docs/specs/014-mac-app-install-and-launcher.md). Its icon is
+# app/Wiretrace.icns, built from app/icon.svg by scripts/build-icon.sh.
 #
 # Never call git, python3, xcrun, cc or make here (see setup-mac.sh). osacompile, plutil and
 # codesign are part of macOS.
@@ -55,6 +56,11 @@ run() {
 
 run osacompile -o "$app" "$ROOT/app/Wiretrace.applescript"
 printf '%s\n' "$ROOT" > "$app/Contents/Resources/wiretrace-root"
+# The bytes only, not a copy: a downloaded folder's quarantine flag must not come along.
+cat "$ROOT/app/Wiretrace.icns" > "$app/Contents/Resources/applet.icns" || not_created "app/Wiretrace.icns unreadable"
+# Without CFBundleIconName, macOS shows CFBundleIconFile (applet.icns), not the default
+# script icon in Assets.car.
+run plutil -remove CFBundleIconName "$plist"
 run plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$plist"
 run plutil -replace CFBundleName -string Wiretrace "$plist"
 run plutil -replace CFBundleShortVersionString -string "$VERSION" "$plist"

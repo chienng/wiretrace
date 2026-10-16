@@ -49,6 +49,37 @@ def test_the_app_is_built_signed_and_points_at_this_folder(tmp_path):
     assert [p.name for p in (tmp_path / "Applications").iterdir()] == ["Wiretrace.app"]
 
 
+def test_the_app_shows_the_wiretrace_icon(tmp_path):
+    assert make_app(tmp_path).returncode == 0
+    app = tmp_path / "Applications" / "Wiretrace.app"
+    icon = app / "Contents" / "Resources" / "applet.icns"
+    assert icon.read_bytes() == (ROOT / "app" / "Wiretrace.icns").read_bytes()
+    assert plist_value(app, "CFBundleIconFile") == "applet"
+    # With CFBundleIconName, macOS would show the default script icon from Assets.car.
+    missing = subprocess.run(["plutil", "-extract", "CFBundleIconName", "raw", "-o", "-",
+                              str(app / "Contents" / "Info.plist")], capture_output=True)
+    assert missing.returncode != 0
+
+
+def test_a_quarantined_download_does_not_pass_its_flag_to_the_app(tmp_path):
+    # A copy of the folder, as if it came out of a downloaded .dmg.
+    root = tmp_path / "wiretrace"
+    for part in ("scripts/make-app.sh", "app/Wiretrace.applescript", "app/Wiretrace.icns", "cli/__init__.py"):
+        (root / part).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(ROOT / part, root / part)
+    flag = "0083;00000000;Safari;"
+    for part in ("app/Wiretrace.applescript", "app/Wiretrace.icns"):
+        subprocess.run(["xattr", "-w", "com.apple.quarantine", flag, str(root / part)], check=True)
+    home = tmp_path / "home"
+    home.mkdir()
+    result = subprocess.run([str(root / "scripts" / "make-app.sh")], env={**os.environ, "HOME": str(home)},
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+    app = home / "Applications" / "Wiretrace.app"
+    assert "com.apple.quarantine" not in subprocess.run(["xattr", "-lr", str(app)], capture_output=True,
+                                                        text=True).stdout
+
+
 def test_our_app_made_from_another_folder_is_replaced(tmp_path):
     assert make_app(tmp_path).returncode == 0
     app = tmp_path / "Applications" / "Wiretrace.app"

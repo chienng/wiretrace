@@ -5,15 +5,17 @@
 #   make tarball COMMIT=v0.7.1   the same, from another commit or tag
 #   make release                 the .tar.gz and the .dmg, each with a .sha256
 #   make ui                      rebuild ui/dist/ (commit it before a release)
+#   make icon                    rebuild app/Wiretrace.icns from app/icon.svg (needs rsvg-convert)
 
 COMMIT ?= HEAD
 
-.PHONY: help tarball release ui clean
+.PHONY: help tarball release ui icon clean
 
 help:
 	@echo "make tarball [COMMIT=<ref>]   build dist/wiretrace-<version>-macos.tar.gz (+ .sha256)"
 	@echo "make release [COMMIT=<ref>]   build the .tar.gz and the .dmg (+ .sha256 each)"
 	@echo "make ui                       rebuild ui/dist/ with npm (commit it before a release)"
+	@echo "make icon                     rebuild app/Wiretrace.icns from app/icon.svg (commit it)"
 	@echo "make clean                    remove the release files of the current version from dist/"
 
 tarball:
@@ -24,6 +26,9 @@ release:
 
 ui:
 	npm --prefix ui run build
+
+icon:
+	scripts/build-icon.sh
 
 clean:
 	@version=$$(sed -n 's/^__version__ = "\(.*\)"$$/\1/p' cli/__init__.py); \

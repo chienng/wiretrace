@@ -138,7 +138,8 @@ against a temporary home. The bundle identifier is `com.safemeet.wiretrace`.
    into place, and print `created:` or `now opens`.
 
 The temporary folder is removed on every exit (`trap`). The script never touches extended
-attributes: no copied file goes into the bundle, so there is no quarantine flag to remove.
+attributes: no file is copied into the bundle (the icon's bytes are written with `cat`), so
+there is no quarantine flag to remove.
 
 In `setup-mac.sh`, a non-zero exit from `make-app.sh` prints `WARN: Wiretrace app not
 created (…)` and setup goes on. The step does not change setup's exit code.
@@ -273,7 +274,6 @@ Order: the check below, then the launcher flag and the menu bar, then `cli/app.p
 - An app in the `.dmg` that installs or updates Wiretrace, *Open Anyway*, `Read me first.txt`
   (the earlier draft of this spec).
 - Signing with a Developer ID and notarization.
-- A Wiretrace icon. The applet's default icon is used.
 - From the app: creating, editing or deleting a project; *Setup check…*; *Open sessions
   folder*; choosing WireGuard or proxy per phone; `--client`; `--no-menu-bar`.
 - Starting at login, auto-update, uninstall.
@@ -293,6 +293,13 @@ own app, and a later signed app should keep it, so it does not change after the 
   `do shell script` shows stderr as the error text when the exit code is not 0.
 - With `--from-app`, a menu bar child that cannot be spawned at all (after the probe passed)
   stops the session as a menu exit does (invariant 1).
+- The app shows the Wiretrace mark (added at the Orchestrator's request; it was out of
+  scope). `app/icon.svg` is `ui/src/assets/mark.svg` on the macOS icon grid; `make icon`
+  (`scripts/build-icon.sh`, needs `rsvg-convert`) builds the committed `app/Wiretrace.icns`.
+  `make-app.sh` writes its bytes to `Contents/Resources/applet.icns` and removes
+  `CFBundleIconName`, which would otherwise select the default script icon in `Assets.car`.
+  Tested: the icon is the committed file, and a quarantined source folder gives an app with
+  no quarantine flag.
 
 ## Manual test
 
