@@ -89,3 +89,18 @@ The first version of screen 5 ([spec 012](../docs/specs/012-bug-report-form.md))
 ![Menu-bar status](screens/06-menu-bar.png)
 
 Shows recording state and error count in the macOS menu bar, with shortcuts to open the app, pause, report the last error, or stop the session.
+
+## 7. Presets — switch, edit, or add
+
+![Presets](screens/07-presets.png)
+
+Opened from **Preset** in the title bar. Not built yet. Source: the last screen in [`wiretrace-mockup.html`](wiretrace-mockup.html).
+
+| Action | What it does |
+|---|---|
+| Select a preset | Fills the form with that file. |
+| New preset | A blank form. **Create preset** writes `presets/<name>.yaml` and leaves the current session running. |
+| Save the preset in use | Writes the file, saves this session, and starts a new one with the same target and mode. The phone stays connected. |
+| Choose another preset | Same restart, using that file. |
+
+The name of an existing preset stays fixed. The form edits hosts, the Android package, the iOS process, the request-ID header, the starting filter, and extra names to hide.

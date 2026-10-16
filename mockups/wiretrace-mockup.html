@@ -327,6 +327,26 @@
   .menu-item.hl .sc { color: #dce9fb; }
   .sep { height: 1px; background: var(--line); margin: 6px 0; }
 
+  /* ---------- presets ---------- */
+  .preset-stage { height: 700px; }
+  .sheet.preset { width: 880px; top: 36px; border-radius: 12px; padding: 20px 22px 16px; }
+  .preset-grid { display: grid; grid-template-columns: 200px 1fr; gap: 20px; }
+  .plist { display: flex; flex-direction: column; gap: 2px; }
+  .pi { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 7px; }
+  .pi .pn { font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+  .pi.sel { background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }
+  .pi.add { color: var(--blue); font-weight: 500; margin-top: 6px; }
+  .pi .here { margin-left: auto; font-size: 10.5px; font-weight: 600; color: var(--green); background: var(--green-soft); border-radius: 8px; padding: 1px 6px; }
+  .hostline { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .hostline .input { flex: 1; }
+  .hostline .x { color: var(--faint); width: 22px; text-align: center; }
+  .addhost { color: var(--blue); font-size: 12.5px; padding: 2px 0 0; }
+  .hint { color: var(--muted); font-size: 11.5px; margin-top: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chips span { font-family: var(--mono); font-size: 11.5px; background: #f0f0f2; border-radius: 6px; padding: 2px 8px; }
+  .chips span i { color: var(--faint); font-style: normal; margin-left: 4px; }
+  .callout { background: var(--yellow-soft); border-radius: 8px; padding: 8px 12px; font-size: 12.5px; color: #6b5300; }
+
   /* ---------- view switcher ---------- */
   .seg.sm span { padding: 3px 12px; font-size: 12px; }
   .seg.sm span .c { background: var(--red-soft); color: var(--red); border-radius: 8px; padding: 0 5px; font-size: 10.5px; font-weight: 600; margin-left: 4px; }
@@ -1092,6 +1112,74 @@ A generic error is shown.
       <div class="sep"></div>
       <div class="menu-item">Stop session</div>
       <div class="menu-item">Quit</div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================================================= -->
+<section class="screen" id="screen-preset">
+  <h2>7. Presets — switch, edit, or add</h2>
+  <p>Opened from <b>Preset</b> in the title bar. The list is every <code>presets/*.yaml</code> file. Selecting one fills the form; <b>New preset</b> starts a blank one. Creating a preset only writes the file, and this session keeps running. Saving the preset that is in use, or choosing another and confirming, saves this session and starts a new one. The phone stays on the tunnel. The name of an existing preset stays fixed. All names and hosts below are examples.</p>
+
+  <div class="stage preset-stage">
+    <div class="ghost-win"></div>
+    <div class="dim"></div>
+    <div class="sheet preset">
+      <h3>Presets</h3>
+      <p class="lead">One file per project and environment. Only the listed hosts are decrypted.</p>
+      <div class="preset-grid">
+        <div>
+          <div class="plist">
+            <div class="pi"><span class="pn">staging</span><span class="here">In use</span></div>
+            <div class="pi"><span class="pn">local</span></div>
+            <div class="pi sel add">+ New preset</div>
+          </div>
+          <p class="hint">Select a name to edit it. Saving the one in use starts a new session.</p>
+        </div>
+        <div>
+          <div class="field">
+            <label>Name</label>
+            <div class="input mono">prod</div>
+            <div class="hint">Saved as presets/prod.yaml. Letters, digits, _ and -. The name cannot be changed later.</div>
+          </div>
+          <div class="field" style="margin-top: 12px;">
+            <label>API hosts</label>
+            <div class="hostline"><div class="input mono">api.example.com</div><span class="x">×</span></div>
+            <div class="hostline"><div class="input mono" style="color: var(--faint);">Add a host…</div></div>
+            <div class="hint">Host names only. Each host includes its subdomains, on any port.</div>
+          </div>
+          <div class="row" style="margin-top: 12px;">
+            <div class="field" style="flex: 1;">
+              <label>Android package</label>
+              <div class="input mono">com.example.myapp</div>
+            </div>
+            <div class="field" style="flex: 1;">
+              <label>iOS process</label>
+              <div class="input mono">MyApp</div>
+            </div>
+          </div>
+          <div class="row" style="margin-top: 12px;">
+            <div class="field" style="flex: 1;">
+              <label>Request ID header</label>
+              <div class="input mono">X-Request-ID</div>
+            </div>
+            <div class="field" style="flex: 1;">
+              <label>Starting filter</label>
+              <div class="input mono" style="color: var(--faint);">optional, e.g. !~t image</div>
+            </div>
+          </div>
+          <div class="field" style="margin-top: 12px;">
+            <label>Extra names to hide</label>
+            <div class="chips"><span>otp<i>×</i></span><span style="color: var(--faint); background: #fff; border: 1px dashed var(--line-strong);">Add…</span></div>
+            <div class="hint">Added to the built-in list. Passwords, tokens and cookies stay hidden either way.</div>
+          </div>
+        </div>
+      </div>
+      <div class="callout">Create writes the file and leaves this session on <b>staging</b>. Choose <b>prod</b> afterwards to switch: traffic so far is saved, and the phone stays connected.</div>
+      <div class="sheet-foot">
+        <button class="btn">Cancel</button>
+        <button class="btn primary">Create preset</button>
+      </div>
     </div>
   </div>
 </section>
