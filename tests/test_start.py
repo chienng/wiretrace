@@ -1760,6 +1760,20 @@ def test_a_stop_signal_after_the_switch_was_decided_removes_the_new_folder(tmp_p
     assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
 
 
+def test_a_stop_signal_during_the_next_banner_starts_nothing(tmp_path, monkeypatch):
+    banner = start.banner
+
+    def stopping_banner(preset, *args):
+        if preset.name == "other":
+            os.kill(os.getpid(), signal.SIGINT)
+        return banner(preset, *args)
+
+    monkeypatch.setattr(start, "banner", stopping_banner)
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")])
+    assert code == 0 and len(calls) == 1
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
 def test_a_folder_name_taken_by_the_switch_is_tried_once_more(tmp_path, monkeypatch):
     create = session.create
     tries = []
