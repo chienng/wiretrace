@@ -19,6 +19,9 @@ FRESH_S = 5.0
 STARTING, LIVE, STALE, STOPPING = "STARTING", "LIVE", "STALE", "STOPPING"
 CHECK_ARGV = "--check"
 MAX_STATUS_BYTES = 65_536
+# The Wiretrace icon, a template image built from app/menubar-icon.svg.
+ICON_PATH = Path(__file__).with_name("icon.tiff")
+ICON_HEIGHT_PT = 16.0
 
 TARGET_LABELS = {
     "android": "Android",
@@ -45,10 +48,13 @@ class Row:
 
 @dataclass(frozen=True)
 class MenuView:
+    """``title`` is shown when the icon cannot be loaded; ``badge`` is the text next to the icon."""
+
     state: str
     title: str
     rows: tuple[Row, ...]
     last_error: str | None = None
+    badge: str = ""
 
 
 def is_fresh(status: dict | None, now: float) -> bool:
@@ -101,18 +107,29 @@ def _action(label: str, action: str, *, enabled: bool = True, shortcut: str = ""
     return Row("action", label, action=action, enabled=enabled, shortcut=shortcut)
 
 
-def render(status: dict | None, now: float, stopping: bool, *, seen: bool = False) -> MenuView:
+def render(status: dict | None, now: float, stopping: bool, *, seen: bool = False, app: bool = False) -> MenuView:
     """The title and the menu for one tick.
 
     ``seen`` is true once a status file has been read. A missing file before that
     is STARTING; after that it is STALE (the file vanished). STOPPING never leaves.
+    ``app``: the session was started from Wiretrace.app, so this menu is its only stop:
+    no Quit, and Stop session in every state.
     """
     if stopping:
         return MenuView(STOPPING, "Wiretrace · stopping", (Row("note", "Wiretrace · stopping", enabled=False),))
+    view = _render(status, now, seen)
+    if not app:
+        return view
+    rows = tuple(row for row in view.rows if row.action != "quit")
+    if not any(row.action == "stop" for row in rows):
+        rows += (_action("Stop session", "stop"),)
+    return MenuView(view.state, view.title, rows, view.last_error, view.badge)
 
+
+def _render(status: dict | None, now: float, seen: bool) -> MenuView:
     if is_fresh(status, now) and isinstance(status, dict):
         errors = _count(status, "errors")
-        title = f"● Wiretrace · {errors}" if errors else "● Wiretrace"
+        title = f"Wiretrace · {errors}" if errors else "Wiretrace"
         last = _text(status, "last_error") or None
         rows = (
             _info("Wiretrace", "Recording"),
@@ -129,7 +146,7 @@ def render(status: dict | None, now: float, stopping: bool, *, seen: bool = Fals
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
         )
-        return MenuView(LIVE, title, rows, last_error=last if errors else None)
+        return MenuView(LIVE, title, rows, last_error=last if errors else None, badge=str(errors) if errors else "")
 
     if seen or status is not None:
         rows = (
@@ -138,7 +155,7 @@ def render(status: dict | None, now: float, stopping: bool, *, seen: bool = Fals
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
         )
-        return MenuView(STALE, "Wiretrace · ?", rows)
+        return MenuView(STALE, "Wiretrace · ?", rows, badge="?")
 
     rows = (
         Row("note", "Starting…", enabled=False),

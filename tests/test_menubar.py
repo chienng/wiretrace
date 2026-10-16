@@ -7,6 +7,7 @@ import pytest
 
 from menubar import (
     FRESH_S,
+    ICON_PATH,
     LIVE,
     STALE,
     STARTING,
@@ -54,7 +55,7 @@ def test_starting_until_a_status_file_has_been_read():
 def test_live_menu_matches_the_counts_and_hides_a_zero():
     view = render(status(), 1_000.0, False)
     assert view.state == LIVE
-    assert view.title == "● Wiretrace · 6"
+    assert view.title == "Wiretrace · 6"
     assert row(view, "Wiretrace").value == "Recording"
     assert row(view, "Preset").value == "staging"
     assert row(view, "Device").value == "Android · WireGuard · Pixel 8"
@@ -69,12 +70,25 @@ def test_live_menu_matches_the_counts_and_hides_a_zero():
 
 def test_zero_errors_has_no_count_in_the_title_and_show_last_error_is_grey():
     view = render(status(errors=0, last_error=None), 1_000.0, False)
-    assert view.title == "● Wiretrace"
+    assert view.title == "Wiretrace"
     assert "· 0" not in view.title
     assert row(view, "errors").alert is False
     assert row(view, "Show last error").enabled is False
     assert "last_error" not in enabled_actions(view)
     assert view.last_error is None
+
+
+def test_the_icon_ships_with_the_menu_bar_and_only_errors_or_a_stale_status_add_text():
+    assert ICON_PATH.read_bytes()[:4] in (b"MM\x00*", b"II*\x00"), "run `make icon`"
+    badges = {
+        "starting": render(None, 1_000.0, False).badge,
+        "live": render(status(errors=0), 1_000.0, False).badge,
+        "errors": render(status(), 1_000.0, False).badge,
+        "stale": render(None, 1_000.0, False, seen=True).badge,
+        "stopping": render(status(), 1_000.0, True).badge,
+        "app": render(status(), 1_000.0, False, app=True).badge,
+    }
+    assert badges == {"starting": "", "live": "", "errors": "6", "stale": "?", "stopping": "", "app": "6"}
 
 
 @pytest.mark.parametrize("model", [None, "", "  "])
@@ -92,7 +106,7 @@ def test_updated_at_exactly_five_seconds_old_is_live_and_older_is_stale():
     fresh = status(updated_at=1_000.0)
     assert is_fresh(fresh, 1_000.0 + FRESH_S)
     live = render(fresh, 1_000.0 + FRESH_S, False)
-    assert live.state == LIVE and live.title == "● Wiretrace · 6"
+    assert live.state == LIVE and live.title == "Wiretrace · 6"
     stale = render(fresh, 1_000.0 + FRESH_S + 0.001, False)
     assert stale.state == STALE
     assert stale.title == "Wiretrace · ?"
@@ -139,3 +153,22 @@ def test_read_status_rejects_anything_that_is_not_version_1(tmp_path: Path):
     assert read_status(path)["preset"] == "staging"
     path.write_bytes(b"{" + b"x" * 70_000)
     assert read_status(path) is None
+
+
+@pytest.mark.parametrize("state, view", [
+    (STARTING, lambda app: render(None, 1_000.0, False, app=app)),
+    (LIVE, lambda app: render(status(), 1_000.0, False, app=app)),
+    (STALE, lambda app: render(None, 1_000.0, False, seen=True, app=app)),
+])
+def test_started_from_the_app_there_is_no_quit_and_stop_is_always_there(state, view):
+    app, plain = view(True), view(False)
+    assert app.state == plain.state == state and app.title == plain.title
+    assert "quit" not in {item.action for item in app.rows}
+    assert "stop" in enabled_actions(app)
+    assert labels(app)[-1] == "Stop session"
+    assert labels(app) == [label for label in labels(plain) if label != "Quit"] + (
+        ["Stop session"] if state == STARTING else [])
+
+
+def test_started_from_the_app_stopping_is_unchanged():
+    assert render(status(), 1_000.0, True, app=True) == render(status(), 1_000.0, True)

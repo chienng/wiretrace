@@ -1,8 +1,11 @@
+import hashlib
 import json
+import os
 import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from cli import preset
 from cli.preset import PresetError
@@ -48,6 +51,10 @@ def test_unknown_keys_accepted(tmp_path):
 
 def test_example_preset_loads():
     assert preset.load_preset("example").name == "example"
+
+
+def test_default_preset_loads():
+    assert preset.load_preset("default").name == "default"
 
 
 # Errors name the file and the problem
@@ -287,3 +294,340 @@ def test_a_mocks_dir_symlink_outside_the_wiretrace_folder_is_refused(tmp_path):
         preset.load_preset("staging", presets)
     message = str(info.value)
     assert "mocks_dir" in message and "must be a folder inside the wiretrace folder" in message
+
+
+# Editing and creating presets from the window (spec 013, extension A). The number is the spec's test number.
+
+ALL_FIELDS = {"api_hosts": ["api.example.com", "auth.example.com"], "android_package": "com.example.app",
+              "ios_process": "Example App", "request_id_header": "X-Trace-Id", "default_filter": "~d example & !~t image",
+              "redact_headers": ["X-Api-Key", "X-Secret"], "redact_fields": ["otp", "login_token"]}
+
+
+def fields(**over) -> dict:
+    return {**preset.empty_fields(), "api_hosts": ["api.example.com"], **over}
+
+
+def presets_dir(tmp_path: Path) -> Path:
+    path = tmp_path / "presets"
+    path.mkdir(exist_ok=True)
+    return path
+
+
+def render(tmp_path: Path, form: dict, old=None, name: str = "staging") -> str:
+    return preset.render_file(presets_dir(tmp_path) / f"{name}.yaml", form, old)
+
+
+def refused(tmp_path: Path, form: dict, old=None) -> preset.FieldError:
+    with pytest.raises(preset.FieldError) as info:
+        render(tmp_path, form, old)
+    return info.value
+
+
+def test_preset_edit_01_every_field_round_trips_through_parse_preset(tmp_path):
+    text = render(tmp_path, ALL_FIELDS)
+    path = presets_dir(tmp_path) / "staging.yaml"
+    loaded = preset.parse_preset(text, path)
+    assert loaded.api_hosts == ("api.example.com", "auth.example.com")
+    assert loaded.app == {"android_package": "com.example.app", "ios_process": "Example App"}
+    assert loaded.request_id_header == "X-Trace-Id" and loaded.default_filter == "~d example & !~t image"
+    assert loaded.redact_headers == ("X-Api-Key", "X-Secret") and loaded.redact_fields == ("otp", "login_token")
+    path.write_text(text)
+    assert preset.read_preset_file(path).fields == ALL_FIELDS
+
+
+def test_preset_edit_01_the_layout_is_the_documented_one(tmp_path):
+    text = render(tmp_path, ALL_FIELDS, {"mocks_dir": "mocks/x", "tracker": "youtrack"})
+    lines = text.splitlines()
+    assert lines[0] == "# Written by the Wiretrace window."
+    assert lines[1] == "# Every key is explained in presets/example.yaml."
+    keys = [line.split(":")[0] for line in lines[2:] if line and line[0] not in " #"]
+    assert keys == ["name", "api_hosts", "default_filter", "request_id_header", "app", "redact", "mocks_dir", "tracker"]
+    assert '  - "api.example.com"' in lines and '  android_package: "com.example.app"' in lines
+    assert lines.index("# Kept from the file:") < lines.index("mocks_dir: mocks/x")
+    assert text.endswith("\n") and not text.endswith("\n\n")
+
+
+def test_preset_edit_01_empty_fields_leave_their_keys_out(tmp_path):
+    text = render(tmp_path, fields())
+    assert [line for line in text.splitlines() if not line.startswith("#")] == [
+        'name: "staging"', "api_hosts:", '  - "api.example.com"']
+    only_one = render(tmp_path, fields(ios_process="Example", redact_fields=["otp"]))
+    assert "android_package" not in only_one and "headers" not in only_one and "default_filter" not in only_one
+    assert "request_id_header" not in only_one and "Kept" not in only_one
+    assert preset.fields_from_data(yaml.safe_load(only_one)) == fields(ios_process="Example", redact_fields=["otp"])
+
+
+@pytest.mark.parametrize("value", [
+    'a"b', "a # b", "a: b", "a\nb: c", "a\\", 'x"\napi_hosts: ["evil.example.com"]', "!!python/object:os.system", "&a *a",
+    "~d x\r\nname: other", "'single'", "é ü 日本語 😀", "- item", "{a: b}", "> folded", "| literal"])
+def test_preset_edit_02_a_value_cannot_add_a_key(tmp_path, value):
+    form = fields(default_filter=value)
+    try:
+        text = render(tmp_path, form)
+    except preset.FieldError:
+        return
+    data = yaml.safe_load(text)
+    assert set(data) == {"name", "api_hosts", "default_filter"}
+    assert data["default_filter"] == value and data["api_hosts"] == ["api.example.com"]
+
+
+@pytest.mark.parametrize("key, value", [
+    ("api_hosts", ['x.example.com"\nredact:\n  headers: [Cookie]\n#']), ("android_package", 'com.a"\nname: other'),
+    ("ios_process", 'App"\n  - x'), ("request_id_header", 'X-Id"\napi_hosts: []'),
+    ("redact_headers", ['X-A"\nname: other']), ("redact_fields", ['f"\nname: other'])])
+def test_preset_edit_02_a_value_in_a_checked_field_is_refused_not_written(tmp_path, key, value):
+    form = fields(**{key: value})
+    assert refused(tmp_path, form).field == key
+
+
+@pytest.mark.parametrize("char", ["\n", "\r", "\t", "\x00", "\x85", "\u2028", "\u2029", "\ud800"])
+def test_preset_edit_02_control_characters_in_the_filter_are_refused(tmp_path, char):
+    error = refused(tmp_path, fields(default_filter=f"~d a{char}b"))
+    assert error.field == "default_filter" and "control characters" in str(error)
+
+
+def test_preset_edit_03_kept_keys_survive_a_save(tmp_path):
+    old = yaml.safe_load(
+        "name: staging\napi_hosts: [old.example.com]\nmocks_dir: mocks/staging\ntracker:\n  project: ABC\n  ids: [1, 2]\n"
+        "later_feature: true\napp:\n  android_package: com.old.app\n  future_key: 7\n  nested: {a: [1, 2]}\n"
+        "redact:\n  headers: [X-Old]\n")
+    text = render(tmp_path, fields(android_package="com.new.app"), old)
+    data = yaml.safe_load(text)
+    assert data["mocks_dir"] == "mocks/staging" and data["tracker"] == {"project": "ABC", "ids": [1, 2]}
+    assert data["later_feature"] is True
+    assert data["app"] == {"android_package": "com.new.app", "future_key": 7, "nested": {"a": [1, 2]}}
+    assert data["api_hosts"] == ["api.example.com"] and "redact" not in data
+    assert list(data) == ["name", "api_hosts", "app", "mocks_dir", "tracker", "later_feature"]
+
+
+def test_preset_edit_03_an_app_block_with_only_unknown_keys_stays_without_the_form_keys(tmp_path):
+    old = yaml.safe_load("name: staging\napi_hosts: [a.example.com]\napp:\n  future_key: 7\n")
+    assert yaml.safe_load(render(tmp_path, fields(), old))["app"] == {"future_key": 7}
+
+
+def test_preset_edit_03_what_the_old_file_had_in_the_form_keys_is_not_kept(tmp_path):
+    old = {"name": "wrong", "api_hosts": "not a list", "app": 5, "redact": {"typo": []}, "default_filter": ["x"]}
+    data = yaml.safe_load(render(tmp_path, fields(), old))
+    assert data == {"name": "staging", "api_hosts": ["api.example.com"]}
+
+
+def test_preset_edit_03_a_kept_mocks_dir_that_fails_the_check_is_refused_without_a_field(tmp_path):
+    error = refused(tmp_path, fields(), {"mocks_dir": "/etc"})
+    assert error.field is None and "mocks_dir" in str(error)
+
+
+@pytest.mark.parametrize("form, field, text", [
+    (fields(api_hosts=[]), "api_hosts", "non-empty list"),
+    (fields(api_hosts=["https://api.example.com"]), "api_hosts", "is a URL"),
+    (fields(api_hosts=["api.example.com", "*.example.com"]), "api_hosts", "wildcard"),
+    (fields(api_hosts=["api.example.com:8443"]), "api_hosts", "port"),
+    (fields(api_hosts=[""]), "api_hosts", "not a host name"),
+    (fields(android_package="not a package"), "android_package", "'app.android_package' must be a package name"),
+    (fields(ios_process='App"'), "ios_process", "'app.ios_process' must be a process name"),
+    (fields(request_id_header="X Id"), "request_id_header", "'request_id_header' must be a header name"),
+    (fields(redact_headers=["X Api"]), "redact_headers", "redact.headers"),
+    (fields(redact_headers=["ok", ""]), "redact_headers", "redact.headers"),
+    (fields(redact_fields=["-otp"]), "redact_fields", "redact.json_fields"),
+    (fields(redact_fields=["a" * 65]), "redact_fields", "redact.json_fields"),
+])
+def test_preset_edit_04_a_bad_value_names_its_field_with_the_message_parse_preset_gives(tmp_path, form, field, text):
+    error = refused(tmp_path, form)
+    assert error.field == field and text in str(error) and str(error).startswith("presets/staging.yaml: ")
+
+
+def test_preset_edit_04_the_message_is_the_one_load_preset_shows(tmp_path):
+    form = fields(api_hosts=["https://api.example.com"])
+    bad = presets_dir(tmp_path) / "staging.yaml"
+    bad.write_text('name: staging\napi_hosts:\n  - "https://api.example.com"\n')
+    with pytest.raises(PresetError) as loaded:
+        preset.load_preset("staging", presets_dir(tmp_path))
+    assert str(refused(tmp_path, form)) == str(loaded.value)
+
+
+@pytest.mark.parametrize("name", ["", "a/b", "../x", "a.b", ".hidden", "-a", "_a", "a b", "a" * 65, "é", "a\n"])
+def test_preset_edit_04_a_name_that_breaks_the_file_name_rule_never_becomes_a_path(tmp_path, name):
+    with pytest.raises(preset.FieldError) as info:
+        preset.preset_path(presets_dir(tmp_path), name)
+    assert info.value.field == "name"
+
+
+@pytest.mark.parametrize("name", ["a", "0", "Staging-2_x", "a" * 64])
+def test_preset_edit_04_a_name_that_follows_the_rule_is_a_path_in_the_presets_folder(tmp_path, name):
+    assert preset.preset_path(presets_dir(tmp_path), name) == presets_dir(tmp_path) / f"{name}.yaml"
+
+
+def test_preset_edit_04_the_limits_are_50_hosts_50_names_and_512_characters(tmp_path):
+    many = [f"h{i}.example.com" for i in range(50)]
+    render(tmp_path, fields(api_hosts=many, redact_headers=[f"X-{i}" for i in range(50)],
+                            redact_fields=[f"f{i}" for i in range(50)], default_filter="~d " + "a" * 509))
+    assert refused(tmp_path, fields(api_hosts=many + ["x.example.com"])).field == "api_hosts"
+    assert refused(tmp_path, fields(redact_headers=[f"X-{i}" for i in range(51)])).field == "redact_headers"
+    assert refused(tmp_path, fields(redact_fields=[f"f{i}" for i in range(51)])).field == "redact_fields"
+    assert refused(tmp_path, fields(default_filter="a" * 513)).field == "default_filter"
+
+
+def test_preset_edit_04_a_text_that_does_not_read_back_as_the_fields_is_refused(tmp_path, monkeypatch):
+    monkeypatch.setattr(preset, "render_preset",
+                        lambda name, form, old=None: f'name: "{name}"\napi_hosts: [a.example.com]\n')
+    error = refused(tmp_path, fields())
+    assert error.field is None and "could not be saved as entered" in str(error)
+
+
+def test_preset_edit_04_a_text_that_parse_preset_refuses_is_not_returned(tmp_path, monkeypatch):
+    monkeypatch.setattr(preset, "render_preset", lambda name, form, old=None: f'name: "{name}"\n')
+    assert "missing 'api_hosts'" in str(refused(tmp_path, fields()))
+
+
+def test_preset_edit_17_a_file_that_does_not_load_gives_its_error_and_the_values_that_can_be_read(tmp_path):
+    path = presets_dir(tmp_path) / "staging.yaml"
+    path.write_text(
+        "name: staging\napi_hosts:\n  - good.example.com\n  - 5\n  - https://bad.example.com\n"
+        "default_filter: [not, a, string]\nrequest_id_header: X-Id\napp:\n  android_package: 7\n  ios_process: App\n"
+        "redact:\n  headers: X-Not-A-List\n  json_fields: [otp, 3]\n")
+    read = preset.read_preset_file(path)
+    assert read.error.startswith("presets/staging.yaml: ") and "api_hosts entry 5" in read.error
+    assert read.fields == {"api_hosts": ["good.example.com", "https://bad.example.com"], "android_package": "",
+                           "ios_process": "App", "request_id_header": "X-Id", "default_filter": "",
+                           "redact_headers": [], "redact_fields": ["otp"]}
+    assert read.revision == hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("raw", [b"", b"just text", b"- a\n- b\n", b"key: [unclosed", b"\xff\xfe\x00bad",
+                                 b"name: a\n\ttab: 1"])
+def test_preset_edit_17_a_file_that_is_not_a_mapping_or_not_text_gives_empty_fields_and_an_error(tmp_path, raw):
+    path = presets_dir(tmp_path) / "staging.yaml"
+    path.write_bytes(raw)
+    read = preset.read_preset_file(path)
+    assert read.fields == preset.empty_fields() and read.error and read.revision == hashlib.sha256(raw).hexdigest()
+
+
+def test_preset_edit_17_a_good_file_has_no_error_and_its_revision_follows_its_bytes(tmp_path):
+    path = presets_dir(tmp_path) / "staging.yaml"
+    path.write_text(GOOD)
+    first = preset.read_preset_file(path)
+    assert first.error is None and first.fields == fields(api_hosts=["api-staging.example.com"])
+    path.write_text(GOOD + "\n")
+    assert preset.read_preset_file(path).revision != first.revision
+
+
+def test_preset_edit_shape_of_the_fields_is_exact():
+    assert preset.fields_shape_ok(preset.empty_fields())
+    assert not preset.fields_shape_ok({**preset.empty_fields(), "extra": ""})
+    assert not preset.fields_shape_ok({k: v for k, v in preset.empty_fields().items() if k != "api_hosts"})
+    for bad in ({"api_hosts": "a"}, {"api_hosts": [1]}, {"android_package": None}, {"redact_fields": [["a"]]},
+                {"ios_process": 5}):
+        assert not preset.fields_shape_ok({**preset.empty_fields(), **bad})
+    assert not preset.fields_shape_ok([]) and not preset.fields_shape_ok(None)
+
+
+def temporary_files(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir() if p.name.endswith(".tmp"))
+
+
+def test_preset_edit_06_create_writes_the_file_and_leaves_no_temporary_file(tmp_path):
+    folder = presets_dir(tmp_path)
+    path = folder / "staging.yaml"
+    text = render(tmp_path, ALL_FIELDS)
+    preset.create_file(path, text)
+    assert path.read_text() == text and temporary_files(folder) == []
+    assert preset.load_preset("staging", folder).api_hosts == ("api.example.com", "auth.example.com")
+    assert path.stat().st_mode & 0o600 == 0o600
+
+
+def test_preset_edit_06_create_never_overwrites_a_file_of_that_name(tmp_path):
+    folder = presets_dir(tmp_path)
+    (folder / "staging.yaml").write_text(GOOD)
+    with pytest.raises(FileExistsError):
+        preset.create_file(folder / "staging.yaml", "name: staging\n")
+    assert (folder / "staging.yaml").read_text() == GOOD and temporary_files(folder) == []
+
+
+def test_preset_edit_06_create_refuses_a_name_that_differs_only_in_capitals(tmp_path):
+    folder = presets_dir(tmp_path)
+    (folder / "staging.yaml").write_text(GOOD)
+    for other in ("Staging", "STAGING"):
+        with pytest.raises(FileExistsError):
+            preset.create_file(folder / f"{other}.yaml", "name: x\n")
+    assert sorted(p.name for p in folder.iterdir()) == ["staging.yaml"]
+
+
+def test_preset_edit_06_create_uses_a_link_so_a_file_that_appears_meanwhile_is_not_overwritten(tmp_path, monkeypatch):
+    folder = presets_dir(tmp_path)
+    real_link = os.link
+
+    def racing_link(src, dst, **kwargs):
+        Path(dst).write_text(GOOD)
+        return real_link(src, dst, **kwargs)
+
+    monkeypatch.setattr(preset.os, "link", racing_link)
+    with pytest.raises(FileExistsError):
+        preset.create_file(folder / "staging.yaml", "name: staging\n")
+    assert (folder / "staging.yaml").read_text() == GOOD and temporary_files(folder) == []
+
+
+def test_preset_edit_06_a_failed_create_leaves_no_temporary_file(tmp_path, monkeypatch):
+    folder = presets_dir(tmp_path)
+    monkeypatch.setattr(preset.os, "link", mock_raise(OSError("disk")))
+    with pytest.raises(OSError):
+        preset.create_file(folder / "staging.yaml", "name: staging\n")
+    assert list(folder.iterdir()) == []
+
+
+def mock_raise(error: Exception):
+    def raiser(*args, **kwargs):
+        raise error
+    return raiser
+
+
+def test_preset_edit_16_replace_writes_the_whole_new_file_and_leaves_no_temporary_file(tmp_path):
+    folder = presets_dir(tmp_path)
+    path = folder / "staging.yaml"
+    path.write_text(GOOD)
+    preset.replace_file(path, "name: staging\napi_hosts: [new.example.com]\n")
+    assert path.read_text() == "name: staging\napi_hosts: [new.example.com]\n"
+    assert [p.name for p in folder.iterdir()] == ["staging.yaml"]
+
+
+def test_preset_edit_16_a_failed_replace_keeps_the_old_file_and_leaves_no_temporary_file(tmp_path, monkeypatch):
+    folder = presets_dir(tmp_path)
+    path = folder / "staging.yaml"
+    path.write_text(GOOD)
+    monkeypatch.setattr(preset.os, "replace", mock_raise(OSError("disk")))
+    with pytest.raises(OSError):
+        preset.replace_file(path, "name: staging\napi_hosts: [new.example.com]\n")
+    assert path.read_text() == GOOD and [p.name for p in folder.iterdir()] == ["staging.yaml"]
+
+
+def test_preset_edit_16_a_failed_write_leaves_no_temporary_file(tmp_path, monkeypatch):
+    folder = presets_dir(tmp_path)
+    monkeypatch.setattr(preset.os, "fsync", mock_raise(OSError("disk")))
+    with pytest.raises(OSError):
+        preset.replace_file(folder / "staging.yaml", "name: staging\n")
+    assert list(folder.iterdir()) == []
+
+
+@pytest.mark.parametrize("write", [preset.replace_file, preset.create_file])
+def test_preset_edit_16_a_link_at_the_temporary_path_is_not_followed(tmp_path, monkeypatch, write):
+    folder = presets_dir(tmp_path)
+    victim = tmp_path / "victim.txt"
+    victim.write_text("untouched")
+    monkeypatch.setattr(preset.secrets, "token_hex", lambda n: "abcd1234")
+    (folder / ".staging.abcd1234.tmp").symlink_to(victim)
+    with pytest.raises(OSError):
+        write(folder / "staging.yaml", "name: staging\napi_hosts: [new.example.com]\n")
+    assert victim.read_text() == "untouched" and not (folder / "staging.yaml").exists()
+    assert (folder / ".staging.abcd1234.tmp").is_symlink()
+
+
+def test_preset_edit_16_a_new_temporary_name_is_hidden_from_the_preset_list(tmp_path, monkeypatch):
+    folder = presets_dir(tmp_path)
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append(preset.list_presets(folder))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(preset.os, "replace", spy)
+    preset.replace_file(folder / "staging.yaml", "name: staging\n")
+    assert seen == [[]]

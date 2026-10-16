@@ -38,6 +38,12 @@ if git cat-file -e "$COMMIT:addons/wiretrace_ui.py" 2>/dev/null && \
     echo "npm --prefix ui run build and commit ui/dist/ first" >&2
     exit 1
 fi
+if git cat-file -e "$COMMIT:menubar/__main__.py" 2>/dev/null && \
+   ! git cat-file -e "$COMMIT:menubar/icon.tiff" 2>/dev/null; then
+    echo "menubar/icon.tiff is not in $COMMIT, so the menu bar would have no icon: run" >&2
+    echo "make icon and commit menubar/icon.tiff first" >&2
+    exit 1
+fi
 if [ "$REF" = HEAD ] && [ -n "$(git status --porcelain)" ]; then
     echo "warning: the working tree has uncommitted changes; they are not in this build" >&2
 fi

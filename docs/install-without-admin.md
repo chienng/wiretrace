@@ -44,7 +44,8 @@ The main thing to avoid is **Homebrew**: its standard installation requires an a
 | Changing the Mac's system proxy | **Usually yes** | Only for simulator traffic; see options below. |
 | Trusting the CA in the Mac's System keychain | Not needed | Only required to intercept the Mac's own browser traffic, which is out of scope. |
 | macOS firewall "Allow incoming connections" prompt | **Depends on company policy** | If the firewall is managed by MDM, IT adds an allow rule. |
-| Phase 2 `Wiretrace.app` in `~/Applications` | No | Must be signed and notarized, or distributed via IT Self Service. |
+| `Wiretrace.app` in `~/Applications` (built by the setup) | No | `osacompile`, `plutil` and `codesign -s -` are part of macOS. Built on the Mac, so it has no quarantine flag. |
+| Phase 2 signed `Wiretrace.app` in the download | No | Must be signed and notarized, or distributed via IT Self Service. |
 
 ---
 
@@ -58,10 +59,12 @@ Follow steps 1 and 2 of the [README quick start](../README.md#quick-start): down
 
 ```bash
 cd ~/wiretrace
-scripts/setup-mac.sh                 # add --skip-android if you only test iOS
+./install                            # add --skip-android if you only test iOS
 ```
 
-All inside your home folder, it installs `uv` into `~/.local/bin`, Python 3.12, the Python packages into `~/wiretrace/.venv`, and Android platform-tools into `~/tools/platform-tools`, then adds the `PATH` lines to `~/.zshrc`. It installs fixed versions of `uv` and platform-tools, downloaded from their GitHub / Google release URLs, and checks each file against a SHA-256 checksum stored in the script before installing it; no downloaded script is executed. It can be run again safely. It never asks for a password; do not run it with `sudo`. Open a new Terminal window afterwards so the `PATH` changes apply.
+`./install` runs `scripts/setup-mac.sh`. It is not `make install`: without the Xcode Command Line Tools, `make` is a stub that opens their install dialog, and installing them needs admin. Developers who have them can use `make install`.
+
+All inside your home folder, it installs `uv` into `~/.local/bin`, Python 3.12, the Python packages into `~/wiretrace/.venv`, and Android platform-tools into `~/tools/platform-tools`, then adds the `PATH` lines to `~/.zshrc` and builds `~/Applications/Wiretrace.app` (see Gatekeeper below). It installs fixed versions of `uv` and platform-tools, downloaded from their GitHub / Google release URLs, and checks each file against a SHA-256 checksum stored in the script before installing it; no downloaded script is executed. It can be run again safely. It never asks for a password; do not run it with `sudo`. Open a new Terminal window afterwards so the `PATH` changes apply.
 
 Do not install the Python packages by hand with `uv pip install -r requirements.txt`. The setup also applies `overrides.txt`, which installs fixed versions of `cryptography`, `h2`, `tornado` and `msgpack` in place of releases with known vulnerabilities.
 
@@ -89,10 +92,9 @@ Files downloaded through a browser get a quarantine flag. A standard user can re
 
 ```bash
 xattr -dr com.apple.quarantine ~/tools/platform-tools
-xattr -dr com.apple.quarantine ~/Applications/Wiretrace.app
 ```
 
-The second line applies to the Phase 2 app. Files downloaded with `curl` or installed with `uv` are not quarantined.
+Files downloaded with `curl` or installed with `uv` are not quarantined. Neither is `~/Applications/Wiretrace.app`: the setup builds it on the Mac (`scripts/make-app.sh`) rather than downloading it, and signs it ad hoc, so Gatekeeper does not check it and there is no *Open Anyway* step. Its bundle identifier is `com.safemeet.wiretrace`; the setup never replaces an app with another identifier at that path.
 
 ---
 

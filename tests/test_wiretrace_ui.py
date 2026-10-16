@@ -1,5 +1,6 @@
 import asyncio
 import gzip
+import hashlib
 import http.client
 import http.server
 import io
@@ -30,6 +31,7 @@ from mitmproxy.test import taddons, tflow
 
 from addons import wiretrace_ui, qa_tools
 from cli import report, screenshot, session, start
+from cli import preset as presetfile
 from cli.preset import Preset
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -180,6 +182,19 @@ def test_the_browser_opens_the_link_only_when_asked(monkeypatch, capsys):
         assert opened == []
 
     scenario(quiet, qa_ui_open_browser=False)
+
+
+def test_without_print_link_the_browser_still_opens_and_no_token_is_printed(monkeypatch, capsys):
+    opened = []
+    monkeypatch.setattr(wiretrace_ui.webbrowser, "open", lambda url: opened.append(url) or True)
+
+    async def body(ui, client, tctx):
+        assert opened == [f"http://127.0.0.1:{ui.port}/?token={ui.token}"]
+
+    scenario(body, qa_ui_open_browser=True, qa_ui_print_link=False)
+    out = capsys.readouterr()
+    assert out.out == "Wiretrace UI: opened in the browser\n"
+    assert "token=" not in out.out + out.err
 
 
 PAGES = ["/", "/index.html", f"/assets/{ASSET.name}", "/api/state", "/api/flows", "/api/flows/x",
@@ -872,7 +887,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.8.0"
+        assert state["version"] == "0.9.0"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
@@ -2410,3 +2425,683 @@ def test_the_switch_file_is_not_a_report_member(tmp_path):
     created = report.create(folder, presets)
     with zipfile.ZipFile(created.zip) as archive:
         assert not [n for n in archive.namelist() if session.SWITCH in n]
+
+
+# Editing and creating presets (spec 013, extension A). The number is the spec's test number.
+
+EXAMPLE_PRESET = "name: example\napi_hosts:\n  - api-staging.example.com\n"
+SECRET_HOST = "secret-host.internal.example.com"
+SECRET_FILTER = "~d secret-host.internal.example.com & ~hq SecretValue"
+OTHER_SESSION = "2026-10-13_090000_staging_android"
+
+
+def edit_fields(**over) -> dict:
+    return {**presetfile.empty_fields(), "api_hosts": ["new.example.com"], **over}
+
+
+def edit_scenario(body, tmp_path, target="android"):
+    """The switch scenario plus the template; `staging` is the preset in use."""
+    async def wrapped(ui, client, tctx, folder):
+        (ui.presets_dir / "example.yaml").write_text(EXAMPLE_PRESET)
+        await body(ui, client, tctx, folder)
+
+    switch_scenario(wrapped, tmp_path, target)
+
+
+async def detail(client, name: str) -> dict:
+    return await client.json(f"/api/presets/{name}")
+
+
+def preset_file(ui, name: str) -> Path:
+    return ui.presets_dir / f"{name}.yaml"
+
+
+def folder_listing(folder: Path) -> list[str]:
+    return sorted(p.name for p in folder.iterdir())
+
+
+def contents(folder: Path) -> dict:
+    return {p.name: p.read_bytes() for p in folder.iterdir()}
+
+
+def error_of(response) -> dict:
+    return json.loads(response.body)
+
+
+async def put(client, name: str, revision: str, fields: dict, **extra):
+    return await client.fetch(f"/api/presets/{name}", "PUT", body={"revision": revision, "fields": fields, **extra})
+
+
+async def create(client, name: str, fields: dict):
+    return await client.fetch("/api/presets", "POST", body={"name": name, "fields": fields})
+
+
+def open_previous_session(ui) -> None:
+    ui.viewed = wiretrace_ui.Store(OTHER_SESSION, {}, {"device": [], "app": []})
+
+
+def yaml_of(text: str) -> dict:
+    import yaml
+    return yaml.safe_load(text)
+
+
+def test_preset_edit_get_gives_the_form_values_the_revision_and_the_flags(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        assert set(got) == {"name", "revision", "fields", "in_use", "read_only", "error"}
+        assert got["name"] == "other" and got["error"] is None and got["in_use"] is False and got["read_only"] is False
+        assert got["revision"] == hashlib.sha256(preset_file(ui, "other").read_bytes()).hexdigest()
+        assert got["fields"] == {"api_hosts": ["other.example.com", "cdn.example.com"], "android_package": "",
+                                 "ios_process": "Example", "request_id_header": "", "default_filter": "~d other",
+                                 "redact_headers": ["X-Secret"], "redact_fields": []}
+        assert (await detail(client, "staging"))["in_use"] is True
+        template = await detail(client, "example")
+        assert template["read_only"] is True and template["in_use"] is False
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_get_of_an_unknown_name_is_404_and_a_wrong_case_is_not_opened(tmp_path):
+    async def body(ui, client, tctx, folder):
+        assert (await client.fetch("/api/presets/nope")).code == 404
+        assert (await client.fetch("/api/presets/Staging")).code == 404
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_17_get_of_a_preset_that_does_not_load_has_its_error_and_the_values_that_could_be_read(tmp_path):
+    async def body(ui, client, tctx, folder):
+        preset_file(ui, "broken").write_text(
+            "name: broken\napi_hosts: [good.example.com, https://bad.example.com]\nrequest_id_header: X-Id\n"
+            "redact: {headers: nope}\n")
+        got = await detail(client, "broken")
+        assert got["error"].startswith("presets/broken.yaml: api_hosts entry 'https://bad.example.com' is a URL")
+        assert got["fields"]["api_hosts"] == ["good.example.com", "https://bad.example.com"]
+        assert got["fields"]["request_id_header"] == "X-Id" and got["fields"]["redact_headers"] == []
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_17_the_error_is_the_one_a_switch_shows(tmp_path):
+    async def body(ui, client, tctx, folder):
+        shown = error_of(await client.fetch("/api/preset", "POST", body={"name": "broken"}))["error"]
+        got = await detail(client, "broken")
+        assert got["error"] == shown and got["fields"] == presetfile.empty_fields()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_17_a_valid_form_saved_over_a_broken_file_replaces_it(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "broken")
+        assert (await put(client, "broken", got["revision"], edit_fields())).code == 200
+        assert presetfile.load_preset("broken", ui.presets_dir).api_hosts == ("new.example.com",)
+        assert (await detail(client, "broken"))["error"] is None
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_08_a_save_of_a_preset_not_in_use_is_a_200_with_no_switch_and_no_shutdown(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        form = edit_fields(android_package="com.new.app", default_filter="~c 500", redact_headers=["X-Api-Key"])
+        response = await put(client, "other", got["revision"], form)
+        assert response.code == 200
+        after = await detail(client, "other")
+        assert error_of(response) == {"revision": after["revision"]} and after["revision"] != got["revision"]
+        assert after["fields"] == form and after["error"] is None
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+        assert [p for p in folder_listing(ui.presets_dir) if p.endswith(".tmp")] == []
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_08_a_restart_flag_on_a_preset_not_in_use_does_not_restart(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        assert (await put(client, "other", got["revision"], edit_fields(), restart=True)).code == 200
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_03_kept_keys_survive_a_save_through_the_api(tmp_path):
+    async def body(ui, client, tctx, folder):
+        preset_file(ui, "other").write_text(
+            "# a comment\nname: other\napi_hosts: [other.example.com]\nmocks_dir: mocks/other\ntracker: youtrack\n"
+            "app:\n  ios_process: Example\n  future_key: 3\n")
+        got = await detail(client, "other")
+        assert (await put(client, "other", got["revision"], edit_fields(ios_process="Example"))).code == 200
+        text = preset_file(ui, "other").read_text()
+        assert "# a comment" not in text and "# Kept from the file:" in text
+        data = yaml_of(text)
+        assert data["mocks_dir"] == "mocks/other" and data["tracker"] == "youtrack"
+        assert data["app"] == {"ios_process": "Example", "future_key": 3}
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_02_a_value_with_a_quote_hash_colon_or_newline_cannot_add_a_key_through_the_api(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        tricky = 'x"  # y: z\nname: evil'
+        assert (await put(client, "other", got["revision"], edit_fields(default_filter=tricky))).code == 400
+        spaced = '~d "a # b: c" & !~t image'
+        assert (await put(client, "other", got["revision"], edit_fields(default_filter=spaced))).code == 200
+        data = yaml_of(preset_file(ui, "other").read_text())
+        assert data["default_filter"] == spaced and data["name"] == "other"
+        assert set(data) == {"name", "api_hosts", "default_filter"}
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over, field", [
+    ({"api_hosts": []}, "api_hosts"), ({"api_hosts": ["https://api.example.com"]}, "api_hosts"),
+    ({"api_hosts": ["a.example.com:8443"]}, "api_hosts"), ({"android_package": "nope"}, "android_package"),
+    ({"ios_process": 'bad"quote'}, "ios_process"), ({"request_id_header": "X Id"}, "request_id_header"),
+    ({"redact_headers": ["X Api"]}, "redact_headers"), ({"redact_fields": ["-otp"]}, "redact_fields"),
+    ({"default_filter": "a\nb"}, "default_filter")])
+def test_preset_edit_04_an_invalid_value_is_a_400_naming_its_field_and_writes_nothing(tmp_path, over, field):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        before = contents(ui.presets_dir)
+        response = await put(client, "other", got["revision"], edit_fields(**over))
+        assert response.code == 400 and error_of(response)["field"] == field
+        assert error_of(response)["error"].startswith("presets/other.yaml: ")
+        created = await create(client, "fresh", edit_fields(**over))
+        assert created.code == 400 and error_of(created)["field"] == field
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_04_the_message_names_the_host_in_the_words_of_parse_preset(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        response = await put(client, "other", got["revision"], edit_fields(api_hosts=["https://api.example.com"]))
+        assert ("api_hosts entry 'https://api.example.com' is a URL; use the host name only ('api.example.com')"
+                in error_of(response)["error"])
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_04_a_kept_value_that_fails_is_a_400_without_a_field(tmp_path):
+    async def body(ui, client, tctx, folder):
+        preset_file(ui, "other").write_text("name: other\napi_hosts: [a.example.com]\nmocks_dir: /etc\n")
+        got = await detail(client, "other")
+        response = await put(client, "other", got["revision"], edit_fields())
+        assert response.code == 400 and error_of(response)["field"] is None
+        assert "mocks_dir" in error_of(response)["error"]
+        assert "mocks_dir: /etc" in preset_file(ui, "other").read_text()
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("expr", ["~~bad(", "~u", "~zz foo", "~d a )", "(~d a"])
+def test_preset_edit_05_a_starting_filter_mitmproxy_cannot_parse_is_a_400_on_default_filter(tmp_path, expr):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        before = contents(ui.presets_dir)
+        response = await put(client, "other", got["revision"], edit_fields(default_filter=expr))
+        assert response.code == 400 and error_of(response)["field"] == "default_filter"
+        assert "'default_filter'" in error_of(response)["error"]
+        created = await create(client, "fresh", edit_fields(default_filter=expr))
+        assert created.code == 400 and error_of(created)["field"] == "default_filter"
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_05_a_filter_that_parses_is_saved(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        form = edit_fields(default_filter='~u "/api/v1/orders" & !~t image')
+        assert (await put(client, "other", got["revision"], form)).code == 200
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_06_create_writes_the_file_and_the_session_keeps_running(tmp_path):
+    async def body(ui, client, tctx, folder):
+        form = edit_fields(api_hosts=["qa2.example.com"], ios_process="Qa Two")
+        response = await create(client, "qa2", form)
+        assert response.code == 201
+        made = await detail(client, "qa2")
+        assert error_of(response) == {"name": "qa2", "revision": made["revision"]}
+        assert made["fields"] == form and made["error"] is None and made["in_use"] is False
+        assert presetfile.load_preset("qa2", ui.presets_dir).api_hosts == ("qa2.example.com",)
+        assert "qa2" in [p["name"] for p in (await client.json("/api/presets"))["presets"]]
+        tctx.master.shutdown.assert_not_called()
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        assert [p for p in folder_listing(ui.presets_dir) if p.endswith(".tmp")] == []
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("again", ["qa2", "QA2", "Qa2"])
+def test_preset_edit_06_a_name_that_exists_also_in_other_capitals_is_a_409_and_the_first_file_is_unchanged(
+        tmp_path, again):
+    async def body(ui, client, tctx, folder):
+        assert (await create(client, "qa2", edit_fields())).code == 201
+        written = preset_file(ui, "qa2").read_bytes()
+        second = await create(client, again, edit_fields(api_hosts=["x.example.com"]))
+        assert second.code == 409 and "already exists" in error_of(second)["error"]
+        assert preset_file(ui, "qa2").read_bytes() == written
+        assert [p for p in folder_listing(ui.presets_dir) if p.lower().startswith("qa2")] == ["qa2.yaml"]
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["staging", "STAGING", "example", "Example"])
+def test_preset_edit_06_an_existing_preset_or_the_template_is_never_overwritten_by_a_create(tmp_path, name):
+    async def body(ui, client, tctx, folder):
+        before = contents(ui.presets_dir)
+        assert (await create(client, name, edit_fields())).code == 409
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("revision", ["", "0" * 64, "stale", hashlib.sha256(b"other bytes").hexdigest()])
+def test_preset_edit_07_a_wrong_or_stale_revision_is_a_409_and_the_file_is_unchanged(tmp_path, revision):
+    async def body(ui, client, tctx, folder):
+        before = preset_file(ui, "other").read_bytes()
+        response = await put(client, "other", revision, edit_fields())
+        assert response.code == 409 and error_of(response)["error"] == "The file changed"
+        assert preset_file(ui, "other").read_bytes() == before
+        assert not (folder / session.SWITCH).exists()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_07_a_file_edited_after_the_sheet_loaded_it_is_refused_and_a_reload_saves(tmp_path):
+    async def body(ui, client, tctx, folder):
+        loaded = await detail(client, "other")
+        preset_file(ui, "other").write_text("name: other\napi_hosts: [hand.example.com]\n")
+        assert (await put(client, "other", loaded["revision"], edit_fields())).code == 409
+        assert presetfile.load_preset("other", ui.presets_dir).api_hosts == ("hand.example.com",)
+        reloaded = await detail(client, "other")
+        assert (await put(client, "other", reloaded["revision"], edit_fields())).code == 200
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_07_a_missing_file_is_a_mismatch_and_a_save_never_creates_it(tmp_path):
+    async def body(ui, client, tctx, folder):
+        assert (await put(client, "ghost", "0" * 64, edit_fields())).code == 409
+        assert not preset_file(ui, "ghost").exists()
+        loaded = await detail(client, "other")
+        preset_file(ui, "other").unlink()
+        assert (await put(client, "other", loaded["revision"], edit_fields())).code == 409
+        assert not preset_file(ui, "other").exists()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_09_a_save_of_the_preset_in_use_without_restart_is_a_409_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        for extra in ({}, {"restart": False}, {"restart": "true"}, {"restart": 1}):
+            response = await put(client, "staging", got["revision"], edit_fields(), **extra)
+            assert response.code == 409 and "restarts the session" in error_of(response)["error"]
+        assert preset_file(ui, "staging").read_bytes() == before
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_10_a_save_with_restart_writes_the_file_then_the_switch_file_then_shuts_down(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        seen = []
+        tctx.master.shutdown = mock.Mock(side_effect=lambda: seen.append(
+            (preset_file(ui, "staging").read_text(), (folder / session.SWITCH).read_text())))
+        form = edit_fields(api_hosts=["new.example.com", "second.example.com"], android_package="com.example.app")
+        response = await put(client, "staging", got["revision"], form, restart=True)
+        assert response.code == 202 and error_of(response) == {"switching": "staging"}
+        assert presetfile.load_preset("staging", ui.presets_dir).api_hosts == ("new.example.com", "second.example.com")
+        path = folder / session.SWITCH
+        assert json.loads(path.read_text()) == {"name": "staging"} and (path.stat().st_mode & 0o777) == 0o600
+        assert ui.token not in path.read_text() and ui.switching == "staging"
+        assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
+        tctx.master.shutdown.assert_called_once()
+        # Both files were on disk when mitmdump was asked to exit.
+        assert len(seen) == 1 and "new.example.com" in seen[0][0] and json.loads(seen[0][1]) == {"name": "staging"}
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_10_the_switch_file_is_written_before_shutdown(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        order = []
+        real = wiretrace_ui.write_switch_file
+        tctx.master.shutdown = mock.Mock(side_effect=lambda: order.append("shutdown"))
+        with mock.patch.object(wiretrace_ui, "write_switch_file",
+                               side_effect=lambda *args: (order.append("switch"), real(*args))):
+            response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 202 and order == ["switch", "shutdown"]
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_10_two_restarts_at_once_are_one_202_and_one_409_and_one_write(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        first, second = await asyncio.gather(
+            put(client, "staging", got["revision"], edit_fields(api_hosts=["one.example.com"]), restart=True),
+            put(client, "staging", got["revision"], edit_fields(api_hosts=["two.example.com"]), restart=True))
+        assert sorted([first.code, second.code]) == [202, 409]
+        winner = "one.example.com" if first.code == 202 else "two.example.com"
+        assert presetfile.load_preset("staging", ui.presets_dir).api_hosts == (winner,)
+        tctx.master.shutdown.assert_called_once()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_10_a_restart_whose_checks_fail_writes_neither_file(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        bad = await put(client, "staging", got["revision"], edit_fields(api_hosts=["https://x.example.com"]),
+                        restart=True)
+        stale = await put(client, "staging", "0" * 64, edit_fields(), restart=True)
+        assert (bad.code, stale.code) == (400, 409)
+        assert preset_file(ui, "staging").read_bytes() == before
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_10_a_switch_file_that_cannot_be_written_says_the_preset_is_saved_and_does_not_shut_down(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        with mock.patch.object(wiretrace_ui, "write_switch_file", side_effect=OSError("disk full")):
+            response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 500
+        assert error_of(response)["error"] == "Saved, but the session could not restart: stop and start again"
+        assert presetfile.load_preset("staging", ui.presets_dir).api_hosts == ("new.example.com",)
+        assert ui.switching is None and not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_16_a_write_that_fails_is_a_500_the_old_file_is_whole_and_no_temporary_file_is_left(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        with mock.patch.object(presetfile.os, "replace", side_effect=OSError("disk full")):
+            response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 500 and "unchanged" in error_of(response)["error"]
+        assert preset_file(ui, "staging").read_bytes() == before
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+        with mock.patch.object(presetfile.os, "link", side_effect=OSError("disk full")):
+            assert (await create(client, "qa2", edit_fields())).code == 500
+        assert not preset_file(ui, "qa2").exists()
+        assert [p for p in folder_listing(ui.presets_dir) if p.endswith(".tmp")] == []
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_11_a_save_of_the_preset_in_use_while_a_switch_is_in_flight_is_a_409_and_the_file_is_unchanged(
+        tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        (folder / session.SWITCH).write_text('{"name": "other"}')
+        response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 409 and "already switching" in error_of(response)["error"]
+        (folder / session.SWITCH).unlink()
+        ui.switching = "other"
+        response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 409 and "already switching" in error_of(response)["error"]
+        assert preset_file(ui, "staging").read_bytes() == before
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_11_a_save_of_the_preset_in_use_while_a_previous_session_is_open_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        open_previous_session(ui)
+        response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 409 and "previous session" in error_of(response)["error"]
+        assert preset_file(ui, "staging").read_bytes() == before
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_11_a_save_of_the_preset_in_use_without_a_session_folder_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = preset_file(ui, "staging").read_bytes()
+        tctx.configure(ui, qa_ui_session_dir="")
+        ui.meta = lambda: {"preset": "staging"}
+        response = await put(client, "staging", got["revision"], edit_fields(), restart=True)
+        assert response.code == 409 and "No session folder" in error_of(response)["error"]
+        assert preset_file(ui, "staging").read_bytes() == before
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_11_a_create_or_a_save_not_in_use_is_a_409_while_a_previous_session_is_open(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        before = contents(ui.presets_dir)
+        open_previous_session(ui)
+        assert (await put(client, "other", got["revision"], edit_fields())).code == 409
+        created = await create(client, "qa2", edit_fields())
+        assert created.code == 409 and "previous session" in error_of(created)["error"]
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_12_a_save_of_example_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "example")
+        response = await put(client, "example", got["revision"], edit_fields(), restart=True)
+        assert response.code == 409 and "template" in error_of(response)["error"]
+        assert preset_file(ui, "example").read_text() == EXAMPLE_PRESET
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_12_example_is_read_only_even_when_it_is_the_preset_in_use(tmp_path):
+    async def body(ui, client, tctx, folder):
+        session.write_meta(folder, {**session.read_meta(folder), "preset": "example"})
+        got = await detail(client, "example")
+        assert got["in_use"] is True and got["read_only"] is True
+        assert (await put(client, "example", got["revision"], edit_fields(), restart=True)).code == 409
+        assert preset_file(ui, "example").read_text() == EXAMPLE_PRESET and ui.switching is None
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("path", [
+    "/api/presets/..", "/api/presets/a.b", "/api/presets/a%2Fb", "/api/presets/..%2Fx", "/api/presets/%2e%2e",
+    "/api/presets/-a", "/api/presets/_a", "/api/presets/a/b", "/api/presets/" + "a" * 65, "/api/presets/staging.yaml"])
+def test_preset_edit_13_a_name_in_the_path_that_breaks_the_rule_is_refused_and_nothing_is_written(tmp_path, path):
+    async def body(ui, client, tctx, folder):
+        before = contents(ui.presets_dir)
+        for method in ("GET", "PUT"):
+            sent = {"revision": "0" * 64, "fields": edit_fields()} if method == "PUT" else None
+            assert (await client.fetch(path, method, body=sent)).code in (400, 404), (path, method)
+        assert contents(ui.presets_dir) == before
+        assert sorted(p.name for p in tmp_path.rglob("*.yaml")) == sorted(["staging.yaml", "other.yaml", "broken.yaml",
+                                                                         "example.yaml"])
+
+    edit_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["", "a/b", "../x", "a.b", ".hidden", "-a", "a b", "a" * 65, "a\nb", "é",
+                                  "../presets/x"])
+def test_preset_edit_13_a_name_in_the_body_that_breaks_the_rule_is_a_400_on_name_and_nothing_is_written(tmp_path, name):
+    async def body(ui, client, tctx, folder):
+        before = contents(ui.presets_dir)
+        response = await create(client, name, edit_fields())
+        assert response.code == 400 and error_of(response)["field"] == "name"
+        assert contents(ui.presets_dir) == before
+        assert sorted(p.name for p in tmp_path.rglob("*.yaml")) == sorted(["staging.yaml", "other.yaml", "broken.yaml",
+                                                                         "example.yaml"])
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_13_the_longest_name_is_64_characters(tmp_path):
+    async def body(ui, client, tctx, folder):
+        assert (await create(client, "a" * 64, edit_fields())).code == 201
+        assert (await create(client, "a" * 65, edit_fields())).code == 400
+        assert (await detail(client, "a" * 64))["name"] == "a" * 64
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_14_a_body_over_64_kib_is_a_400_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        before = contents(ui.presets_dir)
+        big = json.dumps({"revision": got["revision"], "fields": edit_fields(), "padding": "x" * (64 << 10)})
+        assert len(big) > 64 << 10
+        assert await client.refused_code("/api/presets/other", "PUT", body=big) in (400, 599)
+        assert await client.refused_code("/api/presets", "POST", body=big) in (400, 599)
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_14_the_handler_checks_the_size_before_it_parses(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        before = contents(ui.presets_dir)
+        with mock.patch.object(wiretrace_ui, "MAX_REQUEST_BYTES", 100), \
+                mock.patch.object(wiretrace_ui.PresetForm, "small_json", side_effect=AssertionError("parsed")):
+            response = await put(client, "other", got["revision"], edit_fields())
+            created = await create(client, "qa2", edit_fields())
+        assert response.code == 400 and "64 KiB" in error_of(response)["error"] and created.code == 400
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_14_51_hosts_or_51_hide_names_are_a_400_and_50_are_fine(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        hosts = [f"h{i}.example.com" for i in range(51)]
+        too_many = await put(client, "other", got["revision"], edit_fields(api_hosts=hosts))
+        assert too_many.code == 400 and error_of(too_many)["field"] == "api_hosts"
+        for key, items in (("redact_headers", [f"X-{i}" for i in range(51)]),
+                           ("redact_fields", [f"f{i}" for i in range(51)])):
+            response = await put(client, "other", got["revision"], edit_fields(**{key: items}))
+            assert response.code == 400 and error_of(response)["field"] == key
+        fifty = edit_fields(api_hosts=hosts[:50], redact_headers=[f"X-{i}" for i in range(50)],
+                            redact_fields=[f"f{i}" for i in range(50)])
+        assert (await put(client, "other", got["revision"], fifty)).code == 200
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_14_a_starting_filter_of_513_characters_is_a_400_and_512_is_fine(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "other")
+        long = "~d " + "a" * 510
+        assert len(long) == 513
+        response = await put(client, "other", got["revision"], edit_fields(default_filter=long))
+        assert response.code == 400 and error_of(response)["field"] == "default_filter"
+        assert (await put(client, "other", got["revision"], edit_fields(default_filter=long[:512]))).code == 200
+
+    edit_scenario(body, tmp_path)
+
+
+MALFORMED = [{}, [], "not json", {"revision": "x"}, {"fields": {}}, {"revision": 3, "fields": {}},
+             {"revision": "x", "fields": {"api_hosts": ["a.example.com"]}},
+             {"revision": "x", "fields": {**presetfile.empty_fields(), "extra": ""}},
+             {"revision": "x", "fields": {**presetfile.empty_fields(), "api_hosts": "a.example.com"}},
+             {"revision": "x", "fields": {**presetfile.empty_fields(), "default_filter": None}}]
+
+
+@pytest.mark.parametrize("sent", MALFORMED)
+def test_preset_edit_a_malformed_body_is_a_400_with_a_null_field_and_writes_nothing(tmp_path, sent):
+    async def body(ui, client, tctx, folder):
+        before = contents(ui.presets_dir)
+        response = await client.fetch("/api/presets/other", "PUT", body=sent)
+        assert response.code == 400 and error_of(response)["field"] is None and error_of(response)["error"]
+        created = await client.fetch("/api/presets", "POST", body=sent)
+        assert created.code == 400 and error_of(created)["field"] is None
+        assert contents(ui.presets_dir) == before
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_15_a_write_without_x_wiretrace_or_the_cookie_is_a_403_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        got = await detail(client, "staging")
+        before = contents(ui.presets_dir)
+        put_body = {"revision": got["revision"], "fields": edit_fields(), "restart": True}
+        post_body = {"name": "qa2", "fields": edit_fields()}
+        for headers in ({}, {"X-Wiretrace": "0"}, {"X-Wiretrace": ""}):
+            response = await client.fetch("/api/presets/staging", "PUT", mutate=False, headers=headers, body=put_body)
+            assert response.code == 403
+            response = await client.fetch("/api/presets", "POST", mutate=False, headers=headers, body=post_body)
+            assert response.code == 403
+        assert (await client.fetch("/api/presets/staging", "PUT", cookie="wrong", body=put_body)).code == 403
+        assert (await client.fetch("/api/presets", "POST", cookie=False, body=post_body)).code == 403
+        assert (await client.fetch("/api/presets/staging", cookie=False)).code == 403
+        assert (await client.fetch("/api/presets/staging", "PUT", host="evil.example.com", body=put_body)).code == 403
+        assert contents(ui.presets_dir) == before
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_the_existing_list_and_switch_still_work_next_to_the_new_routes(tmp_path):
+    async def body(ui, client, tctx, folder):
+        listed = (await client.json("/api/presets"))["presets"]
+        assert [p["name"] for p in listed] == ["broken", "example", "other", "staging"]
+        assert (await client.fetch("/api/preset", "POST", body={"name": "other"})).code == 202
+
+    edit_scenario(body, tmp_path)
+
+
+def test_preset_edit_9_nothing_of_a_preset_reaches_a_log_line_or_the_terminal(tmp_path, caplog, capsys):
+    async def body(ui, client, tctx, folder):
+        caplog.set_level(logging.DEBUG)
+        form = edit_fields(api_hosts=[SECRET_HOST], default_filter=SECRET_FILTER, redact_headers=["X-SecretHeader"],
+                           redact_fields=["secret_field"])
+        got = await detail(client, "staging")
+        other = await detail(client, "other")
+        assert (await put(client, "staging", "0" * 64, form, restart=True)).code == 409
+        assert (await put(client, "other", other["revision"], {**form, "api_hosts": ["https://" + SECRET_HOST]})
+                ).code == 400
+        assert (await create(client, "qa2", form)).code == 201
+        assert (await create(client, "qa2", form)).code == 409
+        with mock.patch.object(presetfile.os, "replace", side_effect=OSError(f"cannot write {SECRET_HOST}")):
+            assert (await put(client, "staging", got["revision"], form, restart=True)).code == 500
+        with mock.patch.object(presetfile.os, "link", side_effect=OSError(f"cannot link {SECRET_HOST}")):
+            assert (await create(client, "qa3", form)).code == 500
+        with mock.patch.object(wiretrace_ui, "write_switch_file", side_effect=OSError(f"no {SECRET_HOST}")):
+            assert (await put(client, "staging", got["revision"], form, restart=True)).code == 500
+        with mock.patch.object(presetfile, "read_preset_file", side_effect=OSError(f"no {SECRET_HOST}")):
+            assert (await client.fetch("/api/presets/other")).code == 500
+        shown = capsys.readouterr()
+        everything = caplog.text + shown.out + shown.err
+        for secret in (SECRET_HOST, "SecretValue", "X-SecretHeader", "secret_field"):
+            assert secret not in everything
+        assert "OSError" in caplog.text
+
+    edit_scenario(body, tmp_path)

@@ -11,8 +11,9 @@ usage() {
 Usage: scripts/setup-mac.sh [--skip-android]
 
 Installs uv, Python 3.12 and the Wiretrace Python packages (into .venv), plus
-Android platform-tools (into ~/tools) unless --skip-android is given.
-Needs no admin rights. Ends by running ./wiretrace doctor.
+Android platform-tools (into ~/tools) unless --skip-android is given, and
+creates ~/Applications/Wiretrace.app. Needs no admin rights. Ends by running
+./wiretrace doctor.
 EOF
 }
 
@@ -164,6 +165,13 @@ step "First start of the iOS tools (can take a minute)"
 "$ROOT/.venv/bin/pymobiledevice3" usbmux list >/dev/null 2>&1 || true
 echo "done"
 
+step "Wiretrace app (~/Applications)"
+# Not needed to use Wiretrace from Terminal: a failure is a warning, and doctor still decides.
+app_made=0
+if "$ROOT/scripts/make-app.sh"; then
+    app_made=1
+fi
+
 step "Checking the setup (./wiretrace doctor)"
 set +e
 "$ROOT/wiretrace" doctor
@@ -172,4 +180,8 @@ set -e
 
 echo
 echo "Open a new Terminal window (or run: exec zsh) so the PATH changes apply."
+if [ "$app_made" -eq 1 ]; then
+    echo "Next time, open Wiretrace from Launchpad or Spotlight; no Terminal needed."
+    echo "To keep it in the Dock: right-click its Dock icon > Options > Keep in Dock."
+fi
 exit "$status"

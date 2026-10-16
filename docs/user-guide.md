@@ -1,15 +1,22 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.8.0**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.9.0**, on Intel and Apple silicon Macs.
 
-What 0.8.0 gives you: a one-command install that needs no admin rights, a setup
+What 0.9.0 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
 next to the traffic (Part 3). `./wiretrace report` turns a session into a zip for the bug
-ticket. The Wiretrace window (`--ui wiretrace`) is a preview; in 0.8.0 it gains a setup
-wizard, rules that make requests fail or slow, a log timeline with the device's status,
-earlier sessions, saved filters, search in headers and bodies, replay and compare.
+ticket. The Wiretrace window (`--ui wiretrace`) is a preview, with a setup wizard, rules that
+make requests fail or slow, a log timeline with the device's status, earlier sessions, saved
+filters, search in headers and bodies, replay and compare. New in 0.9.0: the **Wiretrace
+app** that setup puts in `~/Applications`, a `default` preset to start with, and editing or
+creating presets from the window.
+
+Using 0.8.0 or 0.7.2? Those versions have no `./install` and no Wiretrace app; follow the
+guide that came with them: [0.8.0](https://github.com/chienng/wiretrace/blob/v0.8.0/docs/user-guide.md),
+[0.7.2](https://github.com/chienng/wiretrace/blob/v0.7.2/docs/user-guide.md), or
+`~/wiretrace/docs/user-guide.md` in your download.
 
 New to Wiretrace? Do Part 1 once per Mac, Part 2 once per phone, then Part 3 every time
 you test. Run each command in **Terminal** (Applications → Utilities → Terminal).
@@ -25,8 +32,8 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  `wiretrace-0.8.0-macos.tar.gz` and `wiretrace-0.8.0-macos.tar.gz.sha256`, or
-  `wiretrace-0.8.0-macos.dmg` and `wiretrace-0.8.0-macos.dmg.sha256`. Both contain the same
+  `wiretrace-0.9.0-macos.tar.gz` and `wiretrace-0.9.0-macos.tar.gz.sha256`, or
+  `wiretrace-0.9.0-macos.dmg` and `wiretrace-0.9.0-macos.dmg.sha256`. Both contain the same
   files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -36,8 +43,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.8.0-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.8.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.9.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.9.0-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -47,14 +54,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.8.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.9.0-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.8.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.9.0**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -63,10 +70,11 @@ Either way you now have `~/wiretrace`.
 
 ```bash
 cd ~/wiretrace
-scripts/setup-mac.sh
+./install
 ```
 
-If you only test iOS, use `scripts/setup-mac.sh --skip-android`.
+If you only test iOS, use `./install --skip-android`. (`./install` runs
+`scripts/setup-mac.sh`; either command works.)
 
 The first run takes a few minutes. It installs, all inside your home folder:
 
@@ -77,12 +85,34 @@ The first run takes a few minutes. It installs, all inside your home folder:
 | mitmproxy, pymobiledevice3 and the other packages | `~/wiretrace/.venv` |
 | Android platform-tools r37.0.1 (`adb`) | `~/tools/platform-tools` |
 | Two `PATH` lines | `~/.zshrc` |
+| The Wiretrace app | `~/Applications/Wiretrace.app` |
 
 Every download is checked against a SHA-256 checksum stored in the script; a file that
 does not match is never installed. Running the script again is safe and quick.
 
 Do **not** run it with `sudo`. It refuses, because the files in your home folder would
 end up owned by root.
+
+### The Wiretrace app
+
+The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS opens it
+without asking. You can start every session from it instead of Terminal:
+
+1. Open **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the
+   Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
+2. Choose your project (a preset: `default`, or one you created in Step 6), then your device.
+   The last ones you used are selected.
+3. After a few seconds the Wiretrace window opens in your browser and the **Wiretrace** menu
+   (the W icon at the top right of the screen) appears.
+
+<!-- Screenshot of the two lists: taken during the spec 014 runtime check. -->
+
+The session keeps recording after the app's last message closes. To stop it and save
+`flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top right): a session started from the app
+has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
+
+The app opens the folder the setup ran in. If you move that folder, the app says so: run
+`scripts/setup-mac.sh` again from the new place.
 
 ### Step 4 — Open a new Terminal window
 
@@ -110,10 +140,15 @@ continue.
 | `INFO CA certificate: not created yet` | Normal before the first start. |
 | `WARN CA private key: readable by other users` | Run the `chmod 600 …` command shown. |
 
-### Step 6 — Create a preset for your project
+### Step 6 — Optional: create a preset for your project
 
-A preset tells Wiretrace which API hosts to decrypt. It is one file per project and
-environment in `~/wiretrace/presets/`. Start from the example:
+A preset tells Wiretrace which API hosts to decrypt: only the hosts under its `api_hosts:`
+are decrypted. It is one file per project and environment in `~/wiretrace/presets/`.
+Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
+and start with `--preset default`. With `--ui wiretrace` you can also do this in the window:
+**Preset → Edit presets…** to put your app's hosts into `default`, or **New preset…** (see
+*Editing and creating presets* under the Wiretrace window). In Terminal, start from the
+example:
 
 ```bash
 cd ~/wiretrace
@@ -177,24 +212,24 @@ iPhone:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --target ios --ui wiretrace
+./wiretrace start --preset default --target ios --ui wiretrace
 ```
 
 Android phone:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --target android --ui wiretrace
+./wiretrace start --preset default --target android --ui wiretrace
 ```
 
 A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
 
 ```bash
 cd ~/wiretrace
-./wiretrace start --preset staging --mode proxy --ui wiretrace
+./wiretrace start --preset default --mode proxy --ui wiretrace
 ```
 
-If your preset has another name, change `staging`. For the Android emulator use
+With a preset you created, change `default` to its name. For the Android emulator use
 `--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
 [Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
 in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick
@@ -292,7 +327,8 @@ running and go on with Part 3, or press **Ctrl+C** and start again later.
 
 ## Part 3 — Test with Wiretrace (every session)
 
-The examples use a preset named `staging` (Part 1, Step 6).
+The examples use a preset named `staging` (Part 1, Step 6). With the preset that comes with
+Wiretrace, use `--preset default`.
 
 ### Step 1 — Start capturing
 
@@ -605,9 +641,10 @@ window only answers on this Mac and cannot be reached from the network. If you c
 copy the link from the Terminal again. Do not paste the link into a chat or a ticket: the
 window shows requests with their tokens, and the phone's WireGuard configuration.
 
-**Menu bar.** With `--ui wiretrace`, a **● Wiretrace** item appears in the macOS menu bar
-(no Dock icon). After a request fails it reads **● Wiretrace · N**, where N is the same count
-as the window's *Errors* filter. The menu shows the preset, the device (target, mode, and the
+**Menu bar.** With `--ui wiretrace`, the Wiretrace icon (a W in a square) appears in the macOS
+menu bar (no Dock icon). It is dimmed while the session starts, and when Wiretrace stops
+answering (a **?** then shows next to it). After a request fails a number N shows next to it,
+the same count as the window's *Errors* filter. The menu shows the preset, the device (target, mode, and the
 phone's model when logs are streaming), how long the session has been running, and the request,
 error and rules-on counts. **Open Wiretrace** (⌘O) opens the window again, including after you
 quit the browser; each click opens a new tab. **Show last error** (⌘R) opens the window with
@@ -630,10 +667,28 @@ Each session has one preset, so the new one gets its own session folder, rules
 (`rules/<preset>.json`) and mocks. The menu is off while a previous session is open. Ctrl+C,
 or *Stop session* in the menu bar, still ends Wiretrace and never starts the chosen preset.
 
+**Editing and creating presets.** In the same menu, *Edit presets…* opens the *Presets* sheet
+with the preset in use selected, and *New preset…* opens it on a blank form. The form has the
+API hosts (one per line), the Android package, the iOS process, the request ID header, the
+starting filter, and the extra header and field names to hide. Each value is checked the way
+`./wiretrace start` checks the file; a refused value is marked and nothing is written.
+
+- *Create preset* writes `presets/<name>.yaml`. This session keeps running; choose the new
+  preset from the menu to switch to it.
+- *Save* on another preset rewrites its file. This session keeps running.
+- *Save and restart* on the preset in use asks first, then saves the file and switches to it
+  as above: this session is saved, a new one starts with the new settings, and the phone stays
+  connected.
+
+The sheet writes the file in its own layout. Settings the form does not show, such as
+`mocks_dir`, are kept; comments in the file are not. `example` is the template and opens
+read-only: use *New preset*. If the file was changed in TextEdit while the sheet showed it,
+the save is refused and the sheet loads the new file. The name of a preset cannot be changed.
+
 **What each area does.**
 
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
-  (for example *v0.8.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  (for example *v0.9.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is
@@ -942,22 +997,25 @@ Your device setup (CA and tunnel in `~/.mitmproxy`) stays valid.
 ```bash
 mv ~/wiretrace ~/wiretrace-old
 tar -xzf wiretrace-<version>-macos.tar.gz -C ~
-cd ~/wiretrace && scripts/setup-mac.sh
+cd ~/wiretrace && ./install
 ```
+
+The setup also updates the Wiretrace app, which then opens the new folder.
 
 Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
 files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
 `~/wiretrace-old/rules/` to `~/wiretrace/rules/`, and any sessions you want to keep from
-`~/wiretrace-old/sessions/`. Then delete `~/wiretrace-old`.
+`~/wiretrace-old/sessions/`. If you changed `presets/default.yaml`, copy it too: the new
+version comes with its own. Then delete `~/wiretrace-old`.
 
-Stop Wiretrace (Ctrl+C) before you update: it reloads its add-on files when they change. Two
+Stop Wiretrace (Ctrl+C, or **Stop session** in the **Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
 builds can carry the same version number, so to check which one you run, look at the Terminal
 banner: a build with rules prints a `Rules:` line.
 
 **Remove Wiretrace completely:**
 
 ```bash
-rm -rf ~/wiretrace ~/tools/platform-tools ~/.local/share/uv
+rm -rf ~/wiretrace ~/tools/platform-tools ~/.local/share/uv ~/Applications/Wiretrace.app
 rm -f ~/.local/bin/uv ~/.local/bin/uvx
 ```
 
