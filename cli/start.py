@@ -339,7 +339,6 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
     previous = {s: signal.signal(s, on_stop) for s in STOP_SIGNALS}
     try:
         switched = False
-        seen = signals[0]
         code = 0
         while True:
             rules = redact.rules_for(preset)
@@ -364,17 +363,22 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 menu_problem = (menu_available or _menu_problem)()
                 if menu_problem is None and token:
                     menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS)
-            # Invariant 1: a stop signal since the switch was decided means no next child.
-            if switched and signals[0] != seen:
+            # Invariant 1: every stop signal ends the run, so any signal at all means no next child.
+            if switched and signals[0]:
                 session.remove(folder)
                 return code
             say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
                        menu_bar_text(kind, no_menu_bar, menu_problem)))
-            seen = signals[0]
+            child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients)
+            har_cmd = har_command(bin_dir, flows, folder / session.HAR_TMP)
+            # Checked again as late as possible: a signal during the banner must not start the child.
+            if switched and signals[0]:
+                session.remove(folder)
+                return code
             outcome = Outcome()
             code = supervise(
-                build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients),
-                har_command(bin_dir, flows, folder / session.HAR_TMP),
+                child_cmd,
+                har_cmd,
                 folder,
                 stops,
                 collector_cmd,
@@ -386,7 +390,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 outcome=outcome,
             )
             # Invariant 9: only the Wiretrace window loops.
-            if kind != WIRETRACE or outcome.state != RUNNING or outcome.switch_to is None or signals[0] != seen:
+            if kind != WIRETRACE or outcome.state != RUNNING or outcome.switch_to is None or signals[0]:
                 return code
             # Invariant 3: the preset is loaded again here, before anything is spawned for it.
             try:
