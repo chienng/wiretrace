@@ -45,8 +45,10 @@ button:disabled { cursor: default; opacity: .5; }
   height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 14px;
   background: #f6f6f8; border-bottom: 1px solid var(--line);
 }
-.title { font-weight: 600; font-size: 13px; margin-right: 4px; white-space: nowrap; }
-.title .version { margin-left: 6px; font-weight: 400; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.title { display: flex; align-items: center; gap: 8px; margin-right: 4px; white-space: nowrap; }
+.title .mark { width: 24px; height: 24px; flex: none; }
+.title .name { display: flex; flex-direction: column; font-weight: 600; font-size: 13px; line-height: 1.15; }
+.title .version { min-height: 13px; font-weight: 400; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .btn {
   display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px;

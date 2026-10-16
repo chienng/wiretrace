@@ -1,4 +1,5 @@
 import { api, ApiError } from '../api';
+import markUrl from '../assets/mark.svg';
 import { devicePill } from '../logic/device';
 import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
@@ -128,12 +129,14 @@ export function TitleBar({ newCount }: Props) {
   return (
     <header className="titlebar">
       <span className="title">
-        Wiretrace
-        {version && (
-          <span className="version" title="Wiretrace version">
+        <img className="mark" src={markUrl} alt="" width={24} height={24} />
+        <span className="name">
+          Wiretrace
+          {/* Always rendered, so the name does not move up once /api/state arrives. */}
+          <span className="version" title={version ? 'Wiretrace version' : undefined}>
             {version}
           </span>
-        )}
+        </span>
       </span>
       <div className="seg sm" role="tablist" aria-label="View">
         <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>

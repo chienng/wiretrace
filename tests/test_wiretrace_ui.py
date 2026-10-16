@@ -302,6 +302,19 @@ def test_the_assets_are_served_and_nothing_outside_dist(tmp_path):
     scenario(body)
 
 
+def test_the_page_icon_is_served_as_svg():
+    page = (ROOT / "ui" / "dist" / "index.html").read_text()
+    href = re.search(r'<link rel="icon" type="image/svg\+xml" href="(/assets/mark-[^"]+\.svg)"', page)
+    assert href, "ui/dist/index.html has no SVG icon: run `make ui`"
+
+    async def body(ui, client, tctx):
+        icon = await client.fetch(href.group(1))
+        assert icon.code == 200 and icon.headers["Content-Type"].startswith("image/svg+xml")
+        assert icon.body == (ROOT / "ui" / "dist" / href.group(1).lstrip("/")).read_bytes()
+
+    scenario(body)
+
+
 def test_without_a_build_the_page_is_not_found(tmp_path):
     async def main():
         ui = wiretrace_ui.WiretraceUI()
