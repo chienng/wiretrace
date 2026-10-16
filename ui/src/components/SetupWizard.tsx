@@ -1,9 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
+import { api } from '../api';
 import { copyText } from '../clipboard';
 import { useNow } from '../hooks';
 import { certificateSteps } from '../logic/certificate';
 import { devicePill, STATE_LABELS } from '../logic/device';
 import {
+  appChecks,
+  appHint,
+  beforeYouStart,
+  CERTIFICATE_WHY,
+  connectWhy,
   deviceChoice,
   deviceFromTarget,
   deviceLogSteps,
@@ -12,12 +18,23 @@ import {
   endpointOf,
   firstApiFlow,
   needsProxy,
+  nextLabel,
+  nextTime,
   NO_CONNECTION_HINT_S,
+  noPageHint,
   proxyCommand,
   proxySteps,
+  setupSummary,
+  STEP_LABELS,
+  stepDone,
+  STORE_BUILD_NOTE,
+  trustChecklist,
+  trustHint,
   tunnelSteps,
+  usesTunnel,
   type DeviceKind,
   type Step,
+  type StepKey,
 } from '../logic/setup';
 import { useDispatch, useStore } from '../store';
 import type { AppState } from '../types';
@@ -60,9 +77,9 @@ function Code({ code, copy, what = 'Command' }: { code: string; copy: Copy; what
   );
 }
 
-function Steps({ steps, copy }: { steps: Step[]; copy: Copy }) {
+function Steps({ steps, copy, className = '' }: { steps: Step[]; copy: Copy; className?: string }) {
   return (
-    <ol className="instr">
+    <ol className={`instr ${className}`.trim()}>
       {steps.map((s) => (
         <li key={s.text}>
           {s.text}
@@ -86,6 +103,56 @@ function DeviceCards({ kind, onPick }: { kind: DeviceKind; onPick: (k: DeviceKin
   );
 }
 
+function Checklist({ items }: { items: { label: string; done: boolean }[] }) {
+  return (
+    <ul className="checklist">
+      {items.map((i) => (
+        <li key={i.label} className={i.done ? 'done' : undefined}>
+          <span className="tick" aria-hidden="true">
+            {i.done ? '✓' : ''}
+          </span>
+          {i.label}
+          <span className="sr">{i.done ? ' (done)' : ' (not yet)'}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function NotTrusted({ failures, note, onBack }: { failures: number; note?: string; onBack?: () => void }) {
+  return (
+    <div className="hintbox bad" role="alert">
+      <p>
+        <b>The device does not trust the certificate yet.</b> Its HTTPS connections to the API hosts fail ({failures}{' '}
+        {failures === 1 ? 'failure' : 'failures'} so far).
+      </p>
+      {note && <p>{note}</p>}
+      {onBack && (
+        <button type="button" className="linkbtn" onClick={onBack}>
+          Back to {STEP_LABELS.trust} →
+        </button>
+      )}
+    </div>
+  );
+}
+
+function BeforeYouStart({ kind, wireguard }: { kind: DeviceKind; wireguard: boolean }) {
+  const { needs, once } = beforeYouStart(kind, wireguard);
+  return (
+    <div className="hintbox">
+      <p>
+        <b>Before you start</b>, you need:
+      </p>
+      <ul className="needs">
+        {needs.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+      <p>{once}</p>
+    </div>
+  );
+}
+
 function Restart({ preset, kind, copy, why }: { preset: string; kind: DeviceKind; copy: Copy; why: string }) {
   return (
     <div className="hintbox">
@@ -103,7 +170,7 @@ function Connection({ state, since }: { state: AppState; since: number }) {
     return (
       <div className="okbox">
         <b>Connected</b>
-        <div>The device reached Wiretrace. Next, install the certificate.</div>
+        <div>The device reached Wiretrace. Next, make it trust Wiretrace.</div>
       </div>
     );
   }
@@ -137,10 +204,10 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
   if (wg && needsProxy(kind)) {
     return (
       <>
-        <h4>Connect the {name}</h4>
-        <p className="lead">The Simulator cannot run the WireGuard app; it uses this Mac's proxy instead.</p>
+        <h4>Connect the {name} to this Mac</h4>
+        <p className="lead">{connectWhy(kind, wg)}</p>
         <DeviceCards kind={kind} onPick={setKind} />
-        <Restart preset={state.preset} kind={kind} copy={copy} why="Wiretrace was started in WireGuard mode, which the Simulator cannot use." />
+        <Restart preset={state.preset} kind={kind} copy={copy} why="Wiretrace was started for the WireGuard VPN app, which the Simulator cannot use." />
       </>
     );
   }
@@ -150,8 +217,8 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
     const local = kind === 'ios-sim' || kind === 'android-emu';
     return (
       <>
-        <h4>Connect the {name} through the Mac's proxy</h4>
-        <p className="lead">{local ? 'The proxy listens on this Mac.' : 'Both devices must be on the same Wi-Fi network.'}</p>
+        <h4>Connect the {name} to this Mac</h4>
+        <p className="lead">{connectWhy(kind, wg)}</p>
         <DeviceCards kind={kind} onPick={setKind} />
         {!local && (
           <div className="addr">
@@ -172,8 +239,8 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
   const endpoint = endpointOf(shown);
   return (
     <>
-      <h4>Connect your {name} through WireGuard</h4>
-      <p className="lead">Works on any Wi-Fi network and also captures apps that ignore the phone's proxy setting.</p>
+      <h4>Connect your {name} to this Mac</h4>
+      <p className="lead">{connectWhy(kind, wg)}</p>
       <DeviceCards kind={kind} onPick={setKind} />
       <div className="connect">
         <div>
@@ -205,13 +272,54 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
   );
 }
 
-function VerifyStep({ state, onCertificate }: { state: AppState; onCertificate: () => void }) {
+function TrustStep({ state, kind, copy }: { state: AppState; kind: DeviceKind; copy: Copy }) {
   const { flows } = useStore();
-  const first = firstApiFlow(flows);
+  const [since] = useState(() => Date.now());
+  const now = useNow(1000);
+  const wg = state.mode === 'wireguard';
+  const hint = trustHint(kind, state, flows, since, now);
   return (
     <>
-      <h4>Verify traffic</h4>
-      <p className="lead">Open the app on the device and use it. Requests to the preset's API hosts appear in the Traffic view.</p>
+      <h4>Trust Wiretrace</h4>
+      <p className="lead">{CERTIFICATE_WHY} Needed once per device.</p>
+      <Checklist items={trustChecklist(kind, flows)} />
+      {hint === 'not-trusted' && <NotTrusted failures={state.tls_failures} />}
+      {hint === 'no-page' && (
+        <div className="hintbox" role="status">
+          {noPageHint(kind, wg)}
+        </div>
+      )}
+      {certificateSteps(deviceChoice(kind).target, wg).map((group) => (
+        <Steps key={group.platform} steps={group.steps} copy={copy} className="gap-top" />
+      ))}
+    </>
+  );
+}
+
+function CheckAppStep({ state, kind, onTrust }: { state: AppState; kind: DeviceKind; onTrust: () => void }) {
+  const { flows, rules } = useStore();
+  const dispatch = useDispatch();
+  const [since] = useState(() => Date.now());
+  const now = useNow(1000);
+  const missing = rules === null;
+  useEffect(() => {
+    if (!missing) return;
+    let cancelled = false;
+    api
+      .rules()
+      .then((r) => !cancelled && dispatch({ type: 'rules', rules: r }))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [missing, dispatch]);
+  const first = firstApiFlow(flows);
+  const hint = appHint(state, flows, since, now);
+  const android = kind === 'android' || kind === 'android-emu';
+  return (
+    <>
+      <h4>Check the app</h4>
+      <p className="lead">Open the app on the device and go to a screen that loads data. Its requests appear in Traffic.</p>
       {first ? (
         <div className="okbox">
           <b>Traffic received</b>
@@ -220,26 +328,41 @@ function VerifyStep({ state, onCertificate }: { state: AppState; onCertificate: 
             {first.path}
           </div>
         </div>
-      ) : state.tls_failures > 0 ? (
-        <div className="hintbox bad" role="alert">
-          <p>
-            <b>The device does not trust the certificate yet.</b> Its HTTPS connections to the API hosts fail ({state.tls_failures}{' '}
-            {state.tls_failures === 1 ? 'failure' : 'failures'} so far).
-          </p>
-          <button type="button" className="linkbtn" onClick={onCertificate}>
-            Back to Install certificate →
-          </button>
-        </div>
+      ) : hint === 'not-trusted' ? (
+        <NotTrusted failures={state.tls_failures} note={android ? STORE_BUILD_NOTE : undefined} onBack={onTrust} />
       ) : (
-        <div className="waiting">
-          <span className="spinner" />
-          <div>
-            <b>Waiting for the first request…</b>
-            <div>This turns green as soon as a request to an API host arrives.</div>
+        <>
+          <div className="waiting">
+            <span className="spinner" />
+            <div>
+              <b>Waiting for the first request…</b>
+              <div>This turns green as soon as a request to an API host arrives.</div>
+            </div>
           </div>
-        </div>
+          {hint === 'no-traffic' && (
+            <div className="hintbox" role="status">
+              <p>Nothing from the app yet. Check that:</p>
+              <ul className="needs">
+                {appChecks(kind, state.mode === 'wireguard', state.preset, rules?.api_hosts ?? []).map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </>
       )}
     </>
+  );
+}
+
+function Summary({ state, kind }: { state: AppState; kind: DeviceKind }) {
+  const { flows } = useStore();
+  return (
+    <div className="summary">
+      <h5>What is set up</h5>
+      <Checklist items={setupSummary(kind, state, flows)} />
+      <p className="tip">{nextTime(kind, state.mode === 'wireguard')}</p>
+    </div>
   );
 }
 
@@ -285,6 +408,7 @@ function DeviceLogsStep({ state, kind }: { state: AppState; kind: DeviceKind }) 
 
 const STEP_IDS = [1, 2, 3, 4, 5] as const;
 type StepId = (typeof STEP_IDS)[number];
+const STEP_KEYS: Record<StepId, StepKey> = { 1: 'device', 2: 'connect', 3: 'trust', 4: 'check', 5: 'logs' };
 
 export function SetupWizard() {
   const { appState, flows } = useStore();
@@ -300,28 +424,36 @@ export function SetupWizard() {
   const copy: Copy = (text, what) => {
     void copyText(text).then((ok) => dispatch({ type: 'toast', text: ok ? `${what} copied` : 'Copy failed' }));
   };
-  const rail: { id: StepId; label: string; sub: string; done: boolean }[] = [
-    { id: 1, label: 'Choose device', sub: `${deviceChoice(kind).label}`, done: step > 1 },
-    { id: 2, label: 'Connect tunnel', sub: wg && !needsProxy(kind) ? 'WireGuard' : 'Wi-Fi proxy', done: appState.device_seen_at !== null },
-    { id: 3, label: 'Install certificate', sub: 'Once per device', done: firstApiFlow(flows) !== null },
-    { id: 4, label: 'Verify traffic', sub: 'Open the app', done: firstApiFlow(flows) !== null },
-    { id: 5, label: 'Device logs', sub: 'Optional, USB', done: appState.device_logs !== null },
-  ];
-  const stepClass = (s: (typeof rail)[number]) => (s.id === step ? 'cur' : s.done ? 'done' : 'todo');
-  const next = rail[step]?.label;
-  const certTarget = deviceChoice(kind).target;
+  const done = (id: StepId) => {
+    const key = STEP_KEYS[id];
+    return key === 'device' ? step > 1 : stepDone(key, appState, flows);
+  };
+  const subs: Record<StepId, string> = {
+    1: deviceChoice(kind).label,
+    2: usesTunnel(kind, wg) ? 'WireGuard' : 'Wi-Fi proxy',
+    3: 'Once per device',
+    4: 'Open the app',
+    5: 'Optional, USB',
+  };
+  const stepClass = (id: StepId) => (id === step ? 'cur' : done(id) ? 'done' : 'todo');
 
   return (
     <Modal title="Connect a test device" onClose={close} wide>
       <div className="wizard">
         <div className="steps">
-          {rail.map((s) => (
-            <button key={s.id} type="button" className={`step ${stepClass(s)}`} aria-current={s.id === step ? 'step' : undefined} onClick={() => setStep(s.id)}>
-              <span className="num">{stepClass(s) === 'done' ? '✓' : s.id}</span>
+          {STEP_IDS.map((id) => (
+            <button
+              key={id}
+              type="button"
+              className={`step ${stepClass(id)}${done(id) ? ' passed' : ''}`}
+              aria-current={id === step ? 'step' : undefined}
+              onClick={() => setStep(id)}
+            >
+              <span className="num">{done(id) ? '✓' : id}</span>
               <span>
-                <span className="lbl">{s.label}</span>
+                <span className="lbl">{STEP_LABELS[STEP_KEYS[id]]}</span>
                 <br />
-                <span className="sub">{s.sub}</span>
+                <span className="sub">{subs[id]}</span>
               </span>
             </button>
           ))}
@@ -330,25 +462,24 @@ export function SetupWizard() {
           {step === 1 && (
             <>
               <h4>Which device do you test on?</h4>
-              <p className="lead">The next steps are for this kind of device. Started with --target {appState.target}.</p>
+              <p className="lead">The next steps are written for this kind of device.</p>
               <DeviceCards kind={kind} onPick={setKind} />
+              <BeforeYouStart kind={kind} wireguard={wg} />
             </>
           )}
           {step === 2 && <ConnectStep state={appState} kind={kind} setKind={setKind} copy={copy} />}
-          {step === 3 && (
-            <>
-              <h4>Install the certificate</h4>
-              <p className="lead">Needed once per device, so it trusts Wiretrace for HTTPS.</p>
-              {certificateSteps(certTarget, wg).map((group) => (
-                <Steps key={group.platform} steps={group.steps} copy={copy} />
-              ))}
-            </>
-          )}
-          {step === 4 && <VerifyStep state={appState} onCertificate={() => setStep(3)} />}
+          {step === 3 && <TrustStep state={appState} kind={kind} copy={copy} />}
+          {step === 4 && <CheckAppStep state={appState} kind={kind} onTrust={() => setStep(3)} />}
           {step === 5 && <DeviceLogsStep state={appState} kind={kind} />}
           {proxyAlt && (
-            <Restart preset={appState.preset} kind={kind} copy={copy} why="Wiretrace cannot change from WireGuard to the Wi-Fi proxy while it runs." />
+            <Restart
+              preset={appState.preset}
+              kind={kind}
+              copy={copy}
+              why="A Wi-Fi proxy is a setting on the phone, used instead of the VPN app. Wiretrace cannot switch to it while it runs."
+            />
           )}
+          {step === 5 && <Summary state={appState} kind={kind} />}
           <div className="wiz-foot">
             {wg && step === 2 && !needsProxy(kind) && (
               <button type="button" className="linkbtn" aria-expanded={alt} onClick={() => setAlt(!alt)}>
@@ -363,11 +494,11 @@ export function SetupWizard() {
             )}
             {step < 5 ? (
               <button type="button" className="btn primary" onClick={() => setStep((step + 1) as StepId)}>
-                Next: {next}
+                {nextLabel(done(step), STEP_KEYS[(step + 1) as StepId])}
               </button>
             ) : (
-              <button type="button" className="btn primary" onClick={close}>
-                Done
+              <button type="button" className="btn primary" onClick={() => dispatch({ type: 'ui', patch: { dialog: null, view: 'traffic' } })}>
+                Done — open Traffic
               </button>
             )}
           </div>

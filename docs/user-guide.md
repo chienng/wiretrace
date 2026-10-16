@@ -190,15 +190,17 @@ cd ~/wiretrace
 If your preset has another name, change `staging`. For the Android emulator use
 `--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy` (see
 [Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
-in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick,
-and turns each step green when Wiretrace sees it work. Without `--ui wiretrace` you get mitmweb
-instead, which shows the same QR code. The first time, macOS may ask whether to allow incoming
+in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick
+(*Choose device*, *Connect to this Mac*, *Trust Wiretrace*, *Check the app*, and the optional
+*Device logs*), says what you need before you start, and ticks each step as soon as Wiretrace
+sees it work. When a step does not turn green, it says what to try. Without `--ui wiretrace`
+you get mitmweb instead, which shows the same QR code. The first time, macOS may ask whether to allow incoming
 connections: click **Allow**.
 
 ### Step 2 — Connect the phone
 
 1. Install the **WireGuard** app (App Store / Google Play).
-2. In WireGuard, add a tunnel by scanning the QR code: step *Connect tunnel* of the setup
+2. In WireGuard, add a tunnel by scanning the QR code: step *Connect to this Mac* of the setup
    wizard, or the WireGuard panel in mitmweb.
 3. Turn the tunnel on. In WireGuard, tap the tunnel: *Endpoint* is your Mac's address with
    port 51820, and *Latest handshake* shows a time a few seconds ago. In the wizard,
@@ -219,7 +221,12 @@ With the tunnel on, open `http://mitm.it` on the phone. This page is served by W
 your Mac, not by the internet, and it is not saved in the session. If it says *"traffic is not
 going through mitmproxy"*, or does not load, the tunnel is off or not connected: check
 *Latest handshake* (Step 2). For the iOS Simulator and the Android emulator, the wizard's
-*Install certificate* step shows the one command to run on your Mac instead, with a copy button.
+*Trust Wiretrace* step shows the one command to run on your Mac instead, with a copy button.
+
+For a phone, the wizard's *Trust Wiretrace* step ticks *Page opened on the phone* when
+`mitm.it` loads, *Certificate downloaded* when you tap the download, and *Trusted* when the
+first request to an API host arrives. If the phone is connected but `mitm.it` has not loaded
+after a minute, type `http://mitm.it` exactly (not https), in Safari on an iPhone.
 
 **iPhone**
 
@@ -263,12 +270,16 @@ going through mitmproxy"*, or does not load, the tunnel is off or not connected:
 ### Step 4 — Check
 
 Open the app on the phone. Its requests to the preset's hosts appear in the Traffic list (or in
-mitmweb), and the wizard's *Verify traffic* step turns green. If the phone refuses Wiretrace's
+mitmweb), and the wizard's *Check the app* step turns green. If the phone refuses Wiretrace's
 certificate for an API host, that step says the certificate is not trusted yet and points back
-to Step 3. If HTTPS requests show errors, see [Troubleshooting](#part-5--troubleshooting).
+to *Trust Wiretrace* (Step 3); on Android it adds that a store build never trusts it. If nothing
+arrives after 30 seconds, it lists what to check: a QA build for the preset's environment, the
+preset's API hosts, a screen of the app that loads data, and the tunnel still on. If HTTPS
+requests show errors, see [Troubleshooting](#part-5--troubleshooting).
 
-You can keep this session running and go on with Part 3, or press **Ctrl+C** and start again
-later.
+The wizard's last button, **Done — open Traffic**, sums up what is set up. Next time, switch the
+WireGuard tunnel on (or set the Wi-Fi proxy), then start Wiretrace. You can keep this session
+running and go on with Part 3, or press **Ctrl+C** and start again later.
 
 ---
 
@@ -635,9 +646,9 @@ window shows requests with their tokens, and the phone's WireGuard configuration
     the requests within 5 seconds of the line, and *Show only this tag*.
 - **Setup.** A wizard in five steps, each of which you can open from the list on the left:
   *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`),
-  *Connect tunnel* (the QR code and steps in WireGuard mode; the address `<Mac IP>:<port>` and
+  *Connect to this Mac* (the QR code and steps in WireGuard mode; the address `<Mac IP>:<port>` and
   the Wi-Fi proxy steps in proxy mode; the command to restart in proxy mode where you need it),
-  *Install certificate*, *Verify traffic* and *Device logs*. See Part 2. The WireGuard
+  *Trust Wiretrace*, *Check the app* and *Device logs*. See Part 2. The WireGuard
   configuration holds the phone's private key; do not share it.
 - **Rules.** A list of rules on the left and the selected rule on the right. A rule matches a
   method (or *ANY*), one of the preset's API hosts (or any of them), a path where `*` stands
