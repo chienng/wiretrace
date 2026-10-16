@@ -14,6 +14,9 @@ as Ctrl+C. The launcher stops that child on every exit path.
 
 States (docs/specs/002-start-launcher-presets-sessions.md, 004-log-collectors-and-app-log-receiver.md):
 PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> ABORTED.
+With `--ui wiretrace`, a session whose mitmdump exited on its own after the window wrote
+`.switch.json` goes back to PREPARE with that preset (docs/specs/013-switch-preset.md).
+A stop signal never does.
 """
 
 from __future__ import annotations
@@ -28,6 +31,7 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
@@ -43,6 +47,8 @@ STILL_STOPPING_S = 15
 COLLECTOR_STOP_S = 3
 MENU_STOP_S = 2
 POLL_S = 0.1
+SWITCH_RETRY_S = 1.0
+MAX_SWITCH_BYTES = 4096
 MENU_CLOSED = "Menu bar: closed; capture continues (Ctrl+C here to stop)"
 WIRETRACE_DIR = Path(__file__).resolve().parent.parent
 # Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
@@ -312,11 +318,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         return 1
 
     kind = ui_kind(ui)
-    busy = busy_ports(needed_ports(mode, kind, proxy_port, ui_port))
-    if busy:
-        for result in busy:
-            say(f"{result.name}: {result.detail}", err=True)
-        say("Not started.", err=True)
+    if ports_busy(mode, kind, proxy_port, ui_port):
         return 1
 
     removed = session.remove_old(sessions_dir, datetime.now())
@@ -324,8 +326,95 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         say(f"Deleted {removed} old session(s) (older than {session.KEEP_DAYS} days).")
 
     bin_dir = bin_dir or Path(sys.prefix) / "bin"
-    rules = redact.rules_for(preset)
-    meta = {
+
+    # Installed before the folder exists, so no stop signal can leave a folder without a child.
+    stops: list[int] = []
+    # Every stop signal of this run. `stops` is emptied as signals are handled; this count never is.
+    signals = [0]
+
+    def on_stop(signum: int, _frame: object) -> None:
+        stops.append(signum)
+        signals[0] += 1
+
+    previous = {s: signal.signal(s, on_stop) for s in STOP_SIGNALS}
+    try:
+        switched = False
+        seen = signals[0]
+        code = 0
+        while True:
+            rules = redact.rules_for(preset)
+            folder = create_folder(preset, target, session_meta(preset, target, mode, kind, rules),
+                                   sessions_dir, retry=switched)
+            if folder is None:
+                return 1
+            flows = folder / session.FLOWS
+            mock_count = count_mocks(wiretrace_dir / preset.mocks_dir)
+            collector_cmd, problem = collector_for(preset, target, bin_dir, folder / session.DEVICE_LOG)
+            source = DEVICE_LOGS.get(target) if collector_cmd else None
+            if source:
+                session.update_meta(folder, device_logs=source)
+                device_logs = f"{DEVICE_LOG_NAMES[source]}, {preset.app[APP_KEYS[source]]} → {session.DEVICE_LOG}"
+            else:
+                session.update_meta(folder, device_logs_off=problem)
+                device_logs = f"off ({problem})"
+            token = make_token() if kind == WIRETRACE else None
+            menu_problem = None
+            menu_cmd = None
+            if kind == WIRETRACE and not no_menu_bar:
+                menu_problem = (menu_available or _menu_problem)()
+                if menu_problem is None and token:
+                    menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS)
+            # Invariant 1: a stop signal since the switch was decided means no next child.
+            if switched and signals[0] != seen:
+                session.remove(folder)
+                return code
+            say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
+                       menu_bar_text(kind, no_menu_bar, menu_problem)))
+            seen = signals[0]
+            outcome = Outcome()
+            code = supervise(
+                build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients),
+                har_command(bin_dir, flows, folder / session.HAR_TMP),
+                folder,
+                stops,
+                collector_cmd,
+                rules,
+                menu_cmd=menu_cmd,
+                menu_token=token,
+                child_env=mitm_env(token),
+                switch=kind == WIRETRACE,
+                outcome=outcome,
+            )
+            # Invariant 9: only the Wiretrace window loops.
+            if kind != WIRETRACE or outcome.state != RUNNING or outcome.switch_to is None or signals[0] != seen:
+                return code
+            # Invariant 3: the preset is loaded again here, before anything is spawned for it.
+            try:
+                preset = load_preset(outcome.switch_to, presets_dir)
+            except PresetError as e:
+                say(str(e), err=True)
+                return 1
+            # Invariant 8.
+            if ports_busy(mode, kind, proxy_port, ui_port):
+                return 1
+            switched = True
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def ports_busy(mode: str, kind: str, proxy_port: int, ui_port: int) -> bool:
+    """Say which ports are in use, and whether any is."""
+    busy = busy_ports(needed_ports(mode, kind, proxy_port, ui_port))
+    for result in busy:
+        say(f"{result.name}: {result.detail}", err=True)
+    if busy:
+        say("Not started.", err=True)
+    return bool(busy)
+
+
+def session_meta(preset: Preset, target: str, mode: str, kind: str, rules: redact.Rules) -> dict:
+    return {
         "wiretrace_version": __version__,
         "mitmproxy_version": _mitmproxy_version(),
         "preset": preset.name,
@@ -339,48 +428,51 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         "redact": {"headers": list(rules.headers), "json_fields": list(rules.fields)},
     }
 
-    # Installed before the folder exists, so no stop signal can leave a folder without a child.
-    stops: list[int] = []
-    previous = {s: signal.signal(s, lambda signum, _frame: stops.append(signum)) for s in STOP_SIGNALS}
-    try:
+
+def create_folder(preset: Preset, target: str, meta: dict, sessions_dir: Path, *, retry: bool) -> Path | None:
+    """The new session folder, or None after saying why. `retry`: wait once when the name is taken."""
+    for attempt in range(2 if retry else 1):
+        if attempt:
+            time.sleep(SWITCH_RETRY_S)
         try:
-            folder = session.create(preset.name, target, meta, sessions_dir)
+            return session.create(preset.name, target, meta, sessions_dir)
         except FileExistsError:
-            say("A session folder with this name already exists; start again in a second.", err=True)
-            return 1
-        flows = folder / session.FLOWS
-        mock_count = count_mocks(wiretrace_dir / preset.mocks_dir)
-        collector_cmd, problem = collector_for(preset, target, bin_dir, folder / session.DEVICE_LOG)
-        source = DEVICE_LOGS.get(target) if collector_cmd else None
-        if source:
-            session.update_meta(folder, device_logs=source)
-            device_logs = f"{DEVICE_LOG_NAMES[source]}, {preset.app[APP_KEYS[source]]} → {session.DEVICE_LOG}"
-        else:
-            session.update_meta(folder, device_logs_off=problem)
-            device_logs = f"off ({problem})"
-        token = make_token() if kind == WIRETRACE else None
-        menu_problem = None
-        menu_cmd = None
-        if kind == WIRETRACE and not no_menu_bar:
-            menu_problem = (menu_available or _menu_problem)()
-            if menu_problem is None and token:
-                menu_cmd = menu_command(os.getpid(), ui_port, folder / session.STATUS)
-        say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
-                   menu_bar_text(kind, no_menu_bar, menu_problem)))
-        return supervise(
-            build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients),
-            har_command(bin_dir, flows, folder / session.HAR_TMP),
-            folder,
-            stops,
-            collector_cmd,
-            rules,
-            menu_cmd=menu_cmd,
-            menu_token=token,
-            child_env=mitm_env(token),
-        )
+            pass
+    say("A session folder with this name already exists; start again in a second.", err=True)
+    return None
+
+
+@dataclass
+class Outcome:
+    """What `supervise` saw, for the loop in `run`. Left as it is, it means "no switch"."""
+
+    state: str | None = None
+    switch_to: str | None = None
+
+
+def take_switch(folder: Path) -> str | None:
+    """The preset name in `.switch.json`, or None. The file is deleted whatever it holds (invariant 6)."""
+    path = folder / session.SWITCH
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as f:
+            raw = f.read(MAX_SWITCH_BYTES + 1)
+    except OSError:
+        return None
     finally:
-        for sig, handler in previous.items():
-            signal.signal(sig, handler)
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
+    if len(raw) > MAX_SWITCH_BYTES:
+        return None
+    try:
+        data = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(data, dict) or set(data) != {"name"} or not isinstance(data["name"], str):
+        return None
+    return data["name"]
 
 
 # RUNNING, STOPPING, KILLED
@@ -536,8 +628,13 @@ class _MenuBar:
 def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: list[int],
               collector_cmd: list[str] | None = None, rules: redact.Rules | None = None, *,
               menu_cmd: list[str] | None = None, menu_token: str | None = None,
-              child_env: dict[str, str] | None = None) -> int:
-    """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`."""
+              child_env: dict[str, str] | None = None, switch: bool = False,
+              outcome: Outcome | None = None) -> int:
+    """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`.
+
+    `switch`: read and delete `.switch.json` once the child has exited. `outcome` gets the state
+    the child exited in and the preset that file named.
+    """
     tool = Path(child_cmd[0]).name
     try:
         child = subprocess.Popen(child_cmd, env=child_env)
@@ -558,12 +655,21 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
             menu = _MenuBar.start(menu_cmd, menu_token)
         state = _wait(child, stops, collector, menu)
         ended_at = session.timestamp()
-        if state == RUNNING:
+        # Invariant 6: read before `_finalize` may remove an empty folder.
+        switch_to = take_switch(folder) if switch else None
+        if outcome is not None:
+            outcome.state, outcome.switch_to = state, switch_to
+        switching = state == RUNNING and switch_to is not None
+        if switching:
+            say("Switching presets: saving this session first.")
+        elif state == RUNNING:
             say(f"{tool} exited on its own (exit code {child.returncode}).", err=True)
         if collector:
             collector.stop(stops, state == KILLED)
+        # The window asked for this exit, so it is saved as a stop.
+        status = STATUS[STOPPING] if switching else STATUS[state]
         # The menu stays up through the HAR write, then the finally block stops it.
-        return _finalize(folder, har_cmd, STATUS[state], ended_at, stops, rules or redact.rules_for(None))
+        return _finalize(folder, har_cmd, status, ended_at, stops, rules or redact.rules_for(None))
     finally:
         # Invariant 1: no exit path leaves the child, the collector's group, or the menu running.
         if child.poll() is None:

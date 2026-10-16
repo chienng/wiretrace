@@ -619,12 +619,24 @@ press Ctrl+C. If the menu cannot start (PyObjC is missing, or there is no logged
 such as an SSH session), the banner says `Menu bar: off (<reason>)` and capture runs as usual.
 `./wiretrace doctor` prints `Menu bar: available` or tells you to run `scripts/setup-mac.sh`.
 
+**Switching the preset.** Click *Preset: …* in the title bar to see every file in `presets/`;
+the one in use is marked. Choose another and Wiretrace asks first: the dialog lists the hosts
+that preset decrypts and says whether device logs will be on. Click *Save and switch*: this
+session is saved as if you had pressed Ctrl+C (`flows.har`, then the session folder), and a new
+session starts with the other preset, the same target and mode. The Terminal prints the new
+preset and its hosts, and a new browser tab opens; the old tab says it is switching. The phone
+stays connected: the WireGuard tunnel (or the Wi-Fi proxy) does not need to be set up again.
+Each session has one preset, so the new one gets its own session folder, rules
+(`rules/<preset>.json`) and mocks. The menu is off while a previous session is open. Ctrl+C,
+or *Stop session* in the menu bar, still ends Wiretrace and never starts the chosen preset.
+
 **What each area does.**
 
 - **Title bar.** *Traffic* and *Logs* switch between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is
-  still saved to the session folder. It also shows the preset, the target and mode, and the
+  still saved to the session folder. It also shows the preset (a menu, see *Switching the
+  preset* above), the target and mode, and the
   device pill: the phone's model, OS version and connection (for example *Pixel 8 · Android 15
   · USB*), green while its logs stream in, or *Device logs off* with the reason when you point
   at it. Then come the buttons *Rules* (with the number of rules that are on), *Setup* and

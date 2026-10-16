@@ -58,6 +58,8 @@ export interface Store {
   rulesStale: boolean;
   /** A previous session opened read-only; the live flows and logs above keep following the socket. */
   view: ViewedSession | null;
+  /** The preset the server is switching to: this session is being saved and this page is done. */
+  switching: string | null;
   ui: UiState;
 }
 
@@ -85,6 +87,7 @@ export type Action =
   | { type: 'openReport'; flowId?: string }
   | { type: 'viewOpened'; view: ViewedSession }
   | { type: 'viewClosed' }
+  | { type: 'switching'; preset: string }
   | { type: 'toast'; text: string };
 
 export const initialStore: Store = {
@@ -96,6 +99,7 @@ export const initialStore: Store = {
   rules: null,
   rulesStale: false,
   view: null,
+  switching: null,
   ui: {
     view: 'traffic',
     selectedFlowId: null,
@@ -159,6 +163,8 @@ export function reducer(store: Store, action: Action): Store {
       };
     case 'viewClosed':
       return store.view ? { ...store, view: null, ui: { ...store.ui, selectedFlowId: null, selectedLog: null, host: null } } : store;
+    case 'switching':
+      return { ...store, switching: action.preset, ui: { ...store.ui, dialog: null } };
     case 'ui':
       return { ...store, ui: { ...store.ui, ...action.patch } };
     case 'rules': {

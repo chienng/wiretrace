@@ -26,6 +26,8 @@ STATUS = ".status.json"
 META = "meta.json"
 # Screenshots taken from the bug report form (0700, files 0600). Not a report member.
 SCREENSHOTS = "screenshots"
+# The preset the window asked to switch to: {"name": ...} only, 0600. Not a report member.
+SWITCH = ".switch.json"
 # The unmasked HAR exists only under this name, and is removed on every exit path.
 HAR_TMP = ".flows.har.tmp"
 HAR_MASKED = ".flows.har.masked"

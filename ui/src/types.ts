@@ -33,6 +33,15 @@ export interface SessionInfo {
   live: boolean;
 }
 
+/** A `presets/*.yaml` file for the preset menu. No hosts: the file does not load. */
+export interface PresetInfo {
+  name: string;
+  api_hosts: string[];
+  /** This target collects device logs and the preset names its app. */
+  device_logs: boolean;
+  app: string | null;
+}
+
 export interface ViewResult {
   viewing: string | null;
   cut_off?: boolean;
