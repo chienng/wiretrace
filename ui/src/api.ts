@@ -4,10 +4,15 @@ import type {
   FlowSummary,
   LogLine,
   LogSource,
+  ReportBox,
+  ReportDraft,
+  ReportFileKind,
+  ReportFormat,
   ReportResult,
   Rule,
   RulesPayload,
   RuleTestResult,
+  Screenshot,
   SessionInfo,
   ViewResult,
 } from './types';
@@ -37,7 +42,7 @@ export function setForbiddenListener(fn: (() => void) | null): void {
 }
 
 async function request<T>(path: string, init: RequestInit = {}, signal?: AbortSignal): Promise<T> {
-  const mutating = init.method === 'PUT' || init.method === 'POST';
+  const mutating = init.method === 'PUT' || init.method === 'POST' || init.method === 'DELETE';
   const headers: Record<string, string> = {};
   if (mutating) {
     headers['X-Wiretrace'] = '1';
@@ -72,6 +77,28 @@ export function withSession(path: string, query: Record<string, string>, session
   return text ? `${path}?${text}` : path;
 }
 
+/** What the bug report form asks for: the request (null for the whole session) and the boxes ticked. */
+export interface ReportQuery {
+  flow: string | null;
+  session: string | null;
+  include: readonly ReportBox[];
+}
+
+function reportQuery(q: ReportQuery): Record<string, string> {
+  const query: Record<string, string> = { include: q.include.join(',') };
+  if (q.flow) query.flow = q.flow;
+  return query;
+}
+
+/** Downloads are plain links: the browser saves them with the name the server gives. */
+export function reportFileUrl(kind: ReportFileKind, q: ReportQuery): string {
+  return withSession(`/api/report/file/${kind}`, reportQuery(q), q.session);
+}
+
+export function screenshotUrl(name: string, session: string | null, download = false): string {
+  return withSession(`/api/report/screenshot/${encodeURIComponent(name)}`, download ? { download: '1' } : {}, session);
+}
+
 export const api = {
   state: () => request<AppState>('/api/state'),
   flows: async (session?: string | null) => (await request<{ flows: FlowSummary[] }>(withSession('/api/flows', {}, session))).flows,
@@ -97,6 +124,12 @@ export const api = {
   report: (session?: string | null) =>
     request<ReportResult>('/api/report', { method: 'POST', body: JSON.stringify(session ? { session } : {}) }),
   reveal: () => request<unknown>('/api/report/reveal', { method: 'POST', body: '{}' }),
+  reportDraft: (q: ReportQuery, format: ReportFormat, signal?: AbortSignal) =>
+    request<ReportDraft>(withSession('/api/report/draft', { ...reportQuery(q), format }, q.session), {}, signal),
+  takeScreenshot: () =>
+    request<{ name: string; screenshots: Screenshot[] }>('/api/report/screenshot', { method: 'POST', body: '{}' }),
+  removeScreenshot: (name: string) =>
+    request<{ screenshots: Screenshot[] }>(`/api/report/screenshot/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 };
 
 export function socketUrl(): string {

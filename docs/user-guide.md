@@ -309,7 +309,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - Every request and response is saved to `flows.mitm` in the session folder as it
   happens, so nothing is lost if you close the window. The session folder and `sessions/`
   are readable only by your macOS user (`drwx------`). `meta.json`, `flows.mitm`,
-  `flows.har`, the log files and a bug-report zip are `-rw-------`. Another account on
+  `flows.har`, the log files, a bug-report zip and the screenshots taken from *Report bug*
+  (in `screenshots/`) are `-rw-------`. Another account on
   this Mac cannot read them. A `sessions/` folder left by an older Wiretrace is tightened
   the next time you start.
 - `--target` is `android`, `ios`, `android-emu`, `ios-sim`, or `device` (the default). It
@@ -657,7 +658,8 @@ such as an SSH session), the banner says `Menu bar: off (<reason>)` and capture 
   payment). *Compare…* shows this request next to another one, by default the previous request
   with the same method and path: status and headers side by side, and the body as a list of
   changed JSON keys, or line by line when it is not JSON. *New rule* opens the Rules view with
-  a rule for this request's method, host and path. *Report* runs *Report bug*.
+  a rule for this request's method, host and path. *Report* opens *Report bug* for this
+  request.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter
   and auto-scroll. Lines that carry the selected request's ID are highlighted. The window keeps
@@ -695,10 +697,41 @@ such as an SSH session), the banner says `Menu bar: off (<reason>)` and capture 
   previous rules if something is not valid; if the file changed in the meantime, the window
   loads it again instead of overwriting it. A flow changed by a rule carries the comment
   `rule: <name>` and the *FAULT* or *MOCK* badge.
-- **Report bug.** Runs the same report as `./wiretrace report` for the session shown (the one
-  running now, using the requests saved so far, or the earlier session you opened). The window
-  shows the zip's name, the counts and the note to check the log lines before you share, and
-  *Show in Finder* opens the folder with the zip selected.
+- **Report bug.** A form shaped like a YouTrack or Jira issue, for the request selected in
+  Traffic, or the most recent failed request when none is selected, or the whole session when
+  nothing failed. It works on the session shown: the one running now (the requests saved so
+  far) or the earlier session you opened. Nothing is sent anywhere: you copy and download, then
+  add everything to your issue yourself.
+  - *Title*: for example `POST /api/v1/orders returns 500`, with the path masked and without
+    the query. Edit it if you like (1 to 200 characters); the copy icon copies it and shows
+    *Copied*.
+  - *Description*: *Steps to reproduce*, *Expected* and *Actual* for you to fill in, then the
+    environment, the failed request, its masked response body (the first 4 KB) and up to 20
+    log lines that carry its request ID. The copy icon copies the text as it is now, your edits
+    included. Changing the format or a box under *Logs* writes the text again; if you edited
+    it, Wiretrace asks *Replace your edits with a new description?* first.
+  - *Format*: *Markdown (YouTrack, Jira Cloud)* or *Jira wiki (Jira Data Center)*. In
+    YouTrack or Jira Cloud, paste into the issue's description and check the preview before you
+    save. In Jira Data Center, switch the description editor to
+    *Text* mode before you paste the Jira wiki text, or the markup shows as plain characters.
+    The window remembers the format per preset, in your browser.
+  - *Logs*: *Other requests ±30 s*, *Device logs (same window)* and *App logs (same window)*,
+    each with its count, decide what goes into the files: the masked HAR
+    (`<session>-requests.har`), the device and app logs as text (`<session>-device-log.txt`,
+    `<session>-app-log.txt`), and *Download all*, a zip with those plus `summary.md`
+    (`<session>-report.zip`). With all boxes on and no request, the zip is the same as
+    `./wiretrace report`'s. *Masked before export* lists the header and field names that are
+    hidden. Log lines are masked by pattern only: check them before you share.
+  - *Screenshots*: *Take screenshot* saves the phone's screen now, up to 5, through `adb` for
+    `--target android` and `android-emu` or from the booted Simulator for `ios-sim`; connect
+    exactly one device. Each thumbnail can be downloaded or removed. They are kept in the
+    session folder under `screenshots/` and listed again when you reopen the form. On a real
+    iPhone (`--target ios`), take the screenshot on the phone (side button and volume up) and
+    add it in the tracker yourself. For `--target device` and for an earlier session, the
+    button is off and says why.
+  - Downloads go to your browser's Downloads folder, which other programs and accounts may be
+    able to read, unlike the protected session folder. Attach them to the issue, then delete
+    them.
 
 **Earlier sessions.** Click *Previous sessions* in the sidebar to list the session folders,
 newest first, with their start time, preset, target and counts. Click one to open it: the
@@ -880,7 +913,9 @@ Rules for the app:
 | The browser did not open the Wiretrace window | Copy the `Wiretrace UI:` link from the Terminal and open it by hand. |
 | `Wiretrace UI: cannot listen on 127.0.0.1:…`, and Wiretrace stops | Another program took the port in the moment between the check and the start. Quit it and start again. |
 | The Traffic list is empty but the phone works | The window lists only requests to the preset's `api_hosts`, and *Clear* or the search box may be hiding them. Check the search box, the quick filter and *Pause*. |
-| *Report bug* says "Nothing to report" | The session has no saved request and no log line yet. Make a request, then try again. |
+| *Report bug* offers no file to download | The session has no saved request and no log line yet, or the boxes under *Logs* leave nothing in. Make a request or tick a box, then try again. |
+| *Report bug* says `That request is not in flows.mitm yet` | The request is still waiting for its answer. Wait until it finishes (or fails), then open *Report bug* again. |
+| *Take screenshot* is off | The reason is next to the button: no device or more than one connected (`adb devices` lists them), no Simulator booted, `--target device`, or an earlier session open. A real iPhone's screenshot is taken on the phone. |
 | Endpoint security quarantines mitmproxy | Ask IT to allowlist Wiretrace ([`install-without-admin.md`](install-without-admin.md#company-managed-macs-what-to-ask-it-for)). |
 
 ---

@@ -127,7 +127,7 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
-| 5. Send a bug report to YouTrack or Jira | Not built yet. Today: `./wiretrace report` writes a zip. |
+| 5. Send a bug report to YouTrack or Jira | Built: form to copy into YouTrack or Jira (screen 5a): title and description in Markdown or Jira wiki, masked HAR and log downloads, Android and Simulator screenshots. Not built: sending directly, signing in to the tracker, iPhone screenshots. |
 | 6. Menu-bar app | Built: status item while `./wiretrace start --ui wiretrace` runs (`--no-menu-bar` turns it off). Differences: no *Pause recording* (the window's Pause only freezes its list); *Show last error* instead of *Report last error*; the device line is target, mode and model. |
 
 **1. Main window** (design mockup)
@@ -146,9 +146,13 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 ![Design mockup: mock and fault rules editor](mockups/screens/04-mock-fault-rules.png)
 
-**5. Bug report to YouTrack or Jira** (design mockup, not built yet)
+**5. Bug report to YouTrack or Jira** (design mockup; sending directly is not built yet)
 
 ![Design mockup: bug report to YouTrack or Jira](mockups/screens/05-bug-report.png)
+
+**5a. Bug report form, copy and download** (design mockup)
+
+![Design mockup: bug report form to copy into YouTrack or Jira](mockups/screens/05a-bug-report-form.png)
 
 **6. Menu-bar app** (design mockup)
 
@@ -183,6 +187,10 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   and cookies replaced by `***`.
 - **Bug report zip.** `./wiretrace report` packs a session into one zip: a summary with the
   failed requests, the masked HAR, and the masked logs.
+- **Bug report form.** In the Wiretrace window, *Report bug* fills in a title and a
+  description (Markdown for YouTrack and Jira Cloud, or Jira wiki for Jira Data Center) for the
+  failed request, offers the masked HAR and logs around it as downloads, and takes Android or
+  Simulator screenshots. You copy and download; nothing is sent anywhere.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
   and logs on one screen, a log timeline with the device's status, earlier sessions, search in
   headers and bodies, replay and compare, the setup wizard and the Rules view. It is only

@@ -245,7 +245,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           >
             New rule
           </button>
-          <button type="button" className="btn small primary" onClick={() => dispatch({ type: 'ui', patch: { dialog: 'report' } })}>
+          <button type="button" className="btn small primary" onClick={() => dispatch({ type: 'openReport', flowId: flow.id })}>
             Report
           </button>
         </div>

@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import http.client
 import http.server
+import io
 import json
 import logging
 import os
@@ -12,8 +13,10 @@ import subprocess
 import sys
 import threading
 import time
+import zipfile
 import zlib
 from pathlib import Path
+from typing import Any
 from unittest import mock
 from urllib.parse import quote
 
@@ -26,7 +29,7 @@ from mitmproxy import ctx
 from mitmproxy.test import taddons, tflow
 
 from addons import wiretrace_ui, qa_tools
-from cli import report, session, start
+from cli import report, screenshot, session, start
 from cli.preset import Preset
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -173,9 +176,11 @@ def test_the_browser_opens_the_link_only_when_asked(monkeypatch, capsys):
 
 PAGES = ["/", "/index.html", f"/assets/{ASSET.name}", "/api/state", "/api/flows", "/api/flows/x",
          "/api/filter?expr=~u%20x", "/api/logs?source=app", "/api/mocks", "/api/nothing", "/api/sessions",
-         "/api/search?q=orders"]
+         "/api/search?q=orders", "/api/report/draft", "/api/report/file/har",
+         "/api/report/screenshot/20261014-090000.png"]
 MUTATIONS = [("/api/rules/test", "POST"), ("/api/rules/abcdef/rearm", "POST"), ("/api/report", "POST"),
-             ("/api/report/reveal", "POST"), ("/api/view", "POST"), ("/api/flows/x/replay", "POST")]
+             ("/api/report/reveal", "POST"), ("/api/view", "POST"), ("/api/flows/x/replay", "POST"),
+             ("/api/report/screenshot", "POST"), ("/api/report/screenshot/20261014-090000.png", "DELETE")]
 
 
 @pytest.mark.parametrize("cookie", [False, "wrong", ""])
@@ -1985,3 +1990,247 @@ def test_a_flow_in_progress_is_not_an_error_and_a_400_is():
     assert not wiretrace_ui.is_error_flow(make_flow(status=200))
     assert not wiretrace_ui.is_error_flow(make_flow(status=399))
     assert not wiretrace_ui.is_error_flow(tflow.tflow(resp=False))
+
+
+# The bug report form (spec 012)
+
+FORM_SECRETS = ("fake-auth-value", "fake-query-token", "fake-body-token", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.c2ln")
+PNG_BYTES = screenshot.PNG + b"fake image"
+
+
+def form_session(folder: Path, **meta) -> tuple[Path, Any]:
+    """A session folder with a failed request carrying secrets, another request, and a device log line."""
+    write_session(folder, preset="example", **meta)
+    chosen = make_flow("/api/v1/orders?token=fake-query-token", method="POST", status=500,
+                       body=b'{"error": "ORDER_FAILED", "token": "fake-body-token"}')
+    chosen.request.headers["Authorization"] = "Bearer fake-auth-value"
+    other = make_flow("/api/v1/profile")
+    for f, offset in ((chosen, 0), (other, 2)):
+        f.request.timestamp_start = 1_791_900_000.0 + offset
+        f.response.timestamp_end = f.request.timestamp_start + 0.5
+    write_flows(folder / session.FLOWS, [chosen, other])
+    (folder / session.DEVICE_LOG).write_bytes(line(ts=1_791_900_001.0, level="E", tag="Net",
+                                                   message=f"auth {FORM_SECRETS[3]}.sig"))
+    return folder, chosen
+
+
+def no_device_commands(monkeypatch) -> list:
+    """Screenshot availability and capture never run a real tool in these tests."""
+    calls = []
+    monkeypatch.setattr(screenshot, "availability", lambda target, previous=False: (
+        calls.append(("availability", target, previous)) or (("off", screenshot.PREVIOUS) if previous else ("available", None))))
+    return calls
+
+
+def fake_capture(calls: list, name: str = "20261014-090000.png"):
+    def capture(target, folder, now=None):
+        calls.append((target, threading.current_thread() is threading.main_thread()))
+        shots = folder / session.SCREENSHOTS
+        shots.mkdir(mode=0o700, exist_ok=True)
+        (shots / name).write_bytes(PNG_BYTES)
+        return name
+    return capture
+
+
+def test_the_draft_of_a_live_request_is_masked_and_says_whether_screenshots_can_be_taken(tmp_path, monkeypatch):
+    folder, chosen = form_session(tmp_path / LIVE)
+    calls = no_device_commands(monkeypatch)
+
+    async def body(ui, client, tctx):
+        draft = await client.json(f"/api/report/draft?flow={chosen.id}&format=markdown&include=others,device,app")
+        assert draft["title"] == "POST /api/v1/orders returns 500"
+        assert draft["lead"]["request"] == "POST /api/v1/orders → 500" and draft["lead"]["session"] == LIVE
+        assert draft["counts"] == {"others": 1, "device": 1, "app": 0}
+        assert [f["kind"] for f in draft["files"]] == ["har", "device-log", "zip"]
+        assert draft["screenshots"] == {"state": "available", "reason": None, "items": []}
+        assert "Authorization" in draft["masked"]["headers"]
+        jira = await client.json(f"/api/report/draft?flow={chosen.id}&format=jira")
+        for text in (json.dumps(draft), json.dumps(jira)):
+            assert not any(secret in text for secret in FORM_SECRETS)
+        assert "h2. Failed request" in jira["description"]
+        whole = await client.json("/api/report/draft")
+        assert whole["lead"]["request"] is None and "1 failed request in session" in whole["title"]
+
+    scenario(body, folder=folder)
+    assert calls[0] == ("availability", "android", False)
+
+
+@pytest.mark.parametrize("query, status", [
+    ("flow=bad%20id", 400), ("format=html", 400), ("include=others,x", 400),
+    ("flow=00000000-0000-0000-0000-000000000000", 404), ("session=not-a-name", 400), (f"session={UNLISTED}", 404)])
+def test_a_draft_request_that_is_wrong_says_why(tmp_path, monkeypatch, query, status):
+    folder, _ = form_session(tmp_path / LIVE)
+    no_device_commands(monkeypatch)
+
+    async def body(ui, client, tctx):
+        response = await client.fetch(f"/api/report/draft?{query}")
+        assert response.code == status and json.loads(response.body)["error"]
+
+    scenario(body, folder=folder)
+
+
+def test_without_a_session_folder_the_form_has_nothing_to_read():
+    async def body(ui, client, tctx):
+        assert (await client.fetch("/api/report/draft")).code == 409
+        assert (await client.fetch("/api/report/file/har")).code == 409
+        assert (await client.fetch("/api/report/screenshot", "POST")).code == 409
+
+    scenario(body)
+
+
+def test_downloads_are_attachments_built_in_memory_with_the_draft_sizes(tmp_path, monkeypatch):
+    folder, chosen = form_session(tmp_path / LIVE)
+    (folder / session.STATUS).write_text('{"v": 1}\n')
+    no_device_commands(monkeypatch)
+    before = tree(folder)
+
+    async def body(ui, client, tctx):
+        query = f"flow={chosen.id}&include=others,device,app"
+        draft = await client.json(f"/api/report/draft?{query}")
+        for item in draft["files"]:
+            response = await client.fetch(f"/api/report/file/{item['kind']}?{query}")
+            assert response.code == 200 and len(response.body) == item["size"]
+            assert response.headers["Content-Disposition"] == f'attachment; filename="{item["name"]}"'
+            assert response.headers["Cache-Control"] == "no-store"
+            assert not any(secret.encode() in response.body for secret in FORM_SECRETS[:3])
+            if item["kind"] == "zip":
+                with zipfile.ZipFile(io.BytesIO(response.body)) as archive:
+                    names = archive.namelist()
+                assert not any(n.endswith((session.FLOWS, session.STATUS)) for n in names)
+        assert (await client.fetch(f"/api/report/file/app-log?{query}")).code == 404
+        for kind in ("flows.mitm", "meta", "..%2Fmeta.json"):
+            assert (await client.fetch(f"/api/report/file/{kind}?{query}")).code == 404
+
+    scenario(body, folder=folder)
+    # The window removes its own status file when it stops; the form wrote nothing.
+    before.pop(session.STATUS)
+    assert tree(folder) == before
+
+
+def test_a_previous_session_is_reported_read_only_without_screenshots(sessions, monkeypatch):
+    live, old, old_flows = sessions
+    calls = no_device_commands(monkeypatch)
+    captures = []
+    monkeypatch.setattr(screenshot, "capture", fake_capture(captures))
+    before = tree(old)
+
+    async def body(ui, client, tctx):
+        draft = await client.json(f"/api/report/draft?session={OLD}&flow={old_flows[1].id}")
+        assert draft["title"] == "GET /api/v1/old-b returns 500" and draft["lead"]["session"] == OLD
+        assert draft["screenshots"]["state"] == "off" and draft["screenshots"]["reason"] == screenshot.PREVIOUS
+        assert (await client.fetch(f"/api/report/file/har?session={OLD}")).code == 200
+        assert (await client.fetch("/api/report/screenshot", "POST", body={"session": OLD})).code == 409
+        response = await client.fetch(f"/api/report/screenshot/20261014-090000.png?session={OLD}", "DELETE", mutate=True)
+        assert response.code == 409
+
+    scenario(body, folder=live)
+    assert calls == [("availability", "", True)] and captures == []
+    assert tree(old) == before
+
+
+def test_a_screenshot_is_taken_in_a_worker_thread_shown_downloaded_and_removed(tmp_path, monkeypatch):
+    folder, _ = form_session(tmp_path / LIVE)
+    calls = []
+    monkeypatch.setattr(screenshot, "capture", fake_capture(calls))
+
+    async def body(ui, client, tctx):
+        taken = await client.json("/api/report/screenshot", method="POST")
+        assert taken["name"] == "20261014-090000.png"
+        assert taken["screenshots"] == [{"name": "20261014-090000.png", "size": len(PNG_BYTES), "time": "09:00:00"}]
+        shown = await client.fetch("/api/report/screenshot/20261014-090000.png")
+        assert shown.code == 200 and shown.body == PNG_BYTES and shown.headers["Content-Type"] == "image/png"
+        assert "Content-Disposition" not in shown.headers
+        saved = await client.fetch("/api/report/screenshot/20261014-090000.png?download=1")
+        assert saved.headers["Content-Disposition"] == f'attachment; filename="{LIVE}-screenshot-090000.png"'
+        removed = await client.fetch("/api/report/screenshot/20261014-090000.png", "DELETE", mutate=True)
+        assert removed.code == 200 and json.loads(removed.body) == {"screenshots": []}
+        again = await client.fetch("/api/report/screenshot/20261014-090000.png", "DELETE", mutate=True)
+        assert again.code == 404
+
+    scenario(body, folder=folder)
+    assert calls == [("android", False)]
+    assert not ui_state_running(folder)
+
+
+def ui_state_running(folder: Path) -> bool:
+    return (folder / session.SCREENSHOTS / screenshot.TMP).exists()
+
+
+@pytest.mark.parametrize("name", ["..%2Fmeta.json", "%2e%2e%2fmeta.json", "x.png", "20261014-000000.png",
+                                  "20261014-090000.png%2F..%2F..%2Fmeta.json"])
+def test_a_screenshot_name_that_is_not_listed_is_404(tmp_path, monkeypatch, name):
+    folder, _ = form_session(tmp_path / LIVE)
+    monkeypatch.setattr(screenshot, "capture", fake_capture([]))
+
+    async def body(ui, client, tctx):
+        await client.json("/api/report/screenshot", method="POST")
+        assert (await client.fetch(f"/api/report/screenshot/{name}")).code == 404
+        assert (await client.fetch(f"/api/report/screenshot/{name}", "DELETE", mutate=True)).code == 404
+        assert (folder / session.META).is_file()
+
+    scenario(body, folder=folder)
+
+
+def test_two_captures_at_once_give_one_409(tmp_path, monkeypatch):
+    folder, _ = form_session(tmp_path / LIVE)
+    release, started = threading.Event(), threading.Event()
+    inner = fake_capture([])
+
+    def capture(target, session_folder, now=None):
+        started.set()
+        assert release.wait(10)
+        return inner(target, session_folder, now)
+
+    monkeypatch.setattr(screenshot, "capture", capture)
+
+    async def body(ui, client, tctx):
+        first = asyncio.ensure_future(client.fetch("/api/report/screenshot", "POST"))
+        while not started.is_set():
+            await asyncio.sleep(0.01)
+        second = await client.fetch("/api/report/screenshot", "POST")
+        assert second.code == 409 and json.loads(second.body)["error"]
+        release.set()
+        assert (await first).code == 200 and not ui.screenshot_running
+
+    scenario(body, folder=folder)
+
+
+def test_a_failed_screenshot_says_why_and_the_form_keeps_working(tmp_path, monkeypatch):
+    folder, chosen = form_session(tmp_path / LIVE)
+    no_device_commands(monkeypatch)
+
+    def capture(target, session_folder, now=None):
+        raise screenshot.Unavailable("adb: device unauthorized")
+
+    monkeypatch.setattr(screenshot, "capture", capture)
+
+    async def body(ui, client, tctx):
+        failed = await client.fetch("/api/report/screenshot", "POST")
+        assert failed.code == 422 and json.loads(failed.body) == {"error": "adb: device unauthorized"}
+        assert not ui.screenshot_running
+        assert (await client.fetch(f"/api/report/draft?flow={chosen.id}")).code == 200
+
+    scenario(body, folder=folder)
+
+
+def test_nothing_captured_is_printed_or_logged(tmp_path, monkeypatch, caplog, capsys):
+    folder, chosen = form_session(tmp_path / LIVE)
+    no_device_commands(monkeypatch)
+    monkeypatch.setattr(screenshot, "capture", fake_capture([]))
+    caplog.set_level(logging.DEBUG)
+    shown = []
+
+    async def body(ui, client, tctx):
+        draft = await client.json(f"/api/report/draft?flow={chosen.id}")
+        shown.extend([draft["title"], draft["description"]])
+        for kind in ("har", "device-log", "zip"):
+            await client.fetch(f"/api/report/file/{kind}?flow={chosen.id}")
+        await client.json("/api/report/screenshot", method="POST")
+        await client.fetch("/api/report/screenshot/20261014-090000.png")
+
+    scenario(body, folder=folder)
+    printed = capsys.readouterr()
+    output = caplog.text + printed.out + printed.err
+    for text in ("ORDER_FAILED", "/api/v1/orders", "auth ***", "Steps to reproduce", *FORM_SECRETS):
+        assert text not in output
+    assert shown and "ORDER_FAILED" in shown[1]

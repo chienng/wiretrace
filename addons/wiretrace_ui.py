@@ -40,7 +40,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from cli import __version__, report, session  # noqa: E402
+from cli import __version__, report, report_text, screenshot, session  # noqa: E402
 from cli import bodies  # noqa: E402
 from cli.preset import PRESETS_DIR  # noqa: E402
 
@@ -85,6 +85,8 @@ STATUS_MIN_S = 1.0
 STATUS_HEARTBEAT_S = 2.0
 STATUS_KEYS = ("v", "updated_at", "started_at", "preset", "target", "mode", "device_state",
                "device_model", "requests", "errors", "rules_on", "last_error")
+FLOW_ID = re.compile(r"[A-Za-z0-9-]{1,64}")
+REPORT_BOXES = ("others", "device", "app")
 
 
 # Plain data
@@ -929,6 +931,123 @@ class Reveal(Guarded):
         self.write({"ok": True})
 
 
+class ReportForm(Guarded):
+    """The bug report form (spec 012): the session, the request and the boxes come from the query."""
+
+    async def session_folder(self, name: object) -> tuple[Path, bool] | None:
+        """The folder and whether it is a previous session; fails the request and returns None otherwise."""
+        status, message, folder, previous = await self.addon.report_folder(name)
+        if folder is None:
+            self.fail(status, message)
+            return None
+        return folder, previous
+
+    def include(self) -> report.Include | None:
+        flow = self.get_query_argument("flow", "")
+        if flow and not FLOW_ID.fullmatch(flow):
+            self.fail(400, "Not a request id")
+            return None
+        raw = self.get_query_argument("include", None)
+        boxes = set(REPORT_BOXES) if raw is None else {box for box in raw.split(",") if box}
+        if boxes - set(REPORT_BOXES):
+            self.fail(400, "include lists others, device and app")
+            return None
+        return report.Include(flow or None, "others" in boxes, "device" in boxes, "app" in boxes)
+
+
+class ReportDraft(ReportForm):
+    async def get(self) -> None:
+        include = self.include()
+        if include is None:
+            return
+        fmt = self.get_query_argument("format", "markdown")
+        if fmt not in report_text.FORMATS:
+            return self.fail(400, "format is markdown or jira")
+        found = await self.session_folder(self.get_query_argument("session", ""))
+        if found is None:
+            return
+        status, payload = await self.addon.report_draft(*found, include, fmt)
+        self.set_status(status)
+        self.finish(payload)
+
+
+class ReportFile(ReportForm):
+    async def get(self, kind: str) -> None:
+        if kind not in report.FILE_TYPES:
+            return self.fail(404, "Unknown file")
+        include = self.include()
+        if include is None:
+            return
+        found = await self.session_folder(self.get_query_argument("session", ""))
+        if found is None:
+            return
+        status, result = await self.addon.report_file(found[0], kind, include)
+        if isinstance(result, str):
+            return self.fail(status, result)
+        name, data = result
+        self.set_header("Content-Type", report.FILE_TYPES[kind])
+        self.set_header("Content-Disposition", f'attachment; filename="{name}"')
+        self.finish(data)
+
+
+class ReportScreenshots(ReportForm):
+    async def post(self) -> None:
+        body = self.small_json()
+        name = body.get("session") if isinstance(body, dict) else None
+        if body is NOT_JSON or (name is not None and not isinstance(name, str)):
+            return self.fail(400, "The body must be empty or {session}")
+        found = await self.session_folder(name or "")
+        if found is None:
+            return
+        folder, previous = found
+        if previous:
+            return self.fail(409, screenshot.PREVIOUS)
+        if self.addon.screenshot_running:
+            return self.fail(409, "A screenshot is already being taken")
+        status, payload = await self.addon.take_screenshot(folder)
+        self.set_status(status)
+        self.finish(payload)
+
+
+class ReportScreenshot(ReportForm):
+    """One screenshot, by a name that must be in the session's listing (invariant 5)."""
+
+    async def get(self, name: str) -> None:
+        found = await self.session_folder(self.get_query_argument("session", ""))
+        if found is None:
+            return
+        folder = found[0]
+        data = await asyncio.to_thread(read_screenshot, folder, name)
+        if data is None:
+            return self.fail(404, "Unknown screenshot")
+        self.set_header("Content-Type", "image/png")
+        if self.get_query_argument("download", "") == "1":
+            self.set_header("Content-Disposition",
+                            f'attachment; filename="{screenshot.download_name(folder.name, name)}"')
+        self.finish(data)
+
+    async def delete(self, name: str) -> None:
+        found = await self.session_folder(self.get_query_argument("session", ""))
+        if found is None:
+            return
+        folder, previous = found
+        if previous:
+            return self.fail(409, "A previous session is read-only")
+        status, payload = await self.addon.remove_screenshot(folder, name)
+        self.set_status(status)
+        self.finish(payload)
+
+
+def read_screenshot(folder: Path, name: str) -> bytes | None:
+    path = screenshot.find(folder, name)
+    f = open_regular(path) if path is not None else None
+    if f is None:
+        return None
+    with f:
+        data = f.read(screenshot.MAX_BYTES + 1)
+    return data if len(data) <= screenshot.MAX_BYTES else None
+
+
 class Updates(Guarded, tornado.websocket.WebSocketHandler):
     def prepare(self) -> None:
         Guarded.prepare(self)
@@ -965,6 +1084,7 @@ class WiretraceUI:
         self.origins: set[str] = set()
         self.security_headers: dict[str, str] = {}
         self.report_running = False
+        self.screenshot_running = False
         self.last_report: Path | None = None
         self.started_at = time.time()
         # Setup: when a device last connected, and failed TLS handshakes with API hosts. Nothing about the peer.
@@ -1070,6 +1190,10 @@ class WiretraceUI:
                 (r"/api/rules/([a-z0-9]{6,32})/rearm", RuleRearm, handler_args),
                 (r"/api/report", Report, handler_args),
                 (r"/api/report/reveal", Reveal, handler_args),
+                (r"/api/report/draft", ReportDraft, handler_args),
+                (r"/api/report/file/([^/]+)", ReportFile, handler_args),
+                (r"/api/report/screenshot", ReportScreenshots, handler_args),
+                (r"/api/report/screenshot/([^/]+)", ReportScreenshot, handler_args),
                 (r"/api/updates", Updates, handler_args),
                 (r"/api/.*", UnknownApi, handler_args),
                 (r"/(.*)", Assets, {**handler_args, "path": str(self.static_dir), "default_filename": "index.html"}),
@@ -1458,6 +1582,88 @@ class WiretraceUI:
             message += " flows.mitm ends early; the report uses the requests that could be read."
         return {"ok": True, "zip": created.zip.name, "requests": created.requests, "failed": created.failed,
                 "device_lines": created.device_lines, "app_lines": created.app_lines, "message": message}
+
+    # The bug report form (spec 012). Reads only, except screenshots in the live session's screenshots/.
+
+    async def report_folder(self, name: object) -> tuple[int, str, Path | None, bool]:
+        """(status, error, folder, previous): the live session, or a previous one found in the listing."""
+        live = ctx.options.qa_ui_session_dir
+        if not live:
+            return 409, "No session folder: start Wiretrace with ./wiretrace start", None, False
+        if not name or name == self.live_name():
+            return 200, "", Path(live).resolve(), False
+        if not isinstance(name, str) or not session.NAME.fullmatch(name):
+            return 400, "Not a session name", None, False
+        folder = await self.find_session(name)
+        if folder is None:
+            return 404, "Unknown session", None, False
+        return 200, "", folder.resolve(), True
+
+    async def report_draft(self, folder: Path, previous: bool, include: report.Include, fmt: str) -> tuple[int, dict]:
+        target = "" if previous else str(self.meta().get("target") or "")
+
+        def job() -> dict:
+            data = report.draft(folder, PRESETS_DIR, include, fmt)
+            state, reason = screenshot.availability(target, previous)
+            data["screenshots"] = {"state": state, "reason": reason, "items": screenshot.listing(folder)}
+            return data
+
+        try:
+            return 200, await asyncio.to_thread(job)
+        except report.UnknownRequest as e:
+            return 404, {"error": str(e)}
+        except report.Failure as e:
+            return 500, {"error": str(e)}
+        except Exception as e:
+            logger.error("Wiretrace UI: could not build the report draft (%s)", type(e).__name__)
+            return 500, {"error": f"Could not build the draft ({type(e).__name__})"}
+
+    async def report_file(self, folder: Path, kind: str, include: report.Include) -> tuple[int, tuple[str, bytes] | str]:
+        try:
+            found = await asyncio.to_thread(report.export, folder, PRESETS_DIR, kind, include)
+        except report.UnknownRequest as e:
+            return 404, str(e)
+        except report.Failure as e:
+            return 500, str(e)
+        except Exception as e:
+            logger.error("Wiretrace UI: could not build a report file (%s)", type(e).__name__)
+            return 500, f"Could not build the file ({type(e).__name__})"
+        if found is None:
+            return 404, "Nothing to download: that file has no content"
+        return 200, found
+
+    async def take_screenshot(self, folder: Path) -> tuple[int, dict]:
+        """Invariant 4: one capture at a time, live session only, with the target the session runs."""
+        self.screenshot_running = True
+        try:
+            target = str(self.meta().get("target") or "")
+            name = await asyncio.to_thread(screenshot.capture, target, folder)
+            items = await asyncio.to_thread(screenshot.listing, folder)
+        except screenshot.Unavailable as e:
+            return 422, {"error": str(e)}
+        except Exception as e:
+            logger.error("Wiretrace UI: screenshot failed (%s)", type(e).__name__)
+            return 500, {"error": f"The screenshot failed ({type(e).__name__})"}
+        finally:
+            self.screenshot_running = False
+        return 200, {"name": name, "screenshots": items}
+
+    async def remove_screenshot(self, folder: Path, name: str) -> tuple[int, dict]:
+        def job() -> list[dict] | None:
+            path = screenshot.find(folder, name)
+            if path is None:
+                return None
+            path.unlink()
+            return screenshot.listing(folder)
+
+        try:
+            items = await asyncio.to_thread(job)
+        except OSError as e:
+            logger.error("Wiretrace UI: could not remove a screenshot (%s)", type(e).__name__)
+            return 500, {"error": "Could not remove the screenshot"}
+        if items is None:
+            return 404, {"error": "Unknown screenshot"}
+        return 200, {"screenshots": items}
 
     async def reveal_report(self) -> str | None:
         """Open Finder on the zip the last report wrote, never on a path from the page. Return an error text."""

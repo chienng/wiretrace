@@ -122,7 +122,7 @@ export function App() {
         {ui.view === 'rules' && !view && <RulesView />}
       </main>
       {ui.dialog === 'setup' && !view && <SetupWizard />}
-      {ui.dialog === 'report' && <ReportDialog session={viewing} />}
+      {ui.dialog === 'report' && <ReportDialog key={ui.reportFlow ?? ''} session={viewing} flowId={ui.reportFlow} />}
       {ui.dialog === 'compare' && selected && <CompareDialog flow={selected} flows={flows} session={viewing} />}
       <Toast />
     </div>
