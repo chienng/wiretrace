@@ -33,19 +33,27 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 
 ## Quick start
 
-Run every command below in **Terminal**, one block at a time. The
-[user guide](docs/user-guide.md) explains each step in more detail.
+Steps 1 and 2 happen in Finder. Run the commands after that in **Terminal**, one block at a
+time. The [user guide](docs/user-guide.md) explains each step in more detail.
 
-**1. Download.** From the Releases page, download `wiretrace-0.9.1-macos.tar.gz` and
-`wiretrace-0.9.1-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
+**1. Download**
+[wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg)
+and double-click it in Downloads. The **Wiretrace 0.9.1** window opens.
 
-**2. Check and unpack** into your home folder. The first line must print `OK`:
+**2. Drag the `wiretrace` folder onto your home folder.** In Finder, choose **Go → Home**,
+drag the folder from the Wiretrace 0.9.1 window into it, then eject **Wiretrace 0.9.1**.
+Wiretrace cannot run from the disk image, which is read-only. You now have `~/wiretrace`.
+
+Optional, to check the download: also save
+[wiretrace-0.9.1-macos.dmg.sha256](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256)
+in Downloads and run this. It must print `OK`; if it prints `FAILED`, download again.
 
 ```bash
-cd ~/Downloads
-shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
-tar -xzf wiretrace-0.9.1-macos.tar.gz -C ~
+cd ~/Downloads && shasum -a 256 -c wiretrace-0.9.1-macos.dmg.sha256
 ```
+
+The same files come as a `.tar.gz` for unpacking in Terminal; see
+[the user guide](docs/user-guide.md#step-2--put-the-wiretrace-folder-in-your-home-folder).
 
 **3. Install** (a few minutes, no password needed, never use `sudo`):
 

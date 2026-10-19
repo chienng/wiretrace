@@ -34,9 +34,11 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  `wiretrace-0.9.1-macos.tar.gz` and `wiretrace-0.9.1-macos.tar.gz.sha256`, or
-  `wiretrace-0.9.1-macos.dmg` and `wiretrace-0.9.1-macos.dmg.sha256`. Both contain the same
-  files and work on Intel and Apple silicon Macs.
+  [wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256)
+  (the easier one: no Terminal until the setup), or `wiretrace-0.9.1-macos.tar.gz` and
+  `wiretrace-0.9.1-macos.tar.gz.sha256`. Both contain the same files and work on Intel and
+  Apple silicon Macs.
 
 ### Step 1 — Check the download
 
@@ -45,13 +47,17 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
 shasum -a 256 -c wiretrace-0.9.1-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
 
 ### Step 2 — Put the wiretrace folder in your home folder
+
+**From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
+Finder: **Go → Home**), then eject **Wiretrace 0.9.1**. Wiretrace cannot run from the disk
+image itself, because the image is read-only.
 
 **From the `.tar.gz`:**
 
@@ -61,10 +67,6 @@ tar -xzf wiretrace-0.9.1-macos.tar.gz -C ~
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
-
-**From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.9.1**. Wiretrace cannot run from the disk
-image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
 
