@@ -364,16 +364,17 @@ function ConnectStep({
 }
 
 function TrustStep({ state, kind, choice, copy }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice; copy: Copy }) {
-  const { flows } = useStore();
+  const { flows, rules } = useStore();
   const [since] = useState(() => Date.now());
   const now = useNow(1000);
   const wg = wireguardSteps(state.mode, choice, kind);
-  const hint = trustHint(kind, state, flows, since, now);
+  const apiHosts = rules?.api_hosts ?? [];
+  const hint = trustHint(kind, state, flows, apiHosts, since, now);
   return (
     <>
       <h4>Trust Wiretrace</h4>
       <p className="lead">{CERTIFICATE_WHY} Needed once per device.</p>
-      <Checklist items={trustChecklist(kind, flows)} />
+      <Checklist items={trustChecklist(kind, flows, apiHosts)} />
       {hint === 'not-trusted' && <NotTrusted failures={state.tls_failures} />}
       {hint === 'no-page' && (
         <div className="hintbox" role="status">
@@ -389,23 +390,11 @@ function TrustStep({ state, kind, choice, copy }: { state: AppState; kind: Devic
 
 function CheckAppStep({ state, kind, choice, onTrust }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice; onTrust: () => void }) {
   const { flows, rules } = useStore();
-  const dispatch = useDispatch();
   const [since] = useState(() => Date.now());
   const now = useNow(1000);
-  const missing = rules === null;
-  useEffect(() => {
-    if (!missing) return;
-    let cancelled = false;
-    api
-      .rules()
-      .then((r) => !cancelled && dispatch({ type: 'rules', rules: r }))
-      .catch(() => undefined);
-    return () => {
-      cancelled = true;
-    };
-  }, [missing, dispatch]);
-  const first = firstApiFlow(flows);
-  const hint = appHint(state, flows, since, now);
+  const apiHosts = rules?.api_hosts ?? [];
+  const first = firstApiFlow(flows, apiHosts);
+  const hint = appHint(state, flows, apiHosts, since, now);
   const android = kind === 'android' || kind === 'android-emu';
   return (
     <>
@@ -434,7 +423,7 @@ function CheckAppStep({ state, kind, choice, onTrust }: { state: AppState; kind:
             <div className="hintbox" role="status">
               <p>Nothing from the app yet. Check that:</p>
               <ul className="needs">
-                {appChecks(kind, wireguardSteps(state.mode, choice, kind), state.preset, rules?.api_hosts ?? []).map((c) => (
+                {appChecks(kind, wireguardSteps(state.mode, choice, kind), state.preset, apiHosts).map((c) => (
                   <li key={c}>{c}</li>
                 ))}
               </ul>
@@ -447,11 +436,11 @@ function CheckAppStep({ state, kind, choice, onTrust }: { state: AppState; kind:
 }
 
 function Summary({ state, kind, choice }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice }) {
-  const { flows } = useStore();
+  const { flows, rules } = useStore();
   return (
     <div className="summary">
       <h5>What is set up</h5>
-      <Checklist items={setupSummary(kind, state, flows, choice)} />
+      <Checklist items={setupSummary(kind, state, flows, rules?.api_hosts ?? [], choice)} />
       <p className="tip">{nextTime(kind, wireguardSteps(state.mode, choice, kind))}</p>
     </div>
   );
@@ -498,10 +487,22 @@ const STEP_KEYS: Record<StepId, StepKey> = { 1: 'device', 2: 'connect', 3: 'trus
 
 /** `startAtConnect`: the tab was opened by a switch started from this wizard. */
 export function SetupWizard({ startAtConnect = false }: { startAtConnect?: boolean }) {
-  const { appState, flows } = useStore();
+  const { appState, flows, rules } = useStore();
   const { viewing } = useData();
   const dispatch = useDispatch();
   const [step, setStep] = useState<StepId>(startAtConnect ? 2 : 1);
+  const missingRules = rules === null;
+  useEffect(() => {
+    if (!missingRules) return;
+    let cancelled = false;
+    api
+      .rules()
+      .then((r) => !cancelled && dispatch({ type: 'rules', rules: r }))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [missingRules, dispatch]);
   const [kind, setKind] = useState<DeviceKind>(() => deviceFromTarget(appState?.target ?? ''));
   const [alt, setAlt] = useState(false);
   const [choice, setChoice] = useState<ConnectionChoice>(() => loadChoice(storage()));
@@ -537,7 +538,7 @@ export function SetupWizard({ startAtConnect = false }: { startAtConnect?: boole
   };
   const done = (id: StepId) => {
     const key = STEP_KEYS[id];
-    return key === 'device' ? step > 1 : stepDone(key, appState, flows);
+    return key === 'device' ? step > 1 : stepDone(key, appState, flows, rules?.api_hosts ?? []);
   };
   const subs: Record<StepId, string> = {
     1: deviceChoice(kind).label,

@@ -48,6 +48,7 @@ const T0 = 1_700_000_000_000;
 const page = flow({ id: 'p', host: 'mitm.it', path: '/' });
 const cert = flow({ id: 'c', host: 'mitm.it', path: '/cert/pem' });
 const api = flow({ id: 'a', host: 'api.example.com' });
+const HOSTS = ['api.example.com'];
 
 const CONF = [
   '[Interface]',
@@ -123,9 +124,20 @@ describe('setup wizard', () => {
   });
 
   it('turns green only for a request to an API host, not the certificate page', () => {
-    expect(firstApiFlow([flow({ host: 'mitm.it' })])).toBeNull();
-    expect(firstApiFlow([flow({ id: 'a', host: 'mitm.it' }), flow({ id: 'b', host: 'api.example.com' })])?.id).toBe('b');
-    expect(firstApiFlow([])).toBeNull();
+    expect(firstApiFlow([flow({ host: 'mitm.it' })], HOSTS)).toBeNull();
+    expect(firstApiFlow([flow({ id: 'a', host: 'mitm.it' }), flow({ id: 'b', host: 'api.example.com' })], HOSTS)?.id).toBe('b');
+    expect(firstApiFlow([flow({ id: 's', host: 'eu.API.example.com.' })], HOSTS)?.id).toBe('s');
+    expect(firstApiFlow([], HOSTS)).toBeNull();
+  });
+
+  it('does not count plain HTTP to another host as trusted', () => {
+    // Regression: an iPhone's OCSP checks over plain HTTP were listed and ticked Trusted and
+    // Check the app, though no request had reached an API host.
+    const ocsp = flow({ id: 'o', scheme: 'http', host: 'ocsp.digicert.com', path: '/ME8wTTBLMEkw' });
+    expect(firstApiFlow([page, ocsp], HOSTS)).toBeNull();
+    expect(trustChecklist('iphone', [page, ocsp], HOSTS).map((i) => i.done)).toEqual([true, false, false]);
+    expect(stepDone('check', state(), [ocsp], HOSTS)).toBe(false);
+    expect(firstApiFlow([api], [])).toBeNull();
   });
 });
 
@@ -153,63 +165,63 @@ describe('setup wizard for first-time testers', () => {
   });
 
   it('ticks the page and the download from requests to mitm.it', () => {
-    expect(onboardingProgress([])).toEqual({ pageOpened: false, certDownloaded: false });
-    expect(onboardingProgress([page])).toEqual({ pageOpened: true, certDownloaded: false });
-    expect(onboardingProgress([page, cert])).toEqual({ pageOpened: true, certDownloaded: true });
-    expect(onboardingProgress([flow({ host: 'MITM.IT.', path: '/cert/cer' })])).toEqual({ pageOpened: true, certDownloaded: true });
-    expect(onboardingProgress([flow({ host: 'mitm.it', path: '/certificates' })]).certDownloaded).toBe(false);
+    expect(onboardingProgress([], HOSTS)).toEqual({ pageOpened: false, certDownloaded: false });
+    expect(onboardingProgress([page], HOSTS)).toEqual({ pageOpened: true, certDownloaded: false });
+    expect(onboardingProgress([page, cert], HOSTS)).toEqual({ pageOpened: true, certDownloaded: true });
+    expect(onboardingProgress([flow({ host: 'MITM.IT.', path: '/cert/cer' })], HOSTS)).toEqual({ pageOpened: true, certDownloaded: true });
+    expect(onboardingProgress([flow({ host: 'mitm.it', path: '/certificates' })], HOSTS).certDownloaded).toBe(false);
   });
 
   it('keeps the page and the download ticked by an API request when the cap dropped them', () => {
-    expect(onboardingProgress([api])).toEqual({ pageOpened: true, certDownloaded: true });
-    expect(trustChecklist('android', [api]).every((i) => i.done)).toBe(true);
+    expect(onboardingProgress([api], HOSTS)).toEqual({ pageOpened: true, certDownloaded: true });
+    expect(trustChecklist('android', [api], HOSTS).every((i) => i.done)).toBe(true);
   });
 
   it('lists the page and the download only for a device that opens mitm.it', () => {
-    expect(trustChecklist('iphone', [page]).map((i) => [i.label, i.done])).toEqual([
+    expect(trustChecklist('iphone', [page], HOSTS).map((i) => [i.label, i.done])).toEqual([
       ['Page opened on the phone', true],
       ['Certificate downloaded', false],
       ['Trusted: the first request to an API host arrived', false],
     ]);
-    expect(trustChecklist('ios-sim', []).map((i) => i.label)).toEqual(['Trusted: the first request to an API host arrived']);
-    expect(trustChecklist('android-emu', []).length).toBe(1);
+    expect(trustChecklist('ios-sim', [], HOSTS).map((i) => i.label)).toEqual(['Trusted: the first request to an API host arrived']);
+    expect(trustChecklist('android-emu', [], HOSTS).length).toBe(1);
   });
 
   it('marks each step done from its live check', () => {
-    expect(stepDone('connect', state(), [])).toBe(false);
-    expect(stepDone('connect', state({ device_seen_at: 1 }), [])).toBe(true);
-    expect(stepDone('trust', state(), [page, cert])).toBe(false);
-    expect(stepDone('trust', state(), [api])).toBe(true);
-    expect(stepDone('check', state(), [api])).toBe(true);
-    expect(stepDone('logs', state(), [])).toBe(false);
-    expect(stepDone('logs', state({ device_logs: 'Android' }), [])).toBe(true);
+    expect(stepDone('connect', state(), [], HOSTS)).toBe(false);
+    expect(stepDone('connect', state({ device_seen_at: 1 }), [], HOSTS)).toBe(true);
+    expect(stepDone('trust', state(), [page, cert], HOSTS)).toBe(false);
+    expect(stepDone('trust', state(), [api], HOSTS)).toBe(true);
+    expect(stepDone('check', state(), [api], HOSTS)).toBe(true);
+    expect(stepDone('logs', state(), [], HOSTS)).toBe(false);
+    expect(stepDone('logs', state({ device_logs: 'Android' }), [], HOSTS)).toBe(true);
     expect(nextLabel(true, 'trust')).toBe('Done — Next: Trust Wiretrace');
     expect(nextLabel(false, 'check')).toBe('Next: Check the app');
   });
 
   it('hints at the address only after 60 s on the Trust step, connected, without a request to mitm.it', () => {
     const on = state({ device_seen_at: 1 });
-    expect(trustHint('iphone', on, [], T0, T0 + 59_999)).toBeNull();
-    expect(trustHint('iphone', on, [], T0, T0 + 60_000)).toBe('no-page');
-    expect(trustHint('iphone', state(), [], T0, T0 + 120_000)).toBeNull();
-    expect(trustHint('iphone', on, [page], T0, T0 + 120_000)).toBeNull();
-    expect(trustHint('ios-sim', on, [], T0, T0 + 120_000)).toBeNull();
+    expect(trustHint('iphone', on, [], HOSTS, T0, T0 + 59_999)).toBeNull();
+    expect(trustHint('iphone', on, [], HOSTS, T0, T0 + 60_000)).toBe('no-page');
+    expect(trustHint('iphone', state(), [], HOSTS, T0, T0 + 120_000)).toBeNull();
+    expect(trustHint('iphone', on, [page], HOSTS, T0, T0 + 120_000)).toBeNull();
+    expect(trustHint('ios-sim', on, [], HOSTS, T0, T0 + 120_000)).toBeNull();
     expect(noPageHint('iphone', true)).toBe('Nothing from the page yet. On the phone, type http://mitm.it exactly (not https) in Safari, with the WireGuard tunnel on.');
     expect(noPageHint('android', false)).toContain('in Chrome, with the Wi-Fi proxy set');
   });
 
   it('shows the not-trusted message on the Trust step when TLS failures arrive', () => {
-    expect(trustHint('android', state({ device_seen_at: 1, tls_failures: 2 }), [page, cert], T0, T0)).toBe('not-trusted');
-    expect(trustHint('android', state({ device_seen_at: 1, tls_failures: 2 }), [api], T0, T0)).toBeNull();
+    expect(trustHint('android', state({ device_seen_at: 1, tls_failures: 2 }), [page, cert], HOSTS, T0, T0)).toBe('not-trusted');
+    expect(trustHint('android', state({ device_seen_at: 1, tls_failures: 2 }), [api], HOSTS, T0, T0)).toBeNull();
   });
 
   it('hints what to check only after 30 s on the Check step, connected, with nothing from the app', () => {
     const on = state({ device_seen_at: 1 });
-    expect(appHint(on, [page, cert], T0, T0 + 29_999)).toBeNull();
-    expect(appHint(on, [page, cert], T0, T0 + 30_000)).toBe('no-traffic');
-    expect(appHint(state(), [], T0, T0 + 60_000)).toBeNull();
-    expect(appHint(on, [api], T0, T0 + 60_000)).toBeNull();
-    expect(appHint(state({ device_seen_at: 1, tls_failures: 1 }), [], T0, T0)).toBe('not-trusted');
+    expect(appHint(on, [page, cert], HOSTS, T0, T0 + 29_999)).toBeNull();
+    expect(appHint(on, [page, cert], HOSTS, T0, T0 + 30_000)).toBe('no-traffic');
+    expect(appHint(state(), [], HOSTS, T0, T0 + 60_000)).toBeNull();
+    expect(appHint(on, [api], HOSTS, T0, T0 + 60_000)).toBeNull();
+    expect(appHint(state({ device_seen_at: 1, tls_failures: 1 }), [], HOSTS, T0, T0)).toBe('not-trusted');
   });
 
   it('lists the checks with the preset and its API hosts', () => {
@@ -228,7 +240,7 @@ describe('setup wizard for first-time testers', () => {
   });
 
   it('sums up what is set up and what to do next time', () => {
-    const items = setupSummary('iphone', state({ device_seen_at: 1 }), [api]);
+    const items = setupSummary('iphone', state({ device_seen_at: 1 }), [api], HOSTS);
     expect(items.map((i) => [i.label, i.done])).toEqual([
       ['iPhone connected to this Mac through WireGuard', true],
       ["Wiretrace trusted, and the app's requests arrive", true],
@@ -295,10 +307,10 @@ describe('setup wizard with the proxy and WireGuard together', () => {
 
   it('sums up the way the device connects in both mode', () => {
     const both = state({ mode: 'both', device_seen_at: 1 });
-    expect(setupSummary('iphone', both, [api], 'proxy')[0]?.label).toBe('iPhone connected to this Mac through the proxy');
-    expect(setupSummary('iphone', both, [api], 'wireguard')[0]?.label).toBe('iPhone connected to this Mac through WireGuard');
-    expect(setupSummary('ios-sim', both, [api], 'wireguard')[0]?.label).toBe('iOS Simulator connected to this Mac through the proxy');
-    expect(setupSummary('iphone', both, [api])[0]?.label).toContain('through the proxy');
+    expect(setupSummary('iphone', both, [api], HOSTS, 'proxy')[0]?.label).toBe('iPhone connected to this Mac through the proxy');
+    expect(setupSummary('iphone', both, [api], HOSTS, 'wireguard')[0]?.label).toBe('iPhone connected to this Mac through WireGuard');
+    expect(setupSummary('ios-sim', both, [api], HOSTS, 'wireguard')[0]?.label).toBe('iOS Simulator connected to this Mac through the proxy');
+    expect(setupSummary('iphone', both, [api], HOSTS)[0]?.label).toContain('through the proxy');
   });
 });
 
