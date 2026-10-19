@@ -30,7 +30,7 @@ TARGET_LABELS = {
     "ios-sim": "iOS Simulator",
     "device": "Device",
 }
-MODE_LABELS = {"wireguard": "WireGuard", "proxy": "Proxy"}
+MODE_LABELS = {"wireguard": "WireGuard", "proxy": "Proxy", "both": "Proxy + WireGuard"}
 
 
 @dataclass(frozen=True)

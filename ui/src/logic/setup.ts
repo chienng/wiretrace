@@ -68,6 +68,34 @@ export function needsProxy(kind: DeviceKind): boolean {
   return kind === 'ios-sim';
 }
 
+/** In `both` mode, which way of connecting the wizard shows. It only chooses the instructions. */
+export type ConnectionChoice = 'proxy' | 'wireguard';
+
+/** Whether the wizard shows the WireGuard steps: the mode decides, except in `both`, where the choice does. */
+export function wireguardSteps(mode: string, choice: ConnectionChoice, kind: DeviceKind): boolean {
+  if (needsProxy(kind)) return false;
+  return mode === 'both' ? choice === 'wireguard' : mode === 'wireguard';
+}
+
+const CHOICE_KEY = 'wiretrace.connection';
+
+/** The way of connecting last chosen, in the browser's localStorage; the Wi-Fi proxy by default. */
+export function loadChoice(storage: Pick<Storage, 'getItem'> | null): ConnectionChoice {
+  try {
+    return storage?.getItem(CHOICE_KEY) === 'wireguard' ? 'wireguard' : 'proxy';
+  } catch {
+    return 'proxy';
+  }
+}
+
+export function storeChoice(storage: Pick<Storage, 'setItem'> | null, choice: ConnectionChoice): void {
+  try {
+    storage?.setItem(CHOICE_KEY, choice);
+  } catch {
+    // Storage full or off: the choice is kept only while the window is open.
+  }
+}
+
 export interface Step {
   text: string;
   /** A command, an address or a file name, shown in monospace with a copy button. */
@@ -347,8 +375,13 @@ export function appChecks(kind: DeviceKind, wireguard: boolean, preset: string, 
 }
 
 /** The last step's summary: what is set up. */
-export function setupSummary(kind: DeviceKind, state: AppState, flows: readonly FlowSummary[]): { label: string; done: boolean }[] {
-  const via = usesTunnel(kind, state.mode === 'wireguard') ? 'through WireGuard' : 'through the proxy';
+export function setupSummary(
+  kind: DeviceKind,
+  state: AppState,
+  flows: readonly FlowSummary[],
+  choice: ConnectionChoice = 'proxy',
+): { label: string; done: boolean }[] {
+  const via = usesTunnel(kind, wireguardSteps(state.mode, choice, kind)) ? 'through WireGuard' : 'through the proxy';
   return [
     { label: `${deviceChoice(kind).label} connected to this Mac ${via}`, done: stepDone('connect', state, flows) },
     { label: 'Wiretrace trusted, and the app\'s requests arrive', done: stepDone('check', state, flows) },

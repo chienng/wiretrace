@@ -1,8 +1,8 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.9.0**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.9.1**, on Intel and Apple silicon Macs.
 
-What 0.9.0 gives you: a one-command install (`./install`) that needs no admin rights, a setup
+What 0.9.1 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
@@ -11,7 +11,9 @@ ticket. The Wiretrace window (`--ui wiretrace`) is a preview, with a setup wizar
 make requests fail or slow, a log timeline with the device's status, earlier sessions, saved
 filters, search in headers and bodies, replay and compare. New in 0.9.0: the **Wiretrace
 app** that setup puts in `~/Applications`, a `default` preset to start with, and editing or
-creating presets from the window.
+creating presets from the window. New in 0.9.1: one session accepts the phone's Wi-Fi proxy
+(now on port 8888) and the WireGuard tunnel at the same time; the setup wizard shows the Wi-Fi
+proxy first.
 
 Using 0.8.0 or 0.7.2? Those versions have no `./install` and no Wiretrace app; follow the
 guide that came with them: [0.8.0](https://github.com/chienng/wiretrace/blob/v0.8.0/docs/user-guide.md),
@@ -32,8 +34,8 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  `wiretrace-0.9.0-macos.tar.gz` and `wiretrace-0.9.0-macos.tar.gz.sha256`, or
-  `wiretrace-0.9.0-macos.dmg` and `wiretrace-0.9.0-macos.dmg.sha256`. Both contain the same
+  `wiretrace-0.9.1-macos.tar.gz` and `wiretrace-0.9.1-macos.tar.gz.sha256`, or
+  `wiretrace-0.9.1-macos.dmg` and `wiretrace-0.9.1-macos.dmg.sha256`. Both contain the same
   files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -43,8 +45,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.9.0-macos.tar.gz.sha256
-shasum -a 256 -c wiretrace-0.9.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.9.1-macos.dmg.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -54,14 +56,14 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 **From the `.tar.gz`:**
 
 ```bash
-tar -xzf wiretrace-0.9.0-macos.tar.gz -C ~
+tar -xzf wiretrace-0.9.1-macos.tar.gz -C ~
 ```
 
 Use this command rather than double-clicking the file in Finder, so the folder ends up in
 the right place.
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.9.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.9.1**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -112,6 +114,8 @@ without asking. You can start every session from it instead of Terminal:
 The session keeps recording after the app's last message closes. To stop it and save
 `flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top right): a session started from the app
 has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
+Every device in the app accepts both ways to connect, the Wi-Fi proxy and the WireGuard tunnel
+(Part 2, Step 2).
 
 The app opens the folder the setup ran in. If you move that folder, the app says so: run
 `scripts/setup-mac.sh` again from the new place.
@@ -137,7 +141,7 @@ continue.
 |---|---|
 | `FAIL Python` / `mitmproxy` / `Python packages` | Run `scripts/setup-mac.sh` again. |
 | `FAIL Port … in use` | Another proxy (or an old Wiretrace window) is running. Quit it. |
-| `FAIL macOS firewall: blocks all incoming connections` | Ask IT for an allow rule for UDP 51820 and TCP 8080. |
+| `FAIL macOS firewall: blocks all incoming connections` | Ask IT for an allow rule for UDP 51820 and TCP 8888. |
 | `WARN macOS firewall: on; macOS will ask …` | Normal. Click **Allow** when macOS asks the first time you start mitmproxy. |
 | `WARN adb: not found` | Only matters for Android. Run the setup without `--skip-android`. |
 | `WARN Android devices: … unauthorized` | Unlock the phone and accept **Allow USB debugging**. |
@@ -226,15 +230,12 @@ cd ~/wiretrace
 ./wiretrace start --preset default --target android --ui wiretrace
 ```
 
-A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
-
-```bash
-cd ~/wiretrace
-./wiretrace start --preset default --mode proxy --ui wiretrace
-```
+Wiretrace listens for the phone's Wi-Fi proxy (TCP 8888) and for the WireGuard tunnel
+(UDP 51820) at the same time, so the phone can connect either way without a restart.
+`--mode proxy` or `--mode wireguard` starts one of the two only.
 
 With a preset you created, change `default` to its name. For the Android emulator use
-`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
+`--target android-emu`; for the iOS Simulator use `--target ios-sim` (see
 [Part 3, Step 1](#step-1--start-capturing)). The Wiretrace window opens in your browser: click **Setup**
 in its title bar. The setup wizard walks you through Steps 2 to 4 below for the device you pick
 (*Choose device*, *Connect to this Mac*, *Trust Wiretrace*, *Check the app*, and the optional
@@ -244,6 +245,26 @@ you get mitmweb instead, which shows the same QR code. The first time, macOS may
 connections: click **Allow**.
 
 ### Step 2 — Connect the phone
+
+The wizard's *Connect to this Mac* step has a switch, **Wi-Fi proxy** | **WireGuard**. It
+starts on Wi-Fi proxy and remembers your last choice in this browser. It only changes the
+steps shown: the session keeps recording, and Wiretrace accepts both at any time. The iOS
+Simulator always uses the proxy and has no switch.
+
+**Wi-Fi proxy** (try this first):
+
+1. Connect the phone to the same Wi-Fi network as the Mac.
+2. Set the network's proxy to **Manual**, server `<Mac IP>`, port **8888**. The wizard shows
+   the address with a copy button, and where the setting is on your phone.
+3. *Waiting for the device…* turns to *Connected* as soon as the phone sends a request.
+
+The Wi-Fi proxy accepts this Mac and the **first other device** that connects, until
+Wiretrace stops. Anyone else on the same Wi-Fi network who connects first takes that place:
+your phone then gets no page, and the Terminal (or `app-start.log`) prints one line telling
+you to restart Wiretrace or to pass `--client <its IP address>`. Apps that ignore the proxy
+setting (Flutter, some React Native libraries) are not captured this way: use WireGuard.
+
+**WireGuard** (for apps that ignore the proxy):
 
 1. Install the **WireGuard** app (App Store / Google Play).
 2. In WireGuard, add a tunnel by scanning the QR code: step *Connect to this Mac* of the setup
@@ -255,7 +276,12 @@ connections: click **Allow**.
    reaching each other (guest networks often do): try another network.
 
 The tunnel keys are stored in `~/.mitmproxy/wireguard.conf` and reused on every start, so
-you only scan the QR code once per device.
+you only scan the QR code once per device. Use one way at a time: remove the Wi-Fi proxy
+before you turn the tunnel on.
+
+**When you are done testing**, set the phone's Wi-Fi proxy back to **Off** (or turn the
+tunnel off). Without Wiretrace running, a phone still set to the proxy has no internet on
+that network.
 
 No browser? `mitmdump --mode wireguard` prints the same configuration as text
 (`[Interface] … [Peer] … Endpoint = <Mac IP>:51820`); enter it in WireGuard with
@@ -263,10 +289,10 @@ No browser? `mitmdump --mode wireguard` prints the same configuration as text
 
 ### Step 3 — Install and trust the Wiretrace certificate
 
-With the tunnel on, open `http://mitm.it` on the phone. This page is served by Wiretrace on
-your Mac, not by the internet, and it is not saved in the session. If it says *"traffic is not
-going through mitmproxy"*, or does not load, the tunnel is off or not connected: check
-*Latest handshake* (Step 2). For the iOS Simulator and the Android emulator, the wizard's
+With the Wi-Fi proxy set (or the tunnel on), open `http://mitm.it` on the phone. This page is
+served by Wiretrace on your Mac, not by the internet, and it is not saved in the session. If it
+says *"traffic is not going through mitmproxy"*, or does not load, the phone is not connected:
+check the proxy address and port, or the tunnel's *Latest handshake* (Step 2). For the iOS Simulator and the Android emulator, the wizard's
 *Trust Wiretrace* step shows the one command to run on your Mac instead, with a copy button.
 
 For a phone, the wizard's *Trust Wiretrace* step ticks *Page opened on the phone* when
@@ -341,7 +367,7 @@ cd ~/wiretrace
 ./wiretrace start --preset staging --target android
 ```
 
-mitmweb opens in a browser tab, in WireGuard mode. Wiretrace prints where the session is
+mitmweb opens in a browser tab; Wiretrace accepts the Wi-Fi proxy and the WireGuard tunnel. Wiretrace prints where the session is
 saved, for example `sessions/2026-10-13_143005_staging_android/`.
 
 - Only the preset's `api_hosts` and their subdomains are decrypted. Other apps and
@@ -362,27 +388,31 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   `--no-ui`. While that window runs, Wiretrace also puts an item in the menu bar (see *Menu bar*
   below). `--no-menu-bar` leaves the item out; the banner says `Menu bar: off (--no-menu-bar)`.
   With `--ui mitmweb` or `--no-ui` there is no menu bar, and `--no-menu-bar` changes nothing.
-- `--mode proxy` runs a regular proxy on port 8080 instead of WireGuard. Set the phone's
-  Wi-Fi proxy to `<Mac IP>:8080`. With `--ui wiretrace`, the setup wizard shows the proxy
-  steps for the device you pick instead of the WireGuard QR code:
-  `./wiretrace start --preset staging --mode proxy --ui wiretrace`. Apps that ignore the
-  system proxy (Flutter, some React Native libraries) are not captured in this mode; use
-  WireGuard for them. The Mac itself is always accepted (the iOS Simulator and
-  the Android emulator connect that way). The first other device that connects is the only
-  other device accepted until you stop Wiretrace. A later device gets no page, and the
-  Terminal prints one line telling you to restart or to pass `--client`. To allow a known
-  phone instead of pinning the first one, repeat `--client` with its IP address:
-  `./wiretrace start --preset staging --mode proxy --ui wiretrace --client 192.168.1.20`. A phone cannot
+- `--mode` is `both` (the default), `proxy` or `wireguard`. `both` runs a Wi-Fi proxy on
+  TCP 8888 and the WireGuard tunnel on UDP 51820 in one session: set the phone's Wi-Fi proxy to
+  `<Mac IP>:8888`, or turn its tunnel on, and both are saved in the same session folder and
+  HAR. `--mode proxy` runs the Wi-Fi proxy only, `--mode wireguard` the tunnel only; the setup
+  wizard then shows only that way, and the command to restart in the other mode where you need
+  it. Apps that ignore the system proxy (Flutter, some React Native libraries) are not
+  captured through the proxy; use WireGuard for them.
+- **Who may use the Wi-Fi proxy** (`both` and `proxy`): the Mac itself is always accepted (the
+  iOS Simulator and the Android emulator connect that way). The first other device that
+  connects is the only other device accepted until you stop Wiretrace. A later device gets no
+  page, and the Terminal prints one line telling you to restart or to pass `--client`. To allow
+  a known phone instead of pinning the first one, repeat `--client` with its IP address:
+  `./wiretrace start --preset staging --ui wiretrace --client 192.168.1.20`. A phone cannot
   open the Mac's own addresses (for example `http://127.0.0.1:8081/`) through this proxy.
+  A phone on the WireGuard tunnel is never pinned or refused: the tunnel's key is its
+  permission.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
-  `--target ios-sim --mode proxy --ui wiretrace`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8080`
+  `--target ios-sim --ui wiretrace`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8888`
   (this usually needs admin rights; see
   [`install-without-admin.md`](install-without-admin.md#ios-simulator-without-admin)), and
   install the certificate in the booted Simulator once:
   `xcrun simctl keychain booted add-root-cert ~/.mitmproxy/mitmproxy-ca-cert.pem`.
   Ignore the "set the Wi-Fi proxy" reminder Wiretrace prints; it is meant for phones.
-- **A browser or Burp Suite on this Mac:** start with `--mode proxy --ui wiretrace`, point the
-  browser's proxy (or Burp's upstream proxy) at `127.0.0.1:8080`, and make it trust
+- **A browser or Burp Suite on this Mac:** start with `--ui wiretrace`, point the
+  browser's proxy (or Burp's upstream proxy) at `127.0.0.1:8888`, and make it trust
   `~/.mitmproxy/mitmproxy-ca-cert.pem`. Only the preset's `api_hosts` are decrypted.
 - The preset's `default_filter` is the starting filter: in mitmweb's search box, or what
   is printed with `--no-ui`. It never limits what is saved. Common filters:
@@ -455,7 +485,7 @@ build that supports it; see *Logs from the app* below. In WireGuard mode the pho
 look up names through Wiretrace, so turn off **Private DNS** on Android (Settings → Network
 & internet → Private DNS → Off; the menu names vary by vendor), and remove any encrypted
 DNS profile on the iPhone (Settings → General → VPN & Device Management). With the Wi-Fi
-proxy (`--mode proxy`) you do not need this.
+proxy you do not need this.
 
 ### Step 3 — Reproduce the problem
 
@@ -692,7 +722,7 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 **What each area does.**
 
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
-  (for example *v0.9.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  (for example *v0.9.1*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is
@@ -751,8 +781,10 @@ the save is refused and the sheet loads the new file. The name of a preset canno
     the requests within 5 seconds of the line, and *Show only this tag*.
 - **Setup.** A wizard in five steps, each of which you can open from the list on the left:
   *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`),
-  *Connect to this Mac* (the QR code and steps in WireGuard mode; the address `<Mac IP>:<port>` and
-  the Wi-Fi proxy steps in proxy mode; the command to restart in proxy mode where you need it),
+  *Connect to this Mac* (the address `<Mac IP>:<port>` and the Wi-Fi proxy steps, or the QR code
+  and WireGuard steps; in the default `both` mode a **Wi-Fi proxy** | **WireGuard** switch picks
+  which, and the later steps follow it; with `--mode wireguard`, the command to restart in proxy
+  mode where you need it),
   *Trust Wiretrace*, *Check the app* and *Device logs*. See Part 2. The WireGuard
   configuration holds the phone's private key; do not share it.
 - **Rules.** A list of rules on the left and the selected rule on the right. A rule matches a

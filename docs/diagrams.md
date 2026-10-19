@@ -97,10 +97,10 @@ flowchart TD
 
     IOSD --> W["WireGuard mode<br/>(recommended)"]
     AD --> W
-    AE --> WE["WireGuard mode<br/>or emulator proxy 10.0.2.2:8080"]
+    AE --> WE["WireGuard mode<br/>or emulator proxy 10.0.2.2:8888"]
 
     IOSS --> SIM{Can the Mac's system<br/>proxy be changed?}
-    SIM -- "Yes (admin or IT-granted right)" --> SP["Regular mode +<br/>Mac system proxy 127.0.0.1:8080"]
+    SIM -- "Yes (admin or IT-granted right)" --> SP["Regular mode +<br/>Mac system proxy 127.0.0.1:8888"]
     SIM -- No --> SN["QA build with a debug proxy setting<br/>or test on a physical device"]
 
     W --> CA[Install CA on the device]
@@ -431,11 +431,11 @@ flowchart LR
 ```mermaid
 flowchart LR
     Phone["Phone<br/>(WireGuard client)"] -- "UDP 51820" --> WGP
-    Emu["Android emulator /<br/>Wi-Fi proxy clients"] -- "TCP 8080" --> HP
+    Emu["Android emulator /<br/>Wi-Fi proxy clients"] -- "TCP 8888" --> HP
 
     subgraph Mac["Mac"]
         WGP["mitmproxy WireGuard listener<br/>0.0.0.0:51820/udp"]
-        HP["mitmproxy HTTP proxy listener<br/>0.0.0.0:8080/tcp"]
+        HP["mitmproxy HTTP proxy listener<br/>0.0.0.0:8888/tcp"]
         WEB["mitmweb / local API<br/>127.0.0.1:8081/tcp"]
     end
 
@@ -448,7 +448,7 @@ flowchart LR
 | Port | Protocol | Bound to | Purpose | Admin needed? |
 |---|---|---|---|---|
 | 51820 | UDP | all interfaces | WireGuard from phones | No (port > 1024) |
-| 8080 | TCP | all interfaces | Regular HTTP proxy (emulator, simulator, fallback) | No |
+| 8888 | TCP | all interfaces | Regular HTTP proxy (emulator, simulator, fallback) | No |
 | 8081 | TCP | `127.0.0.1` only | mitmweb UI / local API | No |
 
 The UI port is bound to localhost so other people on the Wi-Fi cannot see captured traffic.

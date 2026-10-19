@@ -887,7 +887,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.9.0"
+        assert state["version"] == "0.9.1"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
@@ -1029,11 +1029,17 @@ def test_wireguard_configuration_comes_from_the_server_instance(monkeypatch, tmp
             await ui.running()
             try:
                 client = Client(ui)
-                assert (await client.json("/api/state"))["wireguard_conf"] == "[Interface]\nPrivateKey = not-a-real-key\n"
+                monkeypatch.setattr("mitmproxy.net.local_ip.get_local_ip", lambda: "192.0.2.7")
+                wireguard = await client.json("/api/state")
+                assert wireguard["wireguard_conf"] == "[Interface]\nPrivateKey = not-a-real-key\n"
+                assert wireguard["mac_ip"] is None
                 # Never without the cookie.
                 assert b"PrivateKey" not in (await client.fetch("/api/state", cookie=False)).body
+                session.update_meta(tmp_path, mode="both")
+                both = await client.json("/api/state")
+                assert (both["wireguard_conf"], both["mac_ip"]) == ("[Interface]\nPrivateKey = not-a-real-key\n", "192.0.2.7")
+                assert both["mode"] == "both"
                 session.update_meta(tmp_path, mode="proxy")
-                monkeypatch.setattr("mitmproxy.net.local_ip.get_local_ip", lambda: "192.0.2.7")
                 proxy = await client.json("/api/state")
                 assert (proxy["wireguard_conf"], proxy["mac_ip"]) == (None, "192.0.2.7")
             finally:

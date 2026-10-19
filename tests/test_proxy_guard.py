@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import pytest
+from mitmproxy.proxy import mode_specs
 
 from addons import proxy_guard
 from addons.proxy_guard import REFUSAL, ProxyGuard
@@ -23,10 +24,16 @@ ROOT = Path(__file__).resolve().parent.parent
 VENV_BIN = Path(sys.prefix) / "bin"
 
 
+REGULAR = mode_specs.ProxyMode.parse("regular")
+WIREGUARD = mode_specs.ProxyMode.parse("wireguard@51820")
+
+
 class _Client:
-    def __init__(self, ip: str) -> None:
+    def __init__(self, ip: str, mode: mode_specs.ProxyMode | None = REGULAR) -> None:
         self.peername = (ip, 40000)
         self.error = None
+        if mode is not None:
+            self.proxy_mode = mode
 
 
 class _Server:
@@ -36,8 +43,8 @@ class _Server:
 
 
 class _Data:
-    def __init__(self, client_ip: str, host: str) -> None:
-        self.client = _Client(client_ip)
+    def __init__(self, client_ip: str, host: str, mode: mode_specs.ProxyMode | None = REGULAR) -> None:
+        self.client = _Client(client_ip, mode)
         self.server = _Server(host)
 
 
@@ -48,8 +55,8 @@ def guard(*clients: str, pin: bool = True) -> ProxyGuard:
     return addon
 
 
-def connect(addon: ProxyGuard, ip: str) -> _Client:
-    client = _Client(ip)
+def connect(addon: ProxyGuard, ip: str, mode: mode_specs.ProxyMode | None = REGULAR) -> _Client:
+    client = _Client(ip, mode)
     addon.client_connected(client)
     return client
 
@@ -101,6 +108,45 @@ def test_every_loopback_address_is_accepted_and_never_pinned(ip):
     assert phone.error is None and addon.pinned == "192.0.2.10"
 
 
+def test_a_wireguard_client_is_accepted_and_does_not_use_up_the_pin(capsys):
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    tunnel = connect(addon, "10.0.0.1", WIREGUARD)
+    assert tunnel.error is None and addon.pinned is None and addon.refused == 0
+    phone = connect(addon, "192.0.2.10")
+    assert phone.error is None and addon.pinned == "192.0.2.10"
+    other = connect(addon, "192.0.2.11")
+    assert other.error and addon.refused == 1
+    assert capsys.readouterr().out.count(REFUSAL) == 1
+
+
+def test_wireguard_and_lan_clients_at_the_same_address_are_told_apart_by_mode():
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    assert connect(addon, "192.0.2.10").error is None
+    # Every tunnel client comes from the tunnel's address; it is never refused, after the pin too.
+    for _ in range(3):
+        assert connect(addon, "10.0.0.1", WIREGUARD).error is None
+    assert addon.pinned == "192.0.2.10" and addon.refused == 0
+    lan = connect(addon, "10.0.0.1")
+    assert lan.error and addon.refused == 1
+
+
+def test_wireguard_clients_are_not_refused_with_pinning_off():
+    addon = guard("127.0.0.1", pin=False)
+    assert connect(addon, "10.0.0.1", WIREGUARD).error is None
+    assert addon.refused == 0
+
+
+def test_a_client_without_proxy_mode_is_treated_as_regular():
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    first = connect(addon, "192.0.2.10", None)
+    assert first.error is None and addon.pinned == "192.0.2.10"
+    second = connect(addon, "192.0.2.11", None)
+    assert second.error and addon.refused == 1
+    data = _Data("192.0.2.10", "127.0.0.1", None)
+    asyncio.run(addon.server_connect(data))
+    assert data.server.error
+
+
 def test_a_bad_client_entry_is_an_options_error():
     from mitmproxy import exceptions
     from mitmproxy.test import taddons
@@ -116,8 +162,8 @@ def test_a_bad_client_entry_is_an_options_error():
 
 # server_connect
 
-def _run(addon: ProxyGuard, client_ip: str, host: str) -> _Data:
-    data = _Data(client_ip, host)
+def _run(addon: ProxyGuard, client_ip: str, host: str, mode: mode_specs.ProxyMode | None = REGULAR) -> _Data:
+    data = _Data(client_ip, host, mode)
     asyncio.run(addon.server_connect(data))
     return data
 
@@ -133,6 +179,16 @@ def test_a_loopback_client_may_reach_loopback():
 def test_a_remote_client_is_refused_for_a_blocked_literal(host):
     data = _run(guard(pin=False), "192.0.2.10", host)
     assert data.server.error
+
+
+@pytest.mark.parametrize("host", ["127.0.0.1", "::1", "169.254.1.1", "0.0.0.0"])
+def test_a_wireguard_client_is_not_checked_for_the_server_address(host, monkeypatch):
+    async def lookup(host: str):
+        raise AssertionError(host)
+
+    monkeypatch.setattr(proxy_guard, "_lookup", lookup)
+    data = _run(guard(pin=False), "10.0.0.1", host, WIREGUARD)
+    assert data.server.error is None
 
 
 def test_a_name_that_resolves_to_loopback_is_refused(monkeypatch):
@@ -183,6 +239,12 @@ def _free_port() -> int:
         return probe.getsockname()[1]
 
 
+def _free_udp_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+        probe.bind(("0.0.0.0", 0))
+        return probe.getsockname()[1]
+
+
 def _accepts(port: int) -> bool:
     try:
         socket.create_connection(("127.0.0.1", port), timeout=0.5).close()
@@ -195,11 +257,13 @@ needs_mitmdump = pytest.mark.skipif(not (VENV_BIN / "mitmdump").exists(), reason
 
 
 @needs_mitmdump
-def test_real_mitmdump_refuses_loopback_when_it_is_not_allowed(tmp_path):
+@pytest.mark.parametrize("both", [False, True], ids=["proxy", "both"])
+def test_real_mitmdump_refuses_loopback_when_it_is_not_allowed(tmp_path, both):
     port = _free_port()
     log = tmp_path / "mitmdump.log"
+    wireguard = ["--mode", f"wireguard@{_free_udp_port()}"] if both else []
     args = [
-        str(VENV_BIN / "mitmdump"), "--mode", "regular", "--listen-port", str(port),
+        str(VENV_BIN / "mitmdump"), "--mode", "regular", "--listen-port", str(port), *wireguard,
         "--set", f"confdir={tmp_path / 'confdir'}",
         "-s", str(ROOT / "addons" / "proxy_guard.py"),
         "--set", "qa_proxy_clients=192.0.2.1", "--set", "qa_proxy_pin=false",

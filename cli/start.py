@@ -42,8 +42,10 @@ from . import __version__, doctor, redact, session
 from .preset import PRESETS_DIR, Preset, PresetError, allow_hosts_regexes, load_preset
 
 TARGETS = ("android", "ios", "android-emu", "ios-sim", "device")
-MODES = ("wireguard", "proxy")
-PROXY_PORT = 8080
+MODES = ("wireguard", "proxy", "both")
+PROXY_PORT = 8888
+# Written out in both mode: `--listen-port` would otherwise be WireGuard's port too.
+WIREGUARD_PORT = 51820
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STILL_STOPPING_S = 15
 COLLECTOR_STOP_S = 3
@@ -112,7 +114,7 @@ def ui_kind(ui: bool | str) -> str:
 def needed_ports(mode: str, ui: bool | str, proxy_port: int = PROXY_PORT,
                  ui_port: int = UI_PORT) -> list[tuple[str, str, int, str]]:
     kind = ui_kind(ui)
-    labels = {"WireGuard"} if mode == "wireguard" else {"proxy"}
+    labels = {"wireguard": {"WireGuard"}, "both": {"proxy", "WireGuard"}}.get(mode, {"proxy"})
     if kind != NO_UI:
         labels.add("mitmweb UI")
     ports = {"proxy": proxy_port, "mitmweb UI": ui_port if kind == WIRETRACE else UI_PORT}
@@ -144,6 +146,8 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     cmd = [str(bin_dir / ("mitmweb" if kind == MITMWEB else "mitmdump"))]
     if mode == "wireguard":
         cmd += ["--mode", "wireguard"]
+    elif mode == "both":
+        cmd += ["--mode", "regular", "--listen-port", str(proxy_port), "--mode", f"wireguard@{WIREGUARD_PORT}"]
     else:
         cmd += ["--mode", "regular", "--listen-port", str(proxy_port)]
     for regex in allow_hosts_regexes(preset):
@@ -153,7 +157,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     cmd += ["--allow-hosts", ONBOARDING_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
     cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
-    if mode == "proxy":
+    if mode in ("proxy", "both"):
         cmd += ["-s", str(PROXY_GUARD)]
     if kind == WIRETRACE:
         cmd += ["-s", str(UI_ADDON)]
@@ -167,7 +171,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     # Receiver and certificate-page flows stay visible in mitmweb but are not saved: the first would
     # duplicate app.log.jsonl, the second is not app traffic.
     cmd += ["--set", f"save_stream_filter={SAVE_FILTER}"]
-    if mode == "proxy":
+    if mode in ("proxy", "both"):
         # Pinning is on only when the user did not name a device: the first other address is the one.
         for address in (*LOOPBACK_CLIENTS, *clients):
             cmd += ["--set", f"qa_proxy_clients={address}"]
@@ -292,6 +296,14 @@ def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
         first_time = {MITMWEB: "scan the QR code in mitmweb", WIRETRACE: "scan the QR code in Wiretrace > Setup",
                       NO_UI: "enter the configuration printed below"}[kind]
         lines.append(f"Phone: turn the WireGuard tunnel on (first time: {first_time}).")
+    elif mode == "both":
+        first_time = {MITMWEB: "scan the QR code in mitmweb", WIRETRACE: "scan the QR code in Wiretrace > Setup",
+                      NO_UI: "enter the configuration printed below"}[kind]
+        lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
+        lines.append(f"Phone, if an app ignores the proxy: turn the WireGuard tunnel on instead "
+                     f"(first time: {first_time}).")
+        lines.append("Wi-Fi proxy: only the first other device that connects is accepted, "
+                     "unless --client names it.")
     else:
         lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
     lines.append(TARGET_HINTS[target])

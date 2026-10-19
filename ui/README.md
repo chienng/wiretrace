@@ -27,11 +27,12 @@ npx vite --port 5199 --strictPort --host 127.0.0.1
 # open http://127.0.0.1:5199/ ; Ctrl+C stops it
 ```
 
-Use a free port: 8080, 8081 and 51820 belong to mitmproxy.
+Use a free port: 8888, 8081 and 51820 belong to mitmproxy.
 
 | Variable | Effect |
 |---|---|
 | `WIRETRACE_FIXTURE_MODE=proxy` | Setup shows the Wi-Fi proxy address instead of the WireGuard QR code. |
+| `WIRETRACE_FIXTURE_MODE=both` | Setup shows the *Wi-Fi proxy* \| *WireGuard* switch. |
 | `WIRETRACE_FIXTURE_BULK=10000` | Adds 10,000 requests, to check scrolling and filtering speed. |
 | `WIRETRACE_FIXTURE_403=1` | Every API call is refused, as without the Terminal link's token. |
 

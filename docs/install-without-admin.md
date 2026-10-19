@@ -31,7 +31,7 @@ The main thing to avoid is **Homebrew**: its standard installation requires an a
 | Python 3.12 | No | `uv python install` puts it in `~/.local/share/uv`. |
 | mitmproxy, pyyaml, pymobiledevice3, PyObjC | No | Installed into a project virtual environment. PyObjC is the menu bar item; its wheels need no compiler and no admin. |
 | mitmproxy CA certificate | No | Generated in `~/.mitmproxy` on first run. |
-| Listening on UDP 51820, TCP 8080, TCP 8081 | No | Only ports below 1024 need root. |
+| Listening on UDP 51820, TCP 8888, TCP 8081 | No | Only ports below 1024 need root. |
 | mitmproxy **WireGuard mode** | No | WireGuard server runs inside the mitmproxy process; the phone runs the WireGuard client. |
 | mitmproxy **local mode** (`--mode local`) | **Yes** (system extension approval) | Not used by this plan. |
 | Android platform-tools (`adb`) | No | Unzip into `~/tools`. |
@@ -79,7 +79,7 @@ cd ~/wiretrace
 
 - Python 3.12 or newer, mitmproxy 11 or newer (with `mitmweb`), PyObjC (the menu bar) and the other packages in `requirements.txt` are installed.
 - `adb` is found on `PATH` or in `~/tools/platform-tools` (`WARN` if not: Android testing is unavailable).
-- Ports 51820/udp, 8080/tcp, and 8081/tcp are free.
+- Ports 51820/udp, 8888/tcp, and 8081/tcp are free.
 - `~/.mitmproxy` contains a CA (`INFO` until mitmproxy creates it on first start), and its private key is readable by you only.
 - Whether the macOS firewall is on, blocks all incoming connections, or blocks Wiretrace's Python.
 - How many phones are visible over USB (`adb devices`, `pymobiledevice3 usbmux list`). Only counts are shown, never serial numbers or UDIDs.
@@ -106,7 +106,7 @@ The iOS Simulator uses the Mac's network settings. Sending its traffic through W
 |---|---|---|
 | **A. Test on physical iPhones** | QA | Uses WireGuard mode; no Mac changes at all. |
 | **B. IT grants standard users permission to change network settings** | IT, once | e.g. `security authorizationdb write system.preferences.network allow` plus `system.services.systemconfiguration.network`, or an MDM setting. Wiretrace can then switch the proxy on/off with `networksetup`. |
-| **C. IT deploys a proxy configuration profile** | IT, once | MDM profile pointing to `127.0.0.1:8080`; QA enables it only while testing. |
+| **C. IT deploys a proxy configuration profile** | IT, once | MDM profile pointing to `127.0.0.1:8888`; QA enables it only while testing. |
 | **D. QA build supports a debug proxy setting** | Mobile dev team | e.g. a launch argument or debug menu that sets `connectionProxyDictionary` on the app's `URLSessionConfiguration`. Only affects the app under test. |
 
 The CA certificate is installed into the simulator with `xcrun simctl keychain booted add-root-cert ~/.mitmproxy/mitmproxy-ca-cert.pem`, which does not need admin. Xcode itself must be installed by IT.
@@ -122,7 +122,7 @@ Recommended request to IT:
 1. **Approve Wiretrace** (mitmproxy-based) for the QA team, with this plan as the description.
 2. **Allowlist it in endpoint security** (EDR) so it is not quarantined.
 3. **Publish it in Self Service** (Jamf Self Service, Intune Company Portal, or Munki). QA can then install and update it with one click, without admin rights. This is the best option for Phase 2.
-4. **Firewall**: if the firewall is managed, add an allow rule for incoming connections to Wiretrace (UDP 51820, TCP 8080). Rules per app work best with a **signed app bundle**, which is another reason for the Phase 2 signed app.
+4. **Firewall**: if the firewall is managed, add an allow rule for incoming connections to Wiretrace (UDP 51820, TCP 8888). Rules per app work best with a **signed app bundle**, which is another reason for the Phase 2 signed app.
 5. **Optional**: install Xcode and allow network-settings changes on Macs used for iOS Simulator testing.
 6. **Optional**: allow a dedicated **QA Wi-Fi** where phones and Macs can reach each other. Guest/corporate Wi-Fi often blocks device-to-device traffic.
 

@@ -1,6 +1,6 @@
 // Dev only (`vite serve`): answers /api/* from dev/fixtures/*.json and fakes the update socket.
 // Never part of the build. Env: WIRETRACE_FIXTURE_BULK=<n> adds n extra flows,
-// WIRETRACE_FIXTURE_MODE=proxy switches the setup dialog to proxy mode,
+// WIRETRACE_FIXTURE_MODE=proxy|both switches the setup dialog to proxy or both mode,
 // WIRETRACE_FIXTURE_403=1 answers every /api request with 403,
 // WIRETRACE_FIXTURE_NO_DEVICE=1 turns the report form's screenshots off.
 import fs from 'node:fs';
@@ -56,6 +56,8 @@ export default function fixtures() {
   if (process.env.WIRETRACE_FIXTURE_MODE === 'proxy') {
     state.mode = 'proxy';
     state.wireguard_conf = null;
+  } else if (process.env.WIRETRACE_FIXTURE_MODE === 'both') {
+    state.mode = 'both';
   }
   const baseFlows = [...bulkFlows(bulkCount, epoch), ...shiftTimes(read('flows.json'), shift)];
   const details = shiftTimes(read('flow-details.json'), shift);

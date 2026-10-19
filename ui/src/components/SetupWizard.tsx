@@ -22,6 +22,7 @@ import {
   emulatorConf,
   endpointOf,
   firstApiFlow,
+  loadChoice,
   needsProxy,
   nextLabel,
   nextTime,
@@ -32,11 +33,14 @@ import {
   setupSummary,
   STEP_LABELS,
   stepDone,
+  storeChoice,
   STORE_BUILD_NOTE,
   trustChecklist,
   trustHint,
   tunnelSteps,
   usesTunnel,
+  wireguardSteps,
+  type ConnectionChoice,
   type DeviceKind,
   type Step,
   type StepKey,
@@ -44,6 +48,19 @@ import {
 import { useDispatch, useStore } from '../store';
 import type { AppState } from '../types';
 import { Modal } from './Modal';
+
+const CHOICES: readonly { id: ConnectionChoice; label: string }[] = [
+  { id: 'proxy', label: 'Wi-Fi proxy' },
+  { id: 'wireguard', label: 'WireGuard' },
+];
+
+function storage(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
 
 function Qr({ text, onFail }: { text: string; onFail: () => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -108,6 +125,20 @@ function DeviceCards({ kind, onPick }: { kind: DeviceKind; onPick: (k: DeviceKin
           <span className="sub">{d.sub}</span>
         </button>
       ))}
+    </div>
+  );
+}
+
+function ConnectionSwitch({ choice, onChoose }: { choice: ConnectionChoice; onChoose: (c: ConnectionChoice) => void }) {
+  return (
+    <div className="addr">
+      <div className="seg" role="radiogroup" aria-label="How the device connects">
+        {CHOICES.map((c) => (
+          <button key={c.id} type="button" role="radio" aria-checked={choice === c.id} className={choice === c.id ? 'on' : ''} onClick={() => onChoose(c.id)}>
+            {c.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -204,20 +235,35 @@ function Connection({ state, since }: { state: AppState; since: number }) {
   );
 }
 
-function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: DeviceKind; setKind: (k: DeviceKind) => void; copy: Copy }) {
+function ConnectStep({
+  state,
+  kind,
+  setKind,
+  choice,
+  onChoose,
+  copy,
+}: {
+  state: AppState;
+  kind: DeviceKind;
+  setKind: (k: DeviceKind) => void;
+  choice: ConnectionChoice;
+  onChoose: (c: ConnectionChoice) => void;
+  copy: Copy;
+}) {
   const [since] = useState(() => Date.now());
   const [confShown, setConfShown] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
   const onQrFail = useCallback(() => setQrFailed(true), []);
-  const wg = state.mode === 'wireguard';
+  const wg = wireguardSteps(state.mode, choice, kind);
+  const choosable = state.mode === 'both' && !needsProxy(kind);
   const name = deviceChoice(kind).label;
   const macIp = state.mac_ip ?? '<Mac IP>';
 
-  if (wg && needsProxy(kind)) {
+  if (state.mode === 'wireguard' && needsProxy(kind)) {
     return (
       <>
         <h4>Connect the {name} to this Mac</h4>
-        <p className="lead">{connectWhy(kind, wg)}</p>
+        <p className="lead">{connectWhy(kind, true)}</p>
         <DeviceCards kind={kind} onPick={setKind} />
         <Restart preset={state.preset} kind={kind} copy={copy} why="Wiretrace was started for the WireGuard VPN app, which the Simulator cannot use." />
       </>
@@ -232,6 +278,7 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
         <h4>Connect the {name} to this Mac</h4>
         <p className="lead">{connectWhy(kind, wg)}</p>
         <DeviceCards kind={kind} onPick={setKind} />
+        {choosable && <ConnectionSwitch choice={choice} onChoose={onChoose} />}
         {!local && (
           <div className="addr">
             <span className="kbd big">{address}</span>
@@ -256,6 +303,7 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
       <h4>Connect your {name} to this Mac</h4>
       <p className="lead">{connectWhy(kind, wg)}</p>
       <DeviceCards kind={kind} onPick={setKind} />
+      {choosable && <ConnectionSwitch choice={choice} onChoose={onChoose} />}
       <div className="connect">
         <div>
           {shown ? <Qr text={shown} onFail={onQrFail} /> : <div className="qr note">The WireGuard configuration is not available yet.</div>}
@@ -305,11 +353,11 @@ function ConnectStep({ state, kind, setKind, copy }: { state: AppState; kind: De
   );
 }
 
-function TrustStep({ state, kind, copy }: { state: AppState; kind: DeviceKind; copy: Copy }) {
+function TrustStep({ state, kind, choice, copy }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice; copy: Copy }) {
   const { flows } = useStore();
   const [since] = useState(() => Date.now());
   const now = useNow(1000);
-  const wg = state.mode === 'wireguard';
+  const wg = wireguardSteps(state.mode, choice, kind);
   const hint = trustHint(kind, state, flows, since, now);
   return (
     <>
@@ -329,7 +377,7 @@ function TrustStep({ state, kind, copy }: { state: AppState; kind: DeviceKind; c
   );
 }
 
-function CheckAppStep({ state, kind, onTrust }: { state: AppState; kind: DeviceKind; onTrust: () => void }) {
+function CheckAppStep({ state, kind, choice, onTrust }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice; onTrust: () => void }) {
   const { flows, rules } = useStore();
   const dispatch = useDispatch();
   const [since] = useState(() => Date.now());
@@ -376,7 +424,7 @@ function CheckAppStep({ state, kind, onTrust }: { state: AppState; kind: DeviceK
             <div className="hintbox" role="status">
               <p>Nothing from the app yet. Check that:</p>
               <ul className="needs">
-                {appChecks(kind, state.mode === 'wireguard', state.preset, rules?.api_hosts ?? []).map((c) => (
+                {appChecks(kind, wireguardSteps(state.mode, choice, kind), state.preset, rules?.api_hosts ?? []).map((c) => (
                   <li key={c}>{c}</li>
                 ))}
               </ul>
@@ -388,13 +436,13 @@ function CheckAppStep({ state, kind, onTrust }: { state: AppState; kind: DeviceK
   );
 }
 
-function Summary({ state, kind }: { state: AppState; kind: DeviceKind }) {
+function Summary({ state, kind, choice }: { state: AppState; kind: DeviceKind; choice: ConnectionChoice }) {
   const { flows } = useStore();
   return (
     <div className="summary">
       <h5>What is set up</h5>
-      <Checklist items={setupSummary(kind, state, flows)} />
-      <p className="tip">{nextTime(kind, state.mode === 'wireguard')}</p>
+      <Checklist items={setupSummary(kind, state, flows, choice)} />
+      <p className="tip">{nextTime(kind, wireguardSteps(state.mode, choice, kind))}</p>
     </div>
   );
 }
@@ -449,11 +497,18 @@ export function SetupWizard() {
   const [step, setStep] = useState<StepId>(1);
   const [kind, setKind] = useState<DeviceKind>(() => deviceFromTarget(appState?.target ?? ''));
   const [alt, setAlt] = useState(false);
+  const [choice, setChoice] = useState<ConnectionChoice>(() => loadChoice(storage()));
   const close = () => dispatch({ type: 'ui', patch: { dialog: null } });
   if (!appState) return null;
 
-  const wg = appState.mode === 'wireguard';
-  const proxyAlt = alt && wg && step === 2 && !needsProxy(kind);
+  const choose = (c: ConnectionChoice) => {
+    setChoice(c);
+    storeChoice(storage(), c);
+  };
+  // Only a WireGuard-only session needs a restart for the Wi-Fi proxy.
+  const wireguardOnly = appState.mode === 'wireguard';
+  const wg = wireguardSteps(appState.mode, choice, kind);
+  const proxyAlt = alt && wireguardOnly && step === 2 && !needsProxy(kind);
   const copy: Copy = (text, what) => {
     void copyText(text).then((ok) => dispatch({ type: 'toast', text: ok ? `${what} copied` : 'Copy failed' }));
   };
@@ -500,9 +555,9 @@ export function SetupWizard() {
               <BeforeYouStart kind={kind} wireguard={wg} />
             </>
           )}
-          {step === 2 && <ConnectStep state={appState} kind={kind} setKind={setKind} copy={copy} />}
-          {step === 3 && <TrustStep state={appState} kind={kind} copy={copy} />}
-          {step === 4 && <CheckAppStep state={appState} kind={kind} onTrust={() => setStep(3)} />}
+          {step === 2 && <ConnectStep state={appState} kind={kind} setKind={setKind} choice={choice} onChoose={choose} copy={copy} />}
+          {step === 3 && <TrustStep state={appState} kind={kind} choice={choice} copy={copy} />}
+          {step === 4 && <CheckAppStep state={appState} kind={kind} choice={choice} onTrust={() => setStep(3)} />}
           {step === 5 && <DeviceLogsStep state={appState} kind={kind} />}
           {proxyAlt && (
             <Restart
@@ -512,9 +567,9 @@ export function SetupWizard() {
               why="A Wi-Fi proxy is a setting on the phone, used instead of the VPN app. Wiretrace cannot switch to it while it runs."
             />
           )}
-          {step === 5 && <Summary state={appState} kind={kind} />}
+          {step === 5 && <Summary state={appState} kind={kind} choice={choice} />}
           <div className="wiz-foot">
-            {wg && step === 2 && !needsProxy(kind) && (
+            {wireguardOnly && step === 2 && !needsProxy(kind) && (
               <button type="button" className="linkbtn" aria-expanded={alt} onClick={() => setAlt(!alt)}>
                 Use Wi-Fi proxy instead
               </button>

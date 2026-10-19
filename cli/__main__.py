@@ -21,8 +21,9 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--preset", required=True, help="preset name: presets/<name>.yaml")
     start_cmd.add_argument("--target", choices=start.TARGETS, default="device",
                            help="device under test (default: %(default)s)")
-    start_cmd.add_argument("--mode", choices=start.MODES, default="wireguard",
-                           help="wireguard (UDP 51820) or proxy (Wi-Fi proxy, TCP 8080); default: %(default)s")
+    start_cmd.add_argument("--mode", choices=start.MODES, default="both",
+                           help="both (Wi-Fi proxy on TCP 8888 and WireGuard on UDP 51820), proxy (Wi-Fi proxy "
+                                "only) or wireguard (WireGuard only); default: %(default)s")
     ui_choice = start_cmd.add_mutually_exclusive_group()
     ui_choice.add_argument("--ui", choices=(start.MITMWEB, start.WIRETRACE), default=start.MITMWEB,
                            help="window to open: mitmweb, or wiretrace (preview); default: %(default)s")
