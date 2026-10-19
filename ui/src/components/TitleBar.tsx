@@ -254,75 +254,78 @@ export function TitleBar({ newCount }: Props) {
 
   return (
     <header className="titlebar">
-      <span className="title">
-        <img className="mark" src={markUrl} alt="" width={24} height={24} />
-        <span className="name">
-          Wiretrace
-          {/* Always rendered, so the name does not move up once /api/state arrives. */}
-          <span className="version" title={version ? 'Wiretrace version' : undefined}>
-            {version}
+      <div className="tb-group">
+        <span className="title">
+          <img className="mark" src={markUrl} alt="" width={32} height={32} />
+          <span className="name">
+            Wiretrace
+            {/* Always rendered, so the name does not move up once /api/state arrives. */}
+            <span className="version" title={version ? 'Wiretrace version' : undefined}>
+              {version}
+            </span>
           </span>
         </span>
-      </span>
-      <div className="seg sm" role="tablist" aria-label="View">
-        <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>
-          Traffic
+        <div className="seg sm" role="tablist" aria-label="View">
+          <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>
+            Traffic
+          </button>
+          <button type="button" role="tab" aria-selected={ui.view === 'logs'} className={ui.view === 'logs' ? 'on' : ''} onClick={() => patch({ view: 'logs' })}>
+            Logs{crashes > 0 && <span className="c">{crashes} {crashes === 1 ? 'crash' : 'crashes'}</span>}
+          </button>
+        </div>
+        {appState && (
+          <Recording
+            startedAt={appState.started_at}
+            reconnecting={phase === 'reconnecting'}
+            paused={paused && !viewing}
+            fromApp={appState.from_app}
+          />
+        )}
+        {ui.view === 'traffic' && !viewing && (
+          <>
+            <button
+              type="button"
+              className={`btn small${paused ? ' toggled' : ''}`}
+              onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })}
+              aria-pressed={paused}
+            >
+              {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
+            </button>
+          </>
+        )}
+        {ui.view !== 'rules' && !viewing && (
+          <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
+            Clear
+          </button>
+        )}
+      </div>
+      <div className="tb-group end">
+        {appState && pill && (
+          <>
+            <PresetMenu current={appState.preset} target={appState.target} viewing={viewing} />
+            <DeviceMenu state={appState} seen={seen} viewing={viewing} />
+            <span className={`pill ${pill.tone}`} title={pill.title}>
+              {pill.text}
+            </span>
+          </>
+        )}
+        <button
+          type="button"
+          className={`btn${ui.view === 'rules' ? ' toggled' : ''}`}
+          aria-pressed={ui.view === 'rules'}
+          disabled={!!viewing}
+          title={offWhileViewing}
+          onClick={() => patch({ view: ui.view === 'rules' ? 'traffic' : 'rules' })}
+        >
+          Rules{rulesOn > 0 && <span className="count">{rulesOn} active</span>}
         </button>
-        <button type="button" role="tab" aria-selected={ui.view === 'logs'} className={ui.view === 'logs' ? 'on' : ''} onClick={() => patch({ view: 'logs' })}>
-          Logs{crashes > 0 && <span className="c">{crashes} {crashes === 1 ? 'crash' : 'crashes'}</span>}
+        <button type="button" className="btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
+          Setup
+        </button>
+        <button type="button" className="btn primary" onClick={() => dispatch({ type: 'openReport' })}>
+          Report bug
         </button>
       </div>
-      {appState && (
-        <Recording
-          startedAt={appState.started_at}
-          reconnecting={phase === 'reconnecting'}
-          paused={paused && !viewing}
-          fromApp={appState.from_app}
-        />
-      )}
-      {ui.view === 'traffic' && !viewing && (
-        <>
-          <button
-            type="button"
-            className={`btn small${paused ? ' toggled' : ''}`}
-            onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })}
-            aria-pressed={paused}
-          >
-            {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
-          </button>
-        </>
-      )}
-      {ui.view !== 'rules' && !viewing && (
-        <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
-          Clear
-        </button>
-      )}
-      <span className="spacer" />
-      {appState && pill && (
-        <>
-          <PresetMenu current={appState.preset} target={appState.target} viewing={viewing} />
-          <DeviceMenu state={appState} seen={seen} viewing={viewing} />
-          <span className={`pill ${pill.tone}`} title={pill.title}>
-            {pill.text}
-          </span>
-        </>
-      )}
-      <button
-        type="button"
-        className={`btn${ui.view === 'rules' ? ' toggled' : ''}`}
-        aria-pressed={ui.view === 'rules'}
-        disabled={!!viewing}
-        title={offWhileViewing}
-        onClick={() => patch({ view: ui.view === 'rules' ? 'traffic' : 'rules' })}
-      >
-        Rules{rulesOn > 0 && <span className="count">{rulesOn} active</span>}
-      </button>
-      <button type="button" className="btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
-        Setup
-      </button>
-      <button type="button" className="btn primary" onClick={() => dispatch({ type: 'openReport' })}>
-        Report bug
-      </button>
     </header>
   );
 }
