@@ -1,6 +1,7 @@
 import type { AppState, DeviceInfo, FlowSummary } from '../types';
 import { deviceLabel } from './devices';
 import { OFF_WHILE_VIEWING } from './presets';
+import { apiHostFor } from './rules';
 
 export type DeviceKind = 'iphone' | 'android' | 'ios-sim' | 'android-emu';
 
@@ -284,9 +285,12 @@ export function deviceLogSteps(kind: DeviceKind): string[] {
   }
 }
 
-/** The first request that reached an API host: only API hosts and mitm.it are decrypted, the receiver is never listed. */
-export function firstApiFlow(flows: readonly FlowSummary[]): FlowSummary | null {
-  return flows.find((f) => !isOnboarding(f)) ?? null;
+/**
+ * The first request that reached one of the preset's API hosts. Plain HTTP to any host is listed too
+ * (an iPhone's OCSP checks, for one), so "not mitm.it" does not prove the certificate is trusted.
+ */
+export function firstApiFlow(flows: readonly FlowSummary[], apiHosts: readonly string[]): FlowSummary | null {
+  return flows.find((f) => apiHostFor(f.host.replace(/\.$/, ''), apiHosts) !== '') ?? null;
 }
 
 function isOnboarding(f: FlowSummary): boolean {
@@ -304,8 +308,8 @@ export interface OnboardingProgress {
  * The first two items of the Trust checklist. An API request proves both, so they stay ticked when
  * the mitm.it requests were dropped by the 10,000-request cap.
  */
-export function onboardingProgress(flows: readonly FlowSummary[]): OnboardingProgress {
-  if (firstApiFlow(flows)) return { pageOpened: true, certDownloaded: true };
+export function onboardingProgress(flows: readonly FlowSummary[], apiHosts: readonly string[]): OnboardingProgress {
+  if (firstApiFlow(flows, apiHosts)) return { pageOpened: true, certDownloaded: true };
   const page = flows.filter(isOnboarding);
   return { pageOpened: page.length > 0, certDownloaded: page.some((f) => f.path.startsWith(CERT_PATH)) };
 }
@@ -320,13 +324,13 @@ export type StepKey = 'device' | 'connect' | 'trust' | 'check' | 'logs';
 export type CheckedStep = Exclude<StepKey, 'device'>;
 
 /** Whether a step's live check passes. */
-export function stepDone(step: CheckedStep, state: AppState, flows: readonly FlowSummary[]): boolean {
+export function stepDone(step: CheckedStep, state: AppState, flows: readonly FlowSummary[], apiHosts: readonly string[]): boolean {
   switch (step) {
     case 'connect':
       return state.device_seen_at !== null;
     case 'trust':
     case 'check':
-      return firstApiFlow(flows) !== null;
+      return firstApiFlow(flows, apiHosts) !== null;
     case 'logs':
       return state.device_logs !== null;
   }
@@ -348,19 +352,26 @@ export function nextLabel(done: boolean, next: StepKey): string {
 export type TrustHint = 'not-trusted' | 'no-page' | null;
 
 /** TLS failures to API hosts first; else, for a phone, no mitm.it request NO_PAGE_HINT_S after the step opened while connected. */
-export function trustHint(kind: DeviceKind, state: AppState, flows: readonly FlowSummary[], sinceMs: number, now: number): TrustHint {
-  if (firstApiFlow(flows)) return null;
+export function trustHint(
+  kind: DeviceKind,
+  state: AppState,
+  flows: readonly FlowSummary[],
+  apiHosts: readonly string[],
+  sinceMs: number,
+  now: number,
+): TrustHint {
+  if (firstApiFlow(flows, apiHosts)) return null;
   if (state.tls_failures > 0) return 'not-trusted';
   if (!usesOnboardingPage(kind) || state.device_seen_at === null) return null;
-  if (onboardingProgress(flows).pageOpened) return null;
+  if (onboardingProgress(flows, apiHosts).pageOpened) return null;
   return now - sinceMs >= NO_PAGE_HINT_S * 1000 ? 'no-page' : null;
 }
 
 export type AppHint = 'not-trusted' | 'no-traffic' | null;
 
 /** TLS failures to API hosts; else nothing from the app NO_APP_TRAFFIC_HINT_S after the step opened while connected. */
-export function appHint(state: AppState, flows: readonly FlowSummary[], sinceMs: number, now: number): AppHint {
-  if (firstApiFlow(flows)) return null;
+export function appHint(state: AppState, flows: readonly FlowSummary[], apiHosts: readonly string[], sinceMs: number, now: number): AppHint {
+  if (firstApiFlow(flows, apiHosts)) return null;
   if (state.tls_failures > 0) return 'not-trusted';
   if (state.device_seen_at === null) return null;
   return now - sinceMs >= NO_APP_TRAFFIC_HINT_S * 1000 ? 'no-traffic' : null;
@@ -412,10 +423,10 @@ export function beforeYouStart(kind: DeviceKind, wireguard: boolean): { needs: s
 }
 
 /** The checklist of the Trust step, in order. */
-export function trustChecklist(kind: DeviceKind, flows: readonly FlowSummary[]): { label: string; done: boolean }[] {
-  const trusted = { label: 'Trusted: the first request to an API host arrived', done: firstApiFlow(flows) !== null };
+export function trustChecklist(kind: DeviceKind, flows: readonly FlowSummary[], apiHosts: readonly string[]): { label: string; done: boolean }[] {
+  const trusted = { label: 'Trusted: the first request to an API host arrived', done: firstApiFlow(flows, apiHosts) !== null };
   if (!usesOnboardingPage(kind)) return [trusted];
-  const p = onboardingProgress(flows);
+  const p = onboardingProgress(flows, apiHosts);
   return [
     { label: 'Page opened on the phone', done: p.pageOpened },
     { label: 'Certificate downloaded', done: p.certDownloaded },
@@ -448,13 +459,14 @@ export function setupSummary(
   kind: DeviceKind,
   state: AppState,
   flows: readonly FlowSummary[],
+  apiHosts: readonly string[],
   choice: ConnectionChoice = 'proxy',
 ): { label: string; done: boolean }[] {
   const via = usesTunnel(kind, wireguardSteps(state.mode, choice, kind)) ? 'through WireGuard' : 'through the proxy';
   return [
-    { label: `${deviceChoice(kind).label} connected to this Mac ${via}`, done: stepDone('connect', state, flows) },
-    { label: 'Wiretrace trusted, and the app\'s requests arrive', done: stepDone('check', state, flows) },
-    { label: state.device_logs ? 'Device logs on' : 'Device logs off (optional)', done: stepDone('logs', state, flows) },
+    { label: `${deviceChoice(kind).label} connected to this Mac ${via}`, done: stepDone('connect', state, flows, apiHosts) },
+    { label: 'Wiretrace trusted, and the app\'s requests arrive', done: stepDone('check', state, flows, apiHosts) },
+    { label: state.device_logs ? 'Device logs on' : 'Device logs off (optional)', done: stepDone('logs', state, flows, apiHosts) },
   ];
 }
 
