@@ -5,6 +5,7 @@ import { devicePill } from '../logic/device';
 import { deviceLabel, deviceLogsLine, deviceMenuState, modeLabel } from '../logic/devices';
 import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
+import { deviceMenuTitle } from '../logic/proxyDevices';
 import { PAUSED_LABEL, PAUSED_TIP, recordingPill } from '../logic/recording';
 import { OFF_WHILE_VIEWING, presetMenuState, presetRowsState } from '../logic/presets';
 import { useNow } from '../hooks';
@@ -176,7 +177,7 @@ function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; 
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={menu.disabled}
-        title={menu.title}
+        title={deviceMenuTitle(menu.title, state, viewing)}
         onClick={() => setOpen(!open)}
       >
         {deviceLabel(state.target)} · {modeLabel(state.mode)}

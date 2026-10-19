@@ -363,6 +363,7 @@ button.pill { border: 0; }
 .src.pick:disabled { background: transparent; }
 .switch-error { margin-top: 12px; }
 .switch-foot .tip { margin: 0; }
+.switch-kind { margin-bottom: 4px; }
 .pop-rows { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; display: flex; flex-direction: column; }
 .pop-row { text-align: left; border: 0; background: transparent; padding: 7px 8px; border-radius: 8px; font-size: 12.5px; color: var(--blue); font-weight: 500; }
 .pop-row:hover:not(:disabled) { background: var(--side); }
@@ -550,6 +551,8 @@ ul.needs li { margin-bottom: 4px; }
 .banner.bad { background: var(--red-soft); color: var(--red); }
 .banner.warn { background: var(--orange-soft); color: var(--orange); }
 .banner.viewing { display: flex; align-items: center; gap: 10px; background: var(--blue-soft); color: var(--blue); }
+.banner.proxy { display: flex; align-items: center; gap: 10px; background: var(--orange-soft); color: var(--orange); }
+.banner .more { margin-left: 8px; font-weight: 600; }
 
 /* ---------- compare ---------- */
 .cmp { padding: 14px 26px 18px; display: flex; flex-direction: column; gap: 12px; }

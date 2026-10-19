@@ -1927,6 +1927,104 @@ def test_a_valid_switch_file_names_the_preset_and_the_target_and_is_deleted(tmp_
     assert start.take_switch(tmp_path) is None
 
 
+# Switching to another phone on the Wi-Fi proxy (spec 021)
+
+PHONE_A, PHONE_B = "192.0.2.71", "192.0.2.72"
+
+
+def test_021_a_switch_file_with_a_client_names_it_and_is_deleted(tmp_path):
+    (tmp_path / session.SWITCH).write_text(json.dumps({"name": "staging", "target": "ios", "client": PHONE_B}))
+    assert start.take_switch(tmp_path) == start.Switch("staging", "ios", PHONE_B)
+    assert not (tmp_path / session.SWITCH).exists()
+    assert start.Switch("staging", "ios").client is None
+
+
+@pytest.mark.parametrize("raw", [{"name": "staging", "target": "ios", "client": 3},
+                                 {"name": "staging", "target": "ios", "client": None},
+                                 {"name": "staging", "target": "ios", "client": [PHONE_B]},
+                                 {"name": "staging", "target": "ios", "client": PHONE_B, "x": 1},
+                                 {"name": "staging", "client": PHONE_B}])
+def test_021_a_switch_file_with_a_client_of_another_shape_is_no_switch_and_is_deleted(tmp_path, raw):
+    (tmp_path / session.SWITCH).write_text(json.dumps(raw))
+    assert start.take_switch(tmp_path) is None
+    assert not (tmp_path / session.SWITCH).exists()
+
+
+@pytest.mark.parametrize("value, expected", [(PHONE_B, PHONE_B), (f"::ffff:{PHONE_B}", PHONE_B),
+                                             ("2001:db8::7", "2001:db8::7"), ("127.0.0.1", None), ("::1", None),
+                                             ("169.254.3.3", None), ("fe80::1%en0", None), ("0.0.0.0", None),
+                                             ("::", None), ("239.1.1.1", None), ("not-an-ip", None), ("", None),
+                                             ("192.0.2.0/24", None)])
+def test_021_pinnable_client_matches_the_guard(value, expected):
+    from addons import proxy_guard
+
+    assert start.pinnable_client(value) == expected == proxy_guard.pinnable(value)
+
+
+def test_021_the_pinned_option_is_on_the_command_only_with_pinning_in_a_proxy_mode():
+    preset = Preset("staging", ("api.example.com",))
+    for mode in ("proxy", "both"):
+        cmd = start.build_command(preset, mode, "wiretrace", Path("/tmp/s/flows.mitm"), Path("/venv/bin"),
+                                  pinned=PHONE_B)
+        assert cmd[cmd.index("qa_proxy_pin=true") + 1:cmd.index("qa_proxy_pin=true") + 3] == [
+            "--set", f"qa_proxy_pinned={PHONE_B}"]
+    named = start.build_command(preset, "both", "wiretrace", Path("/tmp/s/flows.mitm"), Path("/venv/bin"),
+                                clients=("192.168.1.20",), pinned=PHONE_B)
+    wireguard = start.build_command(preset, "wireguard", "wiretrace", Path("/tmp/s/flows.mitm"), Path("/venv/bin"),
+                                    pinned=PHONE_B)
+    plain = start.build_command(preset, "both", "wiretrace", Path("/tmp/s/flows.mitm"), Path("/venv/bin"))
+    assert not any("qa_proxy_pinned" in part for part in (*named, *wireguard, *plain))
+
+
+def test_021_only_the_session_after_a_client_switch_is_pinned(tmp_path, monkeypatch, capsys):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", PHONE_B)),
+                                                        (start.RUNNING, start.Switch("staging", "ios")),
+                                                        (start.RUNNING, "other")], mode="both")
+    assert code == 0 and len(calls) == 4
+    pinned = [[part for part in c["cmd"] if part.startswith("qa_proxy_pinned=")] for c in calls]
+    assert pinned == [[], [f"qa_proxy_pinned={PHONE_B}"], [], []]
+    assert all("qa_proxy_pin=true" in c["cmd"] for c in calls)
+    printed = capsys.readouterr()
+    assert PHONE_B not in printed.out + printed.err
+    for folder in (c["folder"] for c in calls):
+        assert PHONE_B not in (folder / session.META).read_text()
+
+
+@pytest.mark.parametrize("address", ["127.0.0.1", "169.254.1.1", "0.0.0.0", "ff02::1", "nope"])
+def test_021_a_client_the_launcher_cannot_pin_ends_wiretrace(tmp_path, monkeypatch, capsys, address):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", address))])
+    assert code == 1 and len(calls) == 1
+    printed = capsys.readouterr()
+    assert start.CLIENT_NOT_PINNABLE in printed.err and address not in printed.out + printed.err
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
+def test_021_a_run_started_with_client_does_not_take_a_client_switch(tmp_path, monkeypatch, capsys):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", PHONE_B))],
+                                clients=("192.168.1.20",))
+    assert code == 1 and len(calls) == 1
+    assert start.CLIENT_WITH_CLIENTS in capsys.readouterr().err
+
+
+def test_021_a_stop_signal_after_a_client_switch_was_decided_starts_nothing(tmp_path, monkeypatch):
+    def collector_for(preset, target, *args):
+        if target == "ios":
+            os.kill(os.getpid(), signal.SIGINT)
+        return None, "off (test)"
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", PHONE_B))],
+                                collector_for=collector_for)
+    assert code == 0 and len(calls) == 1
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
+def test_021_the_switch_line_has_no_address():
+    line = start.switch_line(start.Switch("staging", "ios", PHONE_B), "ios")
+    assert line == "Switching to another device on the Wi-Fi proxy: saving this session first."
+    assert start.switch_line(start.Switch("staging", "ios"), "android") == "Switching to iPhone: saving this session first."
+    assert start.switch_line(start.Switch("other", "ios"), "ios") == "Switching presets: saving this session first."
+
+
 # Started from Wiretrace.app (spec 014)
 
 @pytest.mark.parametrize("ui, no_menu_bar", [("mitmweb", False), ("none", False), ("wiretrace", True)])

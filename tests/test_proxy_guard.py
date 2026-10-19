@@ -160,6 +160,109 @@ def test_a_bad_client_entry_is_an_options_error():
         assert not addon._listed("192.168.1.21")
 
 
+# qa_proxy_pinned and the refused addresses (spec 021)
+
+def configured(**options) -> ProxyGuard:
+    from mitmproxy.test import taddons
+
+    addon = ProxyGuard()
+    with taddons.context(addon) as tctx:
+        tctx.configure(addon, qa_proxy_clients=["127.0.0.0/8", "::1"], **options)
+    return addon
+
+
+def test_021_the_pinned_option_is_accepted_first_and_the_next_address_is_refused():
+    addon = configured(qa_proxy_pin=True, qa_proxy_pinned="192.0.2.72")
+    assert addon.pinned == "192.0.2.72"
+    other = connect(addon, "192.0.2.71")
+    assert other.error and addon.pinned == "192.0.2.72"
+    assert connect(addon, "192.0.2.72").error is None
+    assert connect(addon, "127.0.0.1").error is None
+
+
+def test_021_the_pinned_option_is_normalized_like_a_client_address():
+    addon = configured(qa_proxy_pin=True, qa_proxy_pinned="::ffff:192.0.2.72")
+    assert addon.pinned == "192.0.2.72"
+    assert connect(addon, "::ffff:192.0.2.72").error is None
+
+
+def test_021_the_pinned_option_is_ignored_without_pinning():
+    addon = configured(qa_proxy_pin=False, qa_proxy_pinned="192.0.2.72")
+    assert addon.pinned is None
+    assert connect(addon, "192.0.2.72").error
+
+
+def test_021_the_pinned_option_never_replaces_a_device_already_pinned():
+    from mitmproxy.test import taddons
+
+    addon = ProxyGuard()
+    with taddons.context(addon) as tctx:
+        tctx.configure(addon, qa_proxy_clients=["127.0.0.0/8"], qa_proxy_pin=True)
+        assert connect(addon, "192.0.2.71").error is None
+        tctx.configure(addon, qa_proxy_pinned="192.0.2.72")
+    assert addon.pinned == "192.0.2.71"
+    assert connect(addon, "192.0.2.72").error
+
+
+@pytest.mark.parametrize("value", ["127.0.0.1", "::1", "::ffff:127.0.0.1", "169.254.1.1", "fe80::1", "fe80::1%en0",
+                                   "0.0.0.0", "::", "224.0.0.1", "ff02::1", "not-an-ip", "192.0.2.0/24", " "])
+def test_021_a_pinned_value_that_cannot_be_a_phone_is_an_options_error(value):
+    from mitmproxy import exceptions
+    from mitmproxy.test import taddons
+
+    addon = ProxyGuard()
+    with taddons.context(addon) as tctx:
+        with pytest.raises(exceptions.OptionsError):
+            tctx.configure(addon, qa_proxy_pin=True, qa_proxy_pinned=value)
+    assert addon.pinned is None
+
+
+def test_021_refusals_are_recorded_per_address_with_counts(monkeypatch):
+    clock = iter(range(100, 200))
+    monkeypatch.setattr(proxy_guard.time, "time", lambda: float(next(clock)))
+    addon = guard("127.0.0.0/8", pin=True)
+    connect(addon, "192.0.2.10")
+    connect(addon, "192.0.2.11")
+    connect(addon, "192.0.2.12")
+    connect(addon, "::ffff:192.0.2.11")
+    assert addon.waiting() == [
+        proxy_guard.Waiting("192.0.2.11", 100.0, 102.0, 2),
+        proxy_guard.Waiting("192.0.2.12", 101.0, 101.0, 1),
+    ]
+
+
+def test_021_the_list_keeps_the_eight_seen_most_recently(monkeypatch):
+    clock = iter(range(100, 200))
+    monkeypatch.setattr(proxy_guard.time, "time", lambda: float(next(clock)))
+    addon = guard("127.0.0.0/8", pin=True)
+    connect(addon, "192.0.2.1")
+    for n in range(2, 10):
+        connect(addon, f"192.0.2.{n}")
+    connect(addon, "192.0.2.2")
+    connect(addon, "192.0.2.10")
+    listed = [w.address for w in addon.waiting()]
+    assert len(listed) == proxy_guard.MAX_WAITING == 8
+    assert listed[:2] == ["192.0.2.10", "192.0.2.2"] and "192.0.2.3" not in listed
+
+
+def test_021_wireguard_and_accepted_clients_are_never_recorded():
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    connect(addon, "192.0.2.10")
+    connect(addon, "127.0.0.1")
+    for _ in range(3):
+        connect(addon, "10.0.0.1", WIREGUARD)
+    assert addon.waiting() == []
+
+
+def test_021_the_refusal_line_is_unchanged_and_has_no_address(capsys):
+    addon = configured(qa_proxy_pin=True, qa_proxy_pinned="192.0.2.72")
+    connect(addon, "192.0.2.71")
+    connect(addon, "192.0.2.70")
+    printed = capsys.readouterr().out
+    assert printed.count(REFUSAL) == 1
+    assert "192.0.2.7" not in printed
+
+
 # server_connect
 
 def _run(addon: ProxyGuard, client_ip: str, host: str, mode: mode_specs.ProxyMode | None = REGULAR) -> _Data:
@@ -295,6 +398,53 @@ def test_real_mitmdump_refuses_loopback_when_it_is_not_allowed(tmp_path, both):
         assert text.count(REFUSAL) == 1
         line = next(line for line in text.splitlines() if line.startswith("Proxy: refused"))
         assert "127.0.0.1" not in line and "192.0.2.1" not in line
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait()
+
+
+def _refused(port: int) -> bool:
+    conn = None
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+        conn.request("GET", "http://example.com/")
+        response = conn.getresponse()
+        response.read()
+        return response.status >= 400
+    except (OSError, http.client.HTTPException):
+        return True
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+@needs_mitmdump
+def test_021_real_mitmdump_is_pinned_before_its_first_connection(tmp_path):
+    """Invariant 4: without the option, this Mac's first connection would take the pin."""
+    port = _free_port()
+    log = tmp_path / "mitmdump.log"
+    args = [
+        str(VENV_BIN / "mitmdump"), "--mode", "regular", "--listen-port", str(port),
+        "--set", f"confdir={tmp_path / 'confdir'}",
+        "-s", str(ROOT / "addons" / "proxy_guard.py"),
+        "--set", "qa_proxy_clients=192.0.2.1", "--set", "qa_proxy_pin=true",
+        "--set", "qa_proxy_pinned=192.0.2.72",
+    ]
+    with open(log, "w") as out:
+        proc = subprocess.Popen(args, stdout=out, stderr=subprocess.STDOUT, cwd=ROOT,
+                                env={**__import__("os").environ, "PYTHONUNBUFFERED": "1"})
+    try:
+        deadline = time.monotonic() + 60
+        while not _accepts(port):
+            if proc.poll() is not None or time.monotonic() > deadline:
+                raise AssertionError(log.read_text()[-2000:])
+            time.sleep(0.05)
+        assert _refused(port)
+        text = log.read_text()
+        assert text.count(REFUSAL) == 1
+        line = next(line for line in text.splitlines() if line.startswith("Proxy: refused"))
+        assert "192.0.2.72" not in line and "127.0.0.1" not in line
     finally:
         if proc.poll() is None:
             proc.kill()

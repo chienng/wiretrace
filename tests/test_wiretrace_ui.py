@@ -2651,6 +2651,301 @@ def test_019_04_the_state_says_whether_the_app_started_the_session(tmp_path, opt
     scenario(body, folder=folder, **options)
 
 
+# Switching to another phone on the Wi-Fi proxy (spec 021).
+
+PHONE_A, PHONE_B, PHONE_C = "192.0.2.71", "192.0.2.72", "192.0.2.73"
+
+
+def client_scenario(body, tmp_path, target="ios", mode="both", pin=True, guard=True):
+    """`body(ui, client, tctx, folder, guard)`: proxy_guard loaded and PHONE_A pinned, unless told otherwise."""
+    from addons import proxy_guard
+
+    presets, folder = switch_session(tmp_path, target)
+    write_session(folder, target=target, mode=mode)
+    addon = proxy_guard.ProxyGuard() if guard else None
+    options = {"qa_proxy_clients": ["127.0.0.0/8", "::1"], "qa_proxy_pin": pin} if guard else {}
+
+    async def wrapped(ui, client, tctx):
+        ui.presets_dir = presets
+        tctx.master.shutdown = mock.Mock()
+        if addon is not None and pin:
+            accepted = tflow.tclient_conn()
+            accepted.peername = (PHONE_A, 50000)
+            addon.client_connected(accepted)
+            assert addon.pinned == PHONE_A
+        await body(ui, client, tctx, folder, addon)
+
+    scenario(wrapped, folder=folder, extra=(addon,) if addon else (), **options)
+
+
+def refuse(ui, guard, ip: str) -> None:
+    """A connection proxy_guard refuses, then the window's own hook, in the order mitmproxy runs them."""
+    conn = tflow.tclient_conn()
+    conn.peername = (ip, 50001)
+    guard.client_connected(conn)
+    assert conn.error
+    ui.client_connected(conn)
+
+
+async def switch_client(client, target, address, **kwargs):
+    return await client.fetch("/api/device", "POST", body={"target": target, "client": address}, **kwargs)
+
+
+def error_text(response) -> str:
+    return json.loads(response.body)["error"]
+
+
+def test_021_the_state_names_the_accepted_device_and_the_waiting_ones_most_recent_first(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        state = await client.json("/api/state")
+        assert (state["proxy_device"], state["proxy_waiting"]) == (PHONE_A, [])
+        refuse(ui, guard, PHONE_B)
+        refuse(ui, guard, PHONE_C)
+        refuse(ui, guard, PHONE_B)
+        waiting = (await client.json("/api/state"))["proxy_waiting"]
+        assert [(w["address"], w["count"]) for w in waiting] == [(PHONE_B, 2), (PHONE_C, 1)]
+        assert all(set(w) == {"address", "first_at", "last_at", "count"} for w in waiting)
+        assert waiting[0]["first_at"] <= waiting[1]["first_at"] <= waiting[0]["last_at"]
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over", [{"pin": False}, {"guard": False}, {"mode": "wireguard"}])
+def test_021_no_proxy_content_without_pinning(tmp_path, over):
+    async def body(ui, client, tctx, folder, guard):
+        if guard is not None:
+            refuse(ui, guard, PHONE_B)
+        ui.hub.flush(ui.state)
+        assert ui.hub._state_changed is False
+        state = await client.json("/api/state")
+        assert (state["proxy_device"], state["proxy_waiting"]) == (None, [])
+        response = await switch_client(client, "ios", PHONE_B)
+        assert response.code == 409 and error_text(response) == wiretrace_ui.NO_CLIENT_SWITCH
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path, **over)
+
+
+def test_021_no_waiting_list_while_a_previous_session_is_open(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        assert (await client.json("/api/state"))["proxy_waiting"] == []
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_a_new_address_pushes_the_state_at_once_and_a_repeat_at_most_every_5_s(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        ui.hub._state_changed = False
+        refuse(ui, guard, PHONE_B)
+        assert ui.hub._state_changed is True
+        ui.hub._state_changed = False
+        refuse(ui, guard, PHONE_B)
+        assert ui.hub._state_changed is False
+        refuse(ui, guard, PHONE_C)
+        assert ui.hub._state_changed is True
+        ui.hub._state_changed = False
+        ui._waiting_sent_at -= wiretrace_ui.WAITING_PUSH_S
+        refuse(ui, guard, PHONE_B)
+        assert ui.hub._state_changed is True
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_a_refusal_reaches_an_open_page_within_a_second(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        socket_ = await client.socket()
+        started = time.monotonic()
+        refuse(ui, guard, PHONE_B)
+        seen = await read_until(socket_, lambda m: m["type"] == "state" and m["state"]["proxy_waiting"])
+        assert time.monotonic() - started < 1
+        assert seen[-1]["state"]["proxy_waiting"][0]["address"] == PHONE_B
+        socket_.close()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_a_client_switch_writes_the_three_keys_owner_only_then_shuts_down(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await switch_client(client, "android", PHONE_B)
+        assert response.code == 202 and json.loads(response.body) == {"switching": "staging", "target": "android"}
+        path = folder / session.SWITCH
+        assert json.loads(path.read_text()) == {"name": "staging", "target": "android", "client": PHONE_B}
+        assert (path.stat().st_mode & 0o777) == 0o600 and ui.token not in path.read_text()
+        assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
+        tctx.master.shutdown.assert_called_once()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_the_kind_already_in_use_is_allowed(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await switch_client(client, "ios", PHONE_B)).code == 202
+        assert json.loads((folder / session.SWITCH).read_text())["target"] == "ios"
+
+    client_scenario(body, tmp_path, target="ios")
+
+
+def test_021_an_ipv4_mapped_address_matches_and_is_written_as_ipv4(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await switch_client(client, "device", f"::ffff:{PHONE_B}")).code == 202
+        assert json.loads((folder / session.SWITCH).read_text())["client"] == PHONE_B
+
+    client_scenario(body, tmp_path, mode="proxy")
+
+
+def test_021_an_address_the_session_has_not_refused_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        for address in (PHONE_C, PHONE_A, "198.51.100.9"):
+            response = await switch_client(client, "ios", address)
+            assert response.code == 409 and error_text(response) == wiretrace_ui.NOT_WAITING
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_an_address_dropped_from_the_list_is_a_409(tmp_path):
+    from addons import proxy_guard
+
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        for n in range(proxy_guard.MAX_WAITING):
+            refuse(ui, guard, f"198.51.100.{n + 1}")
+        assert PHONE_B not in {w["address"] for w in ui.waiting_list()}
+        assert (await switch_client(client, "ios", PHONE_B)).code == 409
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("target, message", [("ios-sim", wiretrace_ui.CONNECTS_FROM_MAC),
+                                             ("android-emu", wiretrace_ui.CONNECTS_FROM_MAC),
+                                             ("phone", "Unknown device."), (3, "Unknown device."),
+                                             (None, "Unknown device.")])
+def test_021_the_simulator_the_emulator_or_an_unknown_kind_is_a_400(tmp_path, target, message):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await switch_client(client, target, PHONE_B)
+        assert response.code == 400 and error_text(response) == message
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("address", ["not-an-ip", "", 3, None, ["192.0.2.72"], "192.0.2.0/24", "127.0.0.1",
+                                     "169.254.1.1", "0.0.0.0", "224.0.0.1"])
+def test_021_a_value_that_is_not_a_device_address_is_a_400(tmp_path, address):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await switch_client(client, "ios", address)
+        assert response.code == 400 and error_text(response) == wiretrace_ui.NOT_AN_ADDRESS
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_the_checks_run_in_invariant_2s_order(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        # The kind comes before the address.
+        assert error_text(await switch_client(client, "ios-sim", "not-an-ip")) == wiretrace_ui.CONNECTS_FROM_MAC
+        # A switch in flight comes before the kind and the address.
+        (folder / session.SWITCH).write_text("{}")
+        response = await switch_client(client, "phone", "not-an-ip")
+        assert response.code == 409 and error_text(response) == wiretrace_ui.ALREADY_SWITCHING
+        # A previous session open comes before everything.
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        response = await switch_client(client, "phone", "not-an-ip")
+        assert response.code == 409 and "previous session" in error_text(response)
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_pinning_off_comes_before_a_bad_kind_or_address(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        response = await switch_client(client, "phone", "not-an-ip")
+        assert response.code == 409 and error_text(response) == wiretrace_ui.NO_CLIENT_SWITCH
+
+    client_scenario(body, tmp_path, pin=False)
+
+
+def test_021_a_second_switch_while_one_is_in_flight_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        refuse(ui, guard, PHONE_C)
+        codes = sorted(r.code for r in await asyncio.gather(switch_client(client, "ios", PHONE_B),
+                                                            switch_client(client, "android", PHONE_C)))
+        assert codes == [202, 409]
+        for late in (switch_client(client, "ios", PHONE_C), switch_device(client, "android"),
+                     client.fetch("/api/preset", "POST", body={"name": "other"})):
+            response = await late
+            assert response.code == 409 and error_text(response) == wiretrace_ui.ALREADY_SWITCHING
+        assert [p.name for p in folder.iterdir() if p.name.startswith(session.SWITCH)] == [session.SWITCH]
+        tctx.master.shutdown.assert_called_once()
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("sent", [{"target": "ios", "client": PHONE_B, "name": "x"}, {"client": PHONE_B}])
+def test_021_a_body_with_other_keys_is_a_400(tmp_path, sent):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await client.fetch("/api/device", "POST", body=sent)
+        assert response.code == 400 and error_text(response) == "Unknown device."
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_a_client_switch_without_the_guards_is_refused_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await switch_client(client, "ios", PHONE_B, mutate=False)).code == 403
+        assert (await switch_client(client, "ios", PHONE_B, cookie="wrong")).code == 403
+        assert (await client.fetch("/api/state", cookie=False)).code == 403
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_a_device_switch_without_a_client_writes_two_keys_as_before(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await switch_device(client, "android")).code == 202
+        assert json.loads((folder / session.SWITCH).read_text()) == {"name": "staging", "target": "android"}
+
+    client_scenario(body, tmp_path)
+
+
+def test_021_no_address_reaches_meta_status_the_terminal_or_a_report(tmp_path, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await switch_client(client, "ios", PHONE_B)).code == 202
+        ui.maybe_write_status(time.time())
+        status = (folder / session.STATUS).read_text()
+        meta = (folder / session.META).read_text()
+        (folder / session.SWITCH).unlink()
+        (folder / session.FLOWS).write_bytes(b"")
+        (folder / session.APP_LOG).write_text('{"message": "app"}\n')
+        created = report.create(folder, ui.presets_dir)
+        with zipfile.ZipFile(created.zip) as archive:
+            members = b"".join(archive.read(name) for name in archive.namelist())
+        printed = capsys.readouterr()
+        for text in (status, meta, members.decode("utf-8", "replace"), printed.out, printed.err, caplog.text):
+            assert PHONE_A not in text and PHONE_B not in text
+
+    client_scenario(body, tmp_path)
+
+
 # Editing and creating presets (spec 013, extension A). The number is the spec's test number.
 
 EXAMPLE_PRESET = "name: example\napi_hosts:\n  - api-staging.example.com\n"
