@@ -2641,6 +2641,16 @@ def test_018_20_proxy_pin_is_false_without_the_guard(tmp_path):
     scenario(body, folder=folder)
 
 
+@pytest.mark.parametrize("options, expected", [({}, False), ({"qa_ui_from_app": True}, True)])
+def test_019_04_the_state_says_whether_the_app_started_the_session(tmp_path, options, expected):
+    folder = write_session(tmp_path / "sessions" / "2026-10-14_090000_staging_android")
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/state"))["from_app"] is expected
+
+    scenario(body, folder=folder, **options)
+
+
 # Editing and creating presets (spec 013, extension A). The number is the spec's test number.
 
 EXAMPLE_PRESET = "name: example\napi_hosts:\n  - api-staging.example.com\n"

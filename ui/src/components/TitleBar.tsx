@@ -1,5 +1,6 @@
 import { api, ApiError } from '../api';
 import markUrl from '../assets/mark.svg';
+import { APP_STOP_TIP } from '../logic/appHint';
 import { devicePill } from '../logic/device';
 import { deviceLabel, deviceLogsLine, deviceMenuState, modeLabel } from '../logic/devices';
 import { formatElapsed, formatVersion } from '../logic/format';
@@ -213,10 +214,14 @@ function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; 
   );
 }
 
-function Recording({ startedAt, reconnecting }: { startedAt: number; reconnecting: boolean }) {
+function Recording({ startedAt, reconnecting, fromApp }: { startedAt: number; reconnecting: boolean; fromApp: boolean }) {
   const now = useNow(1000);
   if (reconnecting) return <span className="pill wait">Reconnecting…</span>;
-  return <span className="rec">Recording · {formatElapsed(now / 1000 - startedAt)}</span>;
+  return (
+    <span className="rec" title={fromApp ? APP_STOP_TIP : undefined}>
+      Recording · {formatElapsed(now / 1000 - startedAt)}
+    </span>
+  );
 }
 
 export function TitleBar({ newCount }: Props) {
@@ -258,7 +263,7 @@ export function TitleBar({ newCount }: Props) {
           Logs{crashes > 0 && <span className="c">{crashes} {crashes === 1 ? 'crash' : 'crashes'}</span>}
         </button>
       </div>
-      {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} />}
+      {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} fromApp={appState.from_app} />}
       {ui.view === 'traffic' && !viewing && (
         <>
           <button

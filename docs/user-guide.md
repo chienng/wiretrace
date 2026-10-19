@@ -34,11 +34,12 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
+  [wiretrace-0.9.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz.sha256)
+  (the faster one), or
   [wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256)
-  (the easier one: no Terminal until the setup), or `wiretrace-0.9.1-macos.tar.gz` and
-  `wiretrace-0.9.1-macos.tar.gz.sha256`. Both contain the same files and work on Intel and
-  Apple silicon Macs.
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256).
+  Both contain the same files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
 
@@ -55,22 +56,29 @@ It must print `…: OK`. If it prints `FAILED`, download the file again and do n
 
 ### Step 2 — Put the wiretrace folder in your home folder
 
+**From the `.tar.gz`:** double-click it in Downloads; a `wiretrace` folder appears next to
+it. Drag that folder onto your home folder (in Finder: **Go → Home**). Moving it is
+instant. Do not run Wiretrace from Downloads: the app then needs macOS's permission to
+access that folder, and cleaning up Downloads would delete it. If Downloads already had a
+`wiretrace` folder, the new one is called `wiretrace 2`; drag that one and rename it
+`wiretrace`. In Terminal, the same in one step:
+
+```bash
+tar -xzf ~/Downloads/wiretrace-0.9.1-macos.tar.gz -C ~
+```
+
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
 Finder: **Go → Home**), then eject **Wiretrace 0.9.1**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
-**From the `.tar.gz`:**
-
-```bash
-tar -xzf wiretrace-0.9.1-macos.tar.gz -C ~
-```
-
-Use this command rather than double-clicking the file in Finder, so the folder ends up in
-the right place.
-
 Either way you now have `~/wiretrace`.
 
 ### Step 3 — Run the setup
+
+In Finder, open the `wiretrace` folder in your home folder and double-click **install**. A
+Terminal window opens and runs the setup; when it ends, the window shows the setup check and
+can be closed. To pass an option such as `--skip-android`, or if macOS says it cannot verify
+**install**, run it in Terminal instead:
 
 ```bash
 cd ~/wiretrace
@@ -104,19 +112,24 @@ The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS o
 without asking. You can start every session from it instead of Terminal:
 
 1. The setup opens **Wiretrace** the first time. Later, open it (the blue **W** icon) from
-   Launchpad or Spotlight. To keep it in the
-   Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
+   Launchpad or Spotlight. To keep it in the Dock, in Finder choose **Go → Home**, open
+   **Applications**, and drag **Wiretrace** onto the Dock. The app quits once the session
+   starts, so without that it shows in the Dock only for the few seconds it takes to start.
 2. The app asks nothing. It starts the project (a preset) and the device you used last; the
    first time, the project `default` on an iPhone. If that project was deleted, it starts
    `default`.
 3. After a few seconds the Wiretrace window opens in your browser and the **Wiretrace** menu
-   (the W icon at the top right of the screen) appears.
+   (the W icon at the top right of the screen) appears. The app shows no message when the
+   start works; only when the window takes longer than usual does it say it is still
+   starting.
 4. To use another project or device, switch from the window's title bar (*Switching the
    preset* and *Switching the device* under *The Wiretrace window (preview)*). The app
    remembers the switch for next time.
 
-The session keeps recording after the app's last message closes. To stop it and save
-`flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top right): a session started from the app
+A blue strip under the window's title bar says the same, until you click **Got it**; that
+browser then stops showing it. The session keeps recording when the app closes. To stop it
+and save `flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top
+right; pointing at *Recording* in the window reminds you): a session started from the app
 has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
 Every device in the app accepts both ways to connect, the Wi-Fi proxy and the WireGuard tunnel
 (Part 2, Step 2).

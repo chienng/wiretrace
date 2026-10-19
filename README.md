@@ -33,29 +33,37 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 
 ## Quick start
 
-Steps 1 and 2 happen in Finder. Run the commands after that in **Terminal**, one block at a
-time. The [user guide](docs/user-guide.md) explains each step in more detail.
+Steps 1 to 3 happen in Finder, and step 4 in the Wiretrace app. The **Terminal** commands are
+for checks, options and reports; run them one block at a time. The
+[user guide](docs/user-guide.md) explains each step in more detail.
 
 **1. Download**
-[wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg)
-and double-click it in Downloads. The **Wiretrace 0.9.1** window opens.
+[wiretrace-0.9.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz)
+and double-click it in Downloads. A `wiretrace` folder appears next to it.
 
-**2. Drag the `wiretrace` folder onto your home folder.** In Finder, choose **Go → Home**,
-drag the folder from the Wiretrace 0.9.1 window into it, then eject **Wiretrace 0.9.1**.
-Wiretrace cannot run from the disk image, which is read-only. You now have `~/wiretrace`.
+**2. Drag the `wiretrace` folder onto your home folder.** In Finder, choose **Go → Home** in
+a second window and drag the folder from Downloads into it. You now have `~/wiretrace`.
+(Wiretrace expects it there; run from Downloads, macOS asks the app for access to that
+folder.) If Downloads already had a `wiretrace` folder, the new one is `wiretrace 2`: drag
+that one and rename it `wiretrace`.
 
 Optional, to check the download: also save
-[wiretrace-0.9.1-macos.dmg.sha256](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256)
+[wiretrace-0.9.1-macos.tar.gz.sha256](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz.sha256)
 in Downloads and run this. It must print `OK`; if it prints `FAILED`, download again.
 
 ```bash
-cd ~/Downloads && shasum -a 256 -c wiretrace-0.9.1-macos.dmg.sha256
+cd ~/Downloads && shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
 ```
 
-The same files come as a `.tar.gz` for unpacking in Terminal; see
-[the user guide](docs/user-guide.md#step-2--put-the-wiretrace-folder-in-your-home-folder).
+The same files also come as
+[wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg):
+double-click it and drag the `wiretrace` folder from its window onto your home folder (a
+slower copy), then eject it.
 
-**3. Install** (a few minutes, no password needed, never use `sudo`):
+**3. Install:** in Finder, open the `wiretrace` folder in your home folder and double-click
+**install**. A Terminal window opens and runs it (a few minutes, no password needed). If macOS
+says it cannot verify **install**, or if you only test iOS, run it in Terminal instead (never
+with `sudo`):
 
 ```bash
 cd ~/wiretrace
@@ -68,8 +76,10 @@ check passes, opens it for you (`./install --no-open` does not). You can start r
 new Terminal window is needed.
 
 **4. Start capturing** in the Wiretrace app that the setup opened. Next time, open
-**Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the Dock,
-right-click its Dock icon → **Options** → **Keep in Dock**.
+**Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the Dock, in
+Finder choose **Go → Home**, open **Applications**, and drag **Wiretrace** onto the Dock. (The
+app quits once the session starts, so it shows in the Dock only while starting unless you
+keep it there.)
 
 The app asks nothing: it starts the project and device you used last. The first time, that is
 the project `default`, which comes with Wiretrace, on an iPhone. The Wiretrace window opens

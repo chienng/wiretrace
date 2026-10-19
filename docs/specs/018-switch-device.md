@@ -289,7 +289,8 @@ A first-time tester picks their phone in the Setup wizard instead of in an app d
 - [ ] Already recording: today's "Wiretrace is already recording …" dialog, unchanged.
 - [ ] The closing dialog reads "Wiretrace is recording <project> on <device>. Change either
       from the window's title bar. Stop it from the Wiretrace menu (the W icon at the top
-      right)." It still closes itself after 15 s.
+      right)." It still closes itself after 15 s. (Spec 019 removed this dialog: the advice
+      is a strip in the window.)
 - [ ] A start that fails shows today's error dialog with the log's last lines. For a project
       that no longer loads, that is `load_preset`'s message, as today.
 - [ ] Setup wizard, *Choose device*: when the chosen card is not the session's device, a box

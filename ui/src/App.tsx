@@ -11,6 +11,7 @@ import { TrafficView } from './components/TrafficView';
 import { Connection } from './connection';
 import { useServerFilter } from './hooks';
 import { applyFilters, hostCounts, quickCounts } from './logic/filters';
+import { APP_HINT, loadDismissed, showAppHint, storeDismissed } from './logic/appHint';
 import { flowLinkChoice } from './logic/flowLink';
 import { takeResume } from './logic/setup';
 import { browserStorage } from './storage';
@@ -56,6 +57,26 @@ function ViewingBanner({ name, cutOff }: { name: string; cutOff: boolean }) {
       <span className="spacer" />
       <button type="button" className="btn small" onClick={() => void backToLive(dispatch)}>
         Back to live
+      </button>
+    </div>
+  );
+}
+
+/** Where to switch and how to stop, for a session with no Terminal; shown until Got it, in this browser. */
+function AppHint({ viewing }: { viewing: string | null }) {
+  const { appState } = useStore();
+  const [dismissed, setDismissed] = useState(() => loadDismissed(browserStorage()));
+  if (!showAppHint(appState, viewing, dismissed)) return null;
+  const dismiss = () => {
+    storeDismissed(browserStorage());
+    setDismissed(true);
+  };
+  return (
+    <div className="banner viewing" role="status">
+      <span>{APP_HINT}</span>
+      <span className="spacer" />
+      <button type="button" className="btn small" onClick={dismiss}>
+        Got it
       </button>
     </div>
   );
@@ -154,6 +175,7 @@ export function App() {
     <div className="app">
       <TitleBar newCount={newCount} />
       {view && <ViewingBanner name={view.name} cutOff={view.cutOff} />}
+      <AppHint viewing={viewing} />
       <main className="main">
         {ui.view === 'traffic' && <TrafficView flows={filtered} selected={selected} counts={counts} hosts={hosts} filterError={server.error} />}
         {ui.view === 'logs' && <LogsView />}

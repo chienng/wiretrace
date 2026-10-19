@@ -190,7 +190,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
                 "--set", "qa_ui_open_browser=true"]
         if from_app:
             # Its output goes to app-start.log, a file: the link with the token must not.
-            cmd += ["--set", "qa_ui_print_link=false"]
+            cmd += ["--set", "qa_ui_print_link=false", "--set", "qa_ui_from_app=true"]
     elif preset.default_filter:
         # An option, not mitmdump's positional filter argument, which would also limit saving.
         option = "view_filter" if kind == MITMWEB else "dumper_filter"

@@ -117,6 +117,15 @@ def test_018_a9_the_applet_shows_no_list_and_starts_the_next_choice():
     assert 'app start --project " & quoted form of projectName & " --device " & quoted form of deviceName' in source
 
 
+def test_019_01_the_applet_shows_no_dialog_once_started_and_one_while_still_starting():
+    source = (ROOT / "app" / "Wiretrace.applescript").read_text()
+    assert "Change either from the window's title bar" not in source
+    assert "Wiretrace is recording" not in source
+    ending = source[source.index('if startOutput is "starting" then'):source.index("end run")]
+    assert ending.count("display dialog") == 1
+    assert '"Wiretrace is still starting "' in ending
+
+
 def test_the_applet_source_compiles(tmp_path):
     result = subprocess.run(["osacompile", "-o", str(tmp_path / "check.scpt"), str(ROOT / "app" / "Wiretrace.applescript")],
                             capture_output=True, text=True)

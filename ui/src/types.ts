@@ -103,6 +103,8 @@ export interface AppState {
   proxy_port: number;
   /** The Wi-Fi proxy accepts only the first device that connects (no `--client`). */
   proxy_pin: boolean;
+  /** Started from Wiretrace.app: there is no Terminal, the menu bar is the stop. */
+  from_app: boolean;
   wireguard_conf: string | null;
   mac_ip: string | null;
   faults: Faults;

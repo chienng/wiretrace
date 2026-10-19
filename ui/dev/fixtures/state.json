@@ -9,6 +9,7 @@
  "default_filter": "",
  "proxy_port": 9090,
  "proxy_pin": true,
+ "from_app": true,
  "wireguard_conf": "[Interface]\nPrivateKey = test-private-key-not-real=\nAddress = 10.0.0.2/32\nDNS = 10.0.0.53\n\n[Peer]\nPublicKey = test-public-key-not-real=\nAllowedIPs = 0.0.0.0/0\nEndpoint = 192.0.2.10:51820\n",
  "mac_ip": "192.0.2.10",
  "faults": {
