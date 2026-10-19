@@ -257,7 +257,7 @@ export function TitleBar({ newCount }: Props) {
     <header className="titlebar">
       <div className="tb-group">
         <span className="title">
-          <img className="mark" src={markUrl} alt="" width={32} height={32} />
+          <img className="mark" src={markUrl} alt="" width={36} height={36} />
           <span className="name">
             Wiretrace
             {/* Always rendered, so the name does not move up once /api/state arrives. */}
