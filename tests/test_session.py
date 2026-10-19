@@ -60,6 +60,39 @@ def test_keep_days_is_fourteen():
     assert session.KEEP_DAYS == 14
 
 
+def test_keep_sessions_is_five():
+    assert session.KEEP_SESSIONS == 5
+
+
+def test_only_the_five_newest_sessions_are_kept(tmp_path):
+    folders = [make(tmp_path, NOW - timedelta(hours=hours)) for hours in range(7, 0, -1)]
+    assert session.remove_old(tmp_path, NOW) == 2
+    assert not any(folder.exists() for folder in folders[:2])
+    assert all(folder.is_dir() for folder in folders[2:])
+
+
+def test_the_age_limit_still_applies_within_the_five_newest(tmp_path):
+    old = make(tmp_path, NOW - timedelta(days=20))
+    recent = make(tmp_path, NOW - timedelta(hours=1))
+    assert session.remove_old(tmp_path, NOW) == 1
+    assert not old.exists() and recent.is_dir()
+
+
+def test_folders_without_meta_json_are_not_counted_toward_the_five(tmp_path):
+    loose = [make(tmp_path, NOW - timedelta(minutes=minutes), preset=f"loose{minutes}", meta=False)
+             for minutes in (1, 2, 3)]
+    sessions = [make(tmp_path, NOW - timedelta(hours=hours)) for hours in range(5, 0, -1)]
+    assert session.remove_old(tmp_path, NOW) == 0
+    assert all(folder.is_dir() for folder in loose + sessions)
+
+
+def test_keep_count_is_a_parameter(tmp_path):
+    folders = [make(tmp_path, NOW - timedelta(hours=hours)) for hours in (3, 2, 1)]
+    assert session.remove_old(tmp_path, NOW, keep_count=1) == 2
+    assert [folder.exists() for folder in folders] == [False, False, True]
+    assert session.remove_old(tmp_path, NOW, keep_count=0) == 1
+
+
 def test_folder_with_another_name_is_kept(tmp_path):
     for name in ("notes", "2020-01-01_000000_staging_android.bak", "2020-01-01_000000_staging_linux",
                  "backup-2020-01-01_000000_staging_android"):

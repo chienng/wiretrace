@@ -374,9 +374,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             return 1
         menu_probed = True
 
-    removed = session.remove_old(sessions_dir, datetime.now())
-    if removed:
-        say(f"Deleted {removed} old session(s) (older than {session.KEEP_DAYS} days).")
+    remove_old_sessions(sessions_dir)
 
     bin_dir = bin_dir or Path(sys.prefix) / "bin"
 
@@ -394,6 +392,9 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         switched = False
         code = 0
         while True:
+            # A switch starts a session without a new run: the cap holds across switches too.
+            if switched:
+                remove_old_sessions(sessions_dir)
             rules = redact.rules_for(preset)
             folder = create_folder(preset, target, session_meta(preset, target, mode, kind, rules),
                                    sessions_dir, retry=switched)
@@ -505,6 +506,13 @@ def session_meta(preset: Preset, target: str, mode: str, kind: str, rules: redac
         # So `wiretrace report` still masks these names if the preset is later changed or deleted.
         "redact": {"headers": list(rules.headers), "json_fields": list(rules.fields)},
     }
+
+
+def remove_old_sessions(sessions_dir: Path) -> None:
+    removed = session.remove_old(sessions_dir, datetime.now())
+    if removed:
+        say(f"Deleted {removed} old session(s): Wiretrace keeps the {session.KEEP_SESSIONS} newest, "
+            f"none older than {session.KEEP_DAYS} days.")
 
 
 def create_folder(preset: Preset, target: str, meta: dict, sessions_dir: Path, *, retry: bool) -> Path | None:
