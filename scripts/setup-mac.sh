@@ -29,7 +29,7 @@ finish() {
             echo "Then open Wiretrace from Launchpad or Spotlight."
         fi
     elif [ "$app_made" -eq 1 ] && [ "$open_app" -eq 1 ] && open "$app" 2>/dev/null; then
-        echo "Wiretrace is ready, and the Wiretrace app is opening: choose your project and device."
+        echo "Wiretrace is ready, and the Wiretrace app is opening its window."
         echo "Next time, open Wiretrace from Launchpad or Spotlight; no Terminal needed."
     elif [ "$app_made" -eq 1 ]; then
         echo "Wiretrace is ready: open Wiretrace from Launchpad or Spotlight; no Terminal needed."
@@ -37,7 +37,7 @@ finish() {
         echo "Wiretrace is ready: start it with ./wiretrace start (see the README)."
     fi
     if [ "$app_made" -eq 1 ]; then
-        echo "To keep it in the Dock: right-click its Dock icon > Options > Keep in Dock."
+        echo "To keep it in the Dock: in Finder, Go > Home > Applications, and drag Wiretrace onto the Dock."
     fi
     echo "To type adb or uv yourself, open a new Terminal window first (or run: exec zsh)."
 }
