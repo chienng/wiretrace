@@ -1,5 +1,6 @@
 import type {
   AppState,
+  DeviceInfo,
   FlowDetail,
   FlowSummary,
   LogLine,
@@ -123,6 +124,10 @@ export const api = {
   /** `{switching}` once mitmdump is shutting down; null when that preset is already in use. */
   switchPreset: (name: string) =>
     request<{ switching: string } | null>('/api/preset', { method: 'POST', body: JSON.stringify({ name }) }),
+  devices: async () => (await request<{ devices: DeviceInfo[] }>('/api/devices')).devices,
+  /** `{switching, target}` once mitmdump is shutting down; null when that device is already in use. */
+  switchDevice: (target: string) =>
+    request<{ switching: string; target: string } | null>('/api/device', { method: 'POST', body: JSON.stringify({ target }) }),
   presetDetail: (name: string) => request<PresetDetail>(`/api/presets/${encodeURIComponent(name)}`),
   createPreset: (name: string, fields: PresetFields) =>
     request<{ name: string; revision: string }>('/api/presets', { method: 'POST', body: JSON.stringify({ name, fields }) }),

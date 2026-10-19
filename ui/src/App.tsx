@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { setForbiddenListener } from './api';
 import { CompareDialog } from './components/CompareDialog';
 import { LogsView } from './components/LogsView';
@@ -12,6 +12,8 @@ import { Connection } from './connection';
 import { useServerFilter } from './hooks';
 import { applyFilters, hostCounts, quickCounts } from './logic/filters';
 import { flowLinkChoice } from './logic/flowLink';
+import { takeResume } from './logic/setup';
+import { browserStorage } from './storage';
 import { useData, useDispatch, useStore } from './store';
 import type { FlowSummary } from './types';
 import { backToLive } from './viewing';
@@ -74,10 +76,30 @@ function useFlowLink() {
   }, [loaded, flows, dispatch]);
 }
 
+/** A switch from the Setup wizard left a resume entry: this tab opens Setup on Connect, the first time only. */
+function useSetupResume(): boolean {
+  const dispatch = useDispatch();
+  const { loaded, ui } = useStore();
+  const handled = useRef(false);
+  const [resumed, setResumed] = useState(false);
+  useEffect(() => {
+    if (!loaded || handled.current) return;
+    handled.current = true;
+    if (!takeResume(browserStorage(), Date.now())) return;
+    setResumed(true);
+    dispatch({ type: 'ui', patch: { dialog: 'setup' } });
+  }, [loaded, dispatch]);
+  useEffect(() => {
+    if (resumed && ui.dialog !== 'setup') setResumed(false);
+  }, [resumed, ui.dialog]);
+  return resumed;
+}
+
 export function App() {
   const { phase, loaded, ui, view, switching } = useStore();
   useConnection(switching);
   useFlowLink();
+  const resumed = useSetupResume();
   const { flows, viewing } = useData();
 
   // Pause and Clear act on the live session only.
@@ -137,7 +159,7 @@ export function App() {
         {ui.view === 'logs' && <LogsView />}
         {ui.view === 'rules' && !view && <RulesView />}
       </main>
-      {ui.dialog === 'setup' && !view && <SetupWizard />}
+      {ui.dialog === 'setup' && !view && <SetupWizard startAtConnect={resumed} />}
       {ui.dialog === 'report' && <ReportDialog key={ui.reportFlow ?? ''} session={viewing} flowId={ui.reportFlow} />}
       {ui.dialog === 'compare' && selected && <CompareDialog flow={selected} flows={flows} session={viewing} />}
       <Toast />

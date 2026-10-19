@@ -2366,12 +2366,12 @@ def test_switching_is_refused_while_a_previous_session_is_open(tmp_path):
     switch_scenario(body, tmp_path)
 
 
-def test_a_switch_writes_only_the_name_owner_only_then_shuts_mitmdump_down(tmp_path):
+def test_a_switch_writes_only_the_name_and_this_target_owner_only_then_shuts_mitmdump_down(tmp_path):
     async def body(ui, client, tctx, folder):
         response = await client.fetch("/api/preset", "POST", body={"name": "other"})
-        assert response.code == 202 and json.loads(response.body) == {"switching": "other"}
+        assert response.code == 202 and json.loads(response.body) == {"switching": "other", "target": "android"}
         path = folder / session.SWITCH
-        assert json.loads(path.read_text()) == {"name": "other"}
+        assert json.loads(path.read_text()) == {"name": "other", "target": "android"}
         assert (path.stat().st_mode & 0o777) == 0o600
         assert ui.token not in path.read_text()
         assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
@@ -2426,11 +2426,219 @@ def test_a_malformed_switch_body_is_a_400(tmp_path, sent):
 def test_the_switch_file_is_not_a_report_member(tmp_path):
     presets, folder = switch_session(tmp_path)
     (folder / session.FLOWS).write_bytes(b"")
-    (folder / session.SWITCH).write_text('{"name": "other"}')
+    (folder / session.SWITCH).write_text('{"name": "other", "target": "ios"}')
     (folder / session.APP_LOG).write_text('{"message": "app"}\n')
     created = report.create(folder, presets)
     with zipfile.ZipFile(created.zip) as archive:
         assert not [n for n in archive.namelist() if session.SWITCH in n]
+
+
+# Switching the device (spec 018). The number is the spec's test number.
+
+def fake_collector(preset, target, bin_dir, out):
+    """Device logs as `collector_command` decides them, with every tool found."""
+    return start.collector_command(preset, target, bin_dir, out, find_adb=lambda: "/fake/adb",
+                                   which=lambda tool: f"/fake/{tool}")
+
+
+def device_scenario(body, tmp_path, target="android", mode="wireguard"):
+    presets, folder = switch_session(tmp_path, target)
+    write_session(folder, target=target, mode=mode)
+
+    async def wrapped(ui, client, tctx):
+        ui.presets_dir = presets
+        ui.collector_for = fake_collector
+        ui.bin_dir = tmp_path / "bin"
+        tctx.master.shutdown = mock.Mock()
+        await body(ui, client, tctx, folder)
+
+    scenario(wrapped, folder=folder)
+
+
+async def switch_device(client, target, **kwargs):
+    return await client.fetch("/api/device", "POST", body={"target": target}, **kwargs)
+
+
+def test_018_08_a_device_switch_writes_the_preset_and_the_new_target_then_shuts_down(tmp_path):
+    async def body(ui, client, tctx, folder):
+        response = await switch_device(client, "ios")
+        assert response.code == 202 and json.loads(response.body) == {"switching": "staging", "target": "ios"}
+        path = folder / session.SWITCH
+        assert json.loads(path.read_text()) == {"name": "staging", "target": "ios"}
+        assert (path.stat().st_mode & 0o777) == 0o600 and ui.token not in path.read_text()
+        assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
+        tctx.master.shutdown.assert_called_once()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_09_a_switch_to_the_current_device_does_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        response = await switch_device(client, "android")
+        assert response.code == 204 and response.body == b""
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("sent", [{"target": "phone"}, {"target": "../ios"}, {"target": 3}, {}, {"name": "ios"},
+                                  {"target": "ios", "name": "other"}, "not json", []])
+def test_018_10_an_unknown_device_or_a_malformed_body_is_a_400(tmp_path, sent):
+    async def body(ui, client, tctx, folder):
+        response = await client.fetch("/api/device", "POST", body=sent)
+        assert response.code == 400 and json.loads(response.body)["error"] == "Unknown device."
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_11_the_ios_simulator_is_refused_in_wireguard_mode(tmp_path):
+    async def body(ui, client, tctx, folder):
+        response = await switch_device(client, "ios-sim")
+        assert response.code == 400 and json.loads(response.body)["error"] == start.SIMULATOR_NEEDS_PROXY
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_11_the_ios_simulator_is_accepted_with_the_wi_fi_proxy(tmp_path):
+    async def body(ui, client, tctx, folder):
+        assert (await switch_device(client, "ios-sim")).code == 202
+
+    device_scenario(body, tmp_path, mode="both")
+
+
+def test_018_12_a_device_switch_is_refused_while_a_previous_session_is_open(tmp_path):
+    async def body(ui, client, tctx, folder):
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_android", {}, {"device": [], "app": []})
+        response = await switch_device(client, "ios")
+        assert response.code == 409 and "previous session" in json.loads(response.body)["error"]
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("first, second", [
+    (("/api/preset", {"name": "other"}), ("/api/device", {"target": "ios"})),
+    (("/api/device", {"target": "ios"}), ("/api/preset", {"name": "other"})),
+    (("/api/device", {"target": "ios"}), ("/api/device", {"target": "android-emu"})),
+])
+def test_018_13_device_and_preset_switches_share_one_lock(tmp_path, first, second):
+    async def body(ui, client, tctx, folder):
+        assert (await client.fetch(first[0], "POST", body=first[1])).code == 202
+        response = await client.fetch(second[0], "POST", body=second[1])
+        assert response.code == 409 and "already switching" in json.loads(response.body)["error"]
+        assert [p.name for p in folder.iterdir() if p.name.startswith(session.SWITCH)] == [session.SWITCH]
+        tctx.master.shutdown.assert_called_once()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_13_two_device_switches_at_once_write_one_file(tmp_path):
+    async def body(ui, client, tctx, folder):
+        codes = sorted(r.code for r in await asyncio.gather(switch_device(client, "ios"),
+                                                            switch_device(client, "android-emu")))
+        assert codes == [202, 409]
+        assert [p.name for p in folder.iterdir() if p.name.startswith(session.SWITCH)] == [session.SWITCH]
+        tctx.master.shutdown.assert_called_once()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_14_a_device_switch_without_the_guards_is_refused_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        for headers in ({}, {"X-Wiretrace": "0"}):
+            assert (await switch_device(client, "ios", mutate=False, headers=headers)).code == 403
+        assert (await switch_device(client, "ios", cookie="wrong")).code == 403
+        assert (await switch_device(client, "ios", host="evil.example.com")).code == 403
+        assert (await client.fetch("/api/devices", cookie=False)).code == 403
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_15_a_preset_in_use_that_no_longer_loads_refuses_the_device_switch(tmp_path):
+    async def body(ui, client, tctx, folder):
+        (ui.presets_dir / "staging.yaml").write_text("name: staging\napi_hosts: https://not-a-list\n")
+        response = await switch_device(client, "ios")
+        assert response.code == 400
+        assert json.loads(response.body)["error"].startswith("presets/staging.yaml: 'api_hosts' must be a non-empty list")
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_16_devices_lists_five_rows_in_order_with_labels_and_device_logs(tmp_path):
+    async def body(ui, client, tctx, folder):
+        listed = (await client.json("/api/devices"))["devices"]
+        assert all(set(d) == {"target", "label", "allowed", "why_not", "device_logs"} for d in listed)
+        assert [(d["target"], d["label"]) for d in listed] == [
+            ("ios", "iPhone"), ("android", "Android phone"), ("android-emu", "Android emulator"),
+            ("ios-sim", "iOS Simulator"), ("device", "Another device")]
+        by_target = {d["target"]: d for d in listed}
+        assert by_target["android"]["device_logs"] == "com.example.app"
+        assert by_target["android-emu"]["device_logs"] == "com.example.app"
+        assert by_target["ios"]["device_logs"] == "off (add app.ios_process to the preset)"
+        assert by_target["device"]["device_logs"] == "off (--target device has no device log)"
+        assert by_target["ios-sim"] == {"target": "ios-sim", "label": "iOS Simulator", "allowed": False,
+                                        "why_not": start.SIMULATOR_NEEDS_PROXY,
+                                        "device_logs": "off (add app.ios_process to the preset)"}
+        assert all(d["allowed"] and d["why_not"] is None for d in listed if d["target"] != "ios-sim")
+
+    device_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("mode", ["both", "proxy"])
+def test_018_16_every_device_is_allowed_with_the_wi_fi_proxy(tmp_path, mode):
+    async def body(ui, client, tctx, folder):
+        listed = (await client.json("/api/devices"))["devices"]
+        assert all(d["allowed"] for d in listed)
+
+    device_scenario(body, tmp_path, mode=mode)
+
+
+def test_018_16_devices_say_so_when_the_preset_in_use_does_not_load(tmp_path):
+    async def body(ui, client, tctx, folder):
+        (ui.presets_dir / "staging.yaml").unlink()
+        listed = (await client.json("/api/devices"))["devices"]
+        assert {d["device_logs"] for d in listed} == {"off (the preset in use does not load)"}
+
+    device_scenario(body, tmp_path)
+
+
+def test_018_17_a_preset_switch_names_the_current_target(tmp_path):
+    async def body(ui, client, tctx, folder):
+        assert (await client.fetch("/api/preset", "POST", body={"name": "other"})).code == 202
+        assert json.loads((folder / session.SWITCH).read_text()) == {"name": "other", "target": "ios"}
+
+    device_scenario(body, tmp_path, target="ios")
+
+
+@pytest.mark.parametrize("pin, expected", [(True, True), (False, False)])
+def test_018_20_proxy_pin_is_the_guard_option_when_the_guard_is_loaded(tmp_path, pin, expected):
+    from addons import proxy_guard
+
+    folder = write_session(tmp_path / "sessions" / "2026-10-14_090000_staging_android", mode="both")
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/state"))["proxy_pin"] is expected
+
+    scenario(body, folder=folder, extra=(proxy_guard.ProxyGuard(),), qa_proxy_pin=pin)
+
+
+def test_018_20_proxy_pin_is_false_without_the_guard(tmp_path):
+    folder = write_session(tmp_path / "sessions" / "2026-10-14_090000_staging_android")
+
+    async def body(ui, client, tctx):
+        assert (await client.json("/api/state"))["proxy_pin"] is False
+
+    scenario(body, folder=folder)
 
 
 # Editing and creating presets (spec 013, extension A). The number is the spec's test number.
@@ -2768,15 +2976,16 @@ def test_preset_edit_10_a_save_with_restart_writes_the_file_then_the_switch_file
             (preset_file(ui, "staging").read_text(), (folder / session.SWITCH).read_text())))
         form = edit_fields(api_hosts=["new.example.com", "second.example.com"], android_package="com.example.app")
         response = await put(client, "staging", got["revision"], form, restart=True)
-        assert response.code == 202 and error_of(response) == {"switching": "staging"}
+        assert response.code == 202 and error_of(response) == {"switching": "staging", "target": "android"}
         assert presetfile.load_preset("staging", ui.presets_dir).api_hosts == ("new.example.com", "second.example.com")
         path = folder / session.SWITCH
-        assert json.loads(path.read_text()) == {"name": "staging"} and (path.stat().st_mode & 0o777) == 0o600
+        written = {"name": "staging", "target": "android"}
+        assert json.loads(path.read_text()) == written and (path.stat().st_mode & 0o777) == 0o600
         assert ui.token not in path.read_text() and ui.switching == "staging"
         assert sorted(p.name for p in folder.iterdir()) == [session.SWITCH, session.META]
         tctx.master.shutdown.assert_called_once()
         # Both files were on disk when mitmdump was asked to exit.
-        assert len(seen) == 1 and "new.example.com" in seen[0][0] and json.loads(seen[0][1]) == {"name": "staging"}
+        assert len(seen) == 1 and "new.example.com" in seen[0][0] and json.loads(seen[0][1]) == written
 
     edit_scenario(body, tmp_path)
 

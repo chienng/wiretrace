@@ -45,8 +45,8 @@ sys.exit(start.run("staging", "android", "proxy", ui=a["ui"], presets_dir=Path(a
 
 # Stands in for mitmdump: records the signals it gets in FAKE_EVENTS. FAKE_MODE picks
 # how it behaves, one comma-separated mode per child started; with -r it plays the HAR conversion.
-# `switch:<preset>` writes .switch.json and exits on its own, `switch-empty:` does too without
-# flows, `switch-wait:` writes it and then waits for SIGINT.
+# `switch:<preset>[@<target>]` writes .switch.json (target android by default) and exits on its
+# own, `switch-empty:` does too without flows, `switch-wait:` writes it and then waits for SIGINT.
 FAKE_MITMDUMP = """\
 import json, os, signal, sys, time
 
@@ -111,10 +111,11 @@ log(f"pid {os.getpid()}")
 log("started")
 
 if mode.startswith("switch"):
-    kind, name = mode.split(":", 1)
+    kind, asked = mode.split(":", 1)
+    name, _, target = asked.partition("@")
     folder = os.path.dirname(value("--save-stream-file"))
     with open(os.path.join(folder, ".switch.json"), "w") as f:
-        f.write(json.dumps({"name": name}))
+        f.write(json.dumps({"name": name, "target": target or "android"}))
     log("switch-written")
     if kind != "switch-wait":
         time.sleep(0.2)
@@ -1753,8 +1754,11 @@ def test_without_the_wiretrace_window_a_switch_file_is_not_read_and_nothing_loop
     assert (folder / session.SWITCH).is_file()
 
 
-def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", **kwargs):
-    """start.run with a supervise double that reports `outcomes` in turn, then "no switch"."""
+def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", mode="proxy", **kwargs):
+    """start.run with a supervise double that reports `outcomes` in turn, then "no switch".
+
+    An outcome's switch is a `start.Switch`, or a preset name for a switch that keeps target android.
+    """
     (tmp_path / "presets").mkdir(exist_ok=True)
     (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
     (tmp_path / "presets" / "other.yaml").write_text(OTHER_PRESET)
@@ -1764,12 +1768,15 @@ def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", **kwargs):
     def supervise(cmd, har_cmd, folder, *args, **kw):
         calls.append({"cmd": cmd, "folder": folder, "kw": kw})
         if pending:
-            kw["outcome"].state, kw["outcome"].switch_to = pending.pop(0)
+            state, switch = pending.pop(0)
+            if isinstance(switch, str):
+                switch = start.Switch(switch, "android")
+            kw["outcome"].state, kw["outcome"].switch_to = state, switch
         return 0
 
     monkeypatch.setattr(start, "supervise", supervise)
     monkeypatch.setattr(start, "busy_ports", kwargs.pop("busy_ports", lambda ports: []))
-    code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
+    code = start.run("staging", "android", mode, ui, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
                      wiretrace_dir=tmp_path / "wiretrace", ui_port=free_port(),
                      collector_for=kwargs.pop("collector_for", lambda *a: (None, "off (test)")),
@@ -1873,9 +1880,11 @@ def test_a_folder_name_still_taken_after_the_retry_exits_1(tmp_path, monkeypatch
     assert "A session folder with this name already exists" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("raw", ['{"name": "other", "token": "x"}', '["other"]', '{"name": 3}', "not json",
-                                 '{"name": "' + "a" * 5000 + '"}'])
-def test_a_switch_file_that_is_not_one_name_is_no_switch_and_is_deleted(tmp_path, raw):
+@pytest.mark.parametrize("raw", ['{"name": "other", "target": "ios", "token": "x"}', '["other", "ios"]',
+                                 '{"name": 3, "target": "ios"}', '{"name": "other", "target": 3}',
+                                 '{"name": "other"}', '{"target": "ios"}', "not json",
+                                 '{"name": "' + "a" * 5000 + '", "target": "ios"}'])
+def test_a_switch_file_that_is_not_one_name_and_one_target_is_no_switch_and_is_deleted(tmp_path, raw):
     (tmp_path / session.SWITCH).write_text(raw)
     assert start.take_switch(tmp_path) is None
     assert not (tmp_path / session.SWITCH).exists()
@@ -1883,15 +1892,15 @@ def test_a_switch_file_that_is_not_one_name_is_no_switch_and_is_deleted(tmp_path
 
 def test_a_symlinked_switch_file_is_not_followed(tmp_path):
     target = tmp_path / "elsewhere.json"
-    target.write_text('{"name": "other"}')
+    target.write_text('{"name": "other", "target": "ios"}')
     (tmp_path / session.SWITCH).symlink_to(target)
     assert start.take_switch(tmp_path) is None
     assert not (tmp_path / session.SWITCH).exists() and target.is_file()
 
 
-def test_a_valid_switch_file_names_the_preset_and_is_deleted(tmp_path):
-    (tmp_path / session.SWITCH).write_text('{"name": "other"}')
-    assert start.take_switch(tmp_path) == "other"
+def test_a_valid_switch_file_names_the_preset_and_the_target_and_is_deleted(tmp_path):
+    (tmp_path / session.SWITCH).write_text('{"name": "other", "target": "ios"}')
+    assert start.take_switch(tmp_path) == start.Switch("other", "ios")
     assert not (tmp_path / session.SWITCH).exists()
     assert start.take_switch(tmp_path) is None
 
@@ -1972,7 +1981,7 @@ signal.signal(signal.SIGINT, on_sigint)
 with open(flows, "wb") as handle:
     handle.write(b"flows")
 with open(os.path.join(os.path.dirname(flows), ".switch.json"), "w") as handle:
-    handle.write(json.dumps({"name": "other"}))
+    handle.write(json.dumps({"name": "other", "target": "android"}))
 while not stopping:
     time.sleep(0.05)
 """
@@ -2028,3 +2037,175 @@ def test_from_app_a_menu_that_cannot_start_stops_the_session(tmp_path, capsys):
         assert code == 0 and session.read_meta(folder)["status"] == "stopped"
     else:
         assert code == 1 and "Nothing was captured" in out
+
+
+# Switching the device from the window (spec 018). The number is the spec's test number.
+
+def test_018_01_a_device_switch_saves_the_session_and_starts_the_same_preset_for_the_new_target(launch):
+    run = launch("switch:staging@ios,normal", ui="wiretrace")
+    wait_for(lambda: started_count(run) == 2)
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    folders = run.folders()
+    [first] = [f for f in folders if f.name.endswith("_staging_android")]
+    [second] = [f for f in folders if f.name.endswith("_staging_ios")]
+    assert no_switch_file(run)
+    old, new = session.read_meta(first), session.read_meta(second)
+    assert old["status"] == "stopped" and (first / session.HAR).is_file()
+    assert (old["target"], new["target"]) == ("android", "ios")
+    assert old["preset"] == new["preset"] == "staging" and old["mode"] == new["mode"] == "proxy"
+    assert "Switching to iPhone: saving this session first." in run.output
+    assert "Switching presets" not in run.output
+    assert "preset staging, target ios" in run.output
+
+
+def test_018_01_the_next_session_builds_its_collector_for_the_new_target(tmp_path, monkeypatch):
+    seen = []
+
+    def collector_for(preset, target, *args):
+        seen.append((preset.name, target))
+        return None, "off (test)"
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios"))],
+                                collector_for=collector_for)
+    assert code == 0 and len(calls) == 2
+    assert seen == [("staging", "android"), ("staging", "ios")]
+    assert calls[0]["folder"].name.endswith("_staging_android") and calls[1]["folder"].name.endswith("_staging_ios")
+    assert [c["kw"]["target"] for c in calls] == ["android", "ios"]
+
+
+def test_018_02_a_stop_signal_wins_over_a_device_switch_file(launch):
+    run = launch("switch-wait:staging@ios", ui="wiretrace")
+    wait_for(lambda: "switch-written" in run.events())
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert started_count(run) == 1
+    [folder] = run.folders()
+    assert folder.name.endswith("_staging_android") and session.read_meta(folder)["status"] == "stopped"
+    assert no_switch_file(run)
+    assert "Switching to" not in run.output
+
+
+@pytest.mark.parametrize("target", ["phone", "", "../ios"])
+def test_018_04_a_switch_to_an_unknown_target_exits_1_and_starts_nothing(tmp_path, monkeypatch, capsys, target):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", target))])
+    assert code == 1 and len(calls) == 1
+    assert "Unknown device." in capsys.readouterr().err
+    assert [p.name.endswith("_staging_android") for p in (tmp_path / "sessions").iterdir()] == [True]
+
+
+def test_018_05_the_ios_simulator_is_refused_in_wireguard_mode(tmp_path, monkeypatch, capsys):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios-sim"))],
+                                mode="wireguard")
+    assert code == 1 and len(calls) == 1
+    assert start.SIMULATOR_NEEDS_PROXY in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mode", ["both", "proxy"])
+def test_018_05_the_ios_simulator_is_started_with_the_wi_fi_proxy(tmp_path, monkeypatch, mode):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios-sim"))],
+                                mode=mode)
+    assert code == 0 and len(calls) == 2 and calls[1]["kw"]["target"] == "ios-sim"
+
+
+def test_018_06_a_preset_switch_keeps_the_target(launch):
+    run = launch("switch:other,normal", ui="wiretrace")
+    wait_for(lambda: started_count(run) == 2)
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    assert {f.name.split("_", 2)[2] for f in run.folders()} == {"staging_android", "other_android"}
+    assert "Switching presets: saving this session first." in run.output
+
+
+def test_018_07_mode_ports_clients_and_app_mode_do_not_change_across_a_device_switch(tmp_path, monkeypatch):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios"))],
+                                mode="both", clients=("192.0.2.7",), from_app=True)
+    assert code == 0 and len(calls) == 2
+
+    def without_folder(call):
+        return [arg for arg in call["cmd"] if str(call["folder"]) not in arg]
+
+    first, second = calls
+    # Only the session folder differs: the same preset, mode, ports, clients and app mode.
+    assert without_folder(first) == without_folder(second)
+    assert "qa_proxy_clients=192.0.2.7" in first["cmd"] and "qa_ui_print_link=false" in first["cmd"]
+    assert "wireguard@51820" in " ".join(first["cmd"])
+    assert first["kw"]["from_app"] is second["kw"]["from_app"] is True
+    assert first["kw"]["menu_cmd"][4] == second["kw"]["menu_cmd"][4]
+
+
+def test_018_switch_line_names_the_device_only_when_the_target_changes():
+    assert start.switch_line(start.Switch("staging", "ios"), "android") == (
+        "Switching to iPhone: saving this session first.")
+    assert start.switch_line(start.Switch("other", "android"), "android") == (
+        "Switching presets: saving this session first.")
+
+
+@pytest.mark.parametrize("target, mode, problem", [
+    ("ios", "wireguard", None), ("android", "both", None), ("device", "wireguard", None),
+    ("ios-sim", "both", None), ("ios-sim", "proxy", None),
+    ("ios-sim", "wireguard", start.SIMULATOR_NEEDS_PROXY), ("phone", "both", "Unknown device."),
+])
+def test_018_target_problem(target, mode, problem):
+    assert start.target_problem(target, mode) == problem
+
+
+def test_018_every_target_has_a_label_and_is_shown_once():
+    assert sorted(start.TARGETS_SHOWN) == sorted(start.TARGETS) == sorted(start.TARGET_LABELS)
+
+
+# Extension A: what Wiretrace.app starts next time
+
+def last_choice(tmp_path) -> str | None:
+    path = tmp_path / "wiretrace" / ".app-last"
+    return path.read_text() if path.exists() else None
+
+
+def test_018_a4_a_device_switch_from_the_app_remembers_the_new_device_before_the_next_spawn(tmp_path, monkeypatch):
+    seen = []
+
+    def collector_for(preset, target, *args):
+        seen.append(last_choice(tmp_path))
+        return None, "off (test)"
+
+    (tmp_path / "wiretrace").mkdir()
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios"))],
+                                from_app=True, collector_for=collector_for)
+    assert code == 0 and len(calls) == 2
+    # Already written when the next session was being prepared.
+    assert seen == [None, "staging iPhone\n"]
+
+
+def test_018_a5_a_preset_switch_from_the_app_remembers_the_new_project_and_the_same_device(tmp_path, monkeypatch):
+    (tmp_path / "wiretrace").mkdir()
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, "other")], from_app=True)
+    assert code == 0 and len(calls) == 2
+    assert last_choice(tmp_path) == "other Android phone\n"
+
+
+def test_018_a6_a_switch_in_a_terminal_session_leaves_the_app_choice_alone(tmp_path, monkeypatch):
+    (tmp_path / "wiretrace").mkdir()
+    (tmp_path / "wiretrace" / ".app-last").write_text("staging iPhone\n")
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "android-emu"))])
+    assert code == 0 and len(calls) == 2
+    assert last_choice(tmp_path) == "staging iPhone\n"
+
+
+def test_018_a7_a_switch_refused_by_a_re_check_leaves_the_app_choice_alone(tmp_path, monkeypatch):
+    (tmp_path / "wiretrace").mkdir()
+    (tmp_path / "wiretrace" / ".app-last").write_text("staging iPhone\n")
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("nope", "android"))],
+                                from_app=True)
+    assert code == 1 and len(calls) == 1
+    assert last_choice(tmp_path) == "staging iPhone\n"
+
+
+def test_018_a8_an_app_choice_that_cannot_be_written_does_not_stop_the_next_session(tmp_path, monkeypatch):
+    # No wiretrace folder: the write fails.
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios"))],
+                                from_app=True)
+    assert code == 0 and len(calls) == 2
+    assert last_choice(tmp_path) is None

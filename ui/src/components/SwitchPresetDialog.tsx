@@ -26,7 +26,7 @@ export function SwitchPresetDialog({ preset, target, onClose }: Props) {
     try {
       const result = await api.switchPreset(preset.name);
       if (result) {
-        dispatch({ type: 'switching', preset: result.switching });
+        dispatch({ type: 'switching', to: result.switching });
         return;
       }
       onClose();

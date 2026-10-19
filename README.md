@@ -63,15 +63,18 @@ new Terminal window is needed.
 **Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the Dock,
 right-click its Dock icon → **Options** → **Keep in Dock**.
 
-1. Choose the project: `default`, which comes with Wiretrace, or
-   [a preset you created](#your-own-preset-optional).
-2. Choose the device: iPhone, Android phone, the iOS Simulator or Android emulator on this
-   Mac, or another device with a Wi-Fi proxy. Every choice accepts both ways to connect: the
-   phone's Wi-Fi proxy (this Mac's IP address, port 8888), or the WireGuard tunnel for an app
-   that ignores the proxy. The setup wizard shows the steps.
+The app asks nothing: it starts the project and device you used last. The first time, that is
+the project `default`, which comes with Wiretrace, on an iPhone. The Wiretrace window opens
+in your browser, and the **Wiretrace** menu (the W icon at the top right of the screen)
+appears.
 
-The Wiretrace window opens in your browser, and the **Wiretrace** menu (the W icon at
-the top right of the screen) appears.
+Change either from the window's title bar: *Preset: …* switches to
+[a preset you created](#your-own-preset-optional), and the device menu (*iPhone · Proxy +
+WireGuard*) switches to an Android phone, the iOS Simulator or Android emulator on this Mac,
+or another device with a Wi-Fi proxy. Each switch saves the session and starts a new one.
+Every device accepts both ways to connect: the phone's Wi-Fi proxy (this Mac's IP address,
+port 8888), or the WireGuard tunnel for an app that ignores the proxy. The setup wizard
+shows the steps, and its *Choose device* step can switch the device too.
 
 <details>
 <summary>Or start in Terminal</summary>
@@ -146,7 +149,7 @@ In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
 | `android_package:` | for Android, the app's package name, such as `com.mycompany.myapp` |
 | `ios_process:` | for iOS, the app's process name, such as `MyApp` |
 
-Then start with `--preset staging`, or choose `staging` in the Wiretrace app. If
+Then start with `--preset staging`, or choose `staging` from *Preset: …* in the window. If
 `./wiretrace start` says *name is 'example', but must equal the file name*, the file was not
 changed or not saved.
 
@@ -163,7 +166,7 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 | Mockup | Status |
 |---|---|
-| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
+| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). The target pill is a device menu too: another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
@@ -241,8 +244,8 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   the session. `--no-menu-bar` leaves that item out. mitmweb stays the default, so without
   `--ui wiretrace` you get mitmweb and no Rules view; `--no-ui` runs in the Terminal only.
 - **Wiretrace app.** The setup builds `~/Applications/Wiretrace.app` on your Mac, with the
-  Wiretrace icon. Open it from Launchpad, Spotlight or the Dock, pick a project and a device,
-  and the Wiretrace window opens; the menu bar item is how you stop that session.
+  Wiretrace icon. Open it from Launchpad, Spotlight or the Dock and the Wiretrace window opens
+  on the project and device used last; the menu bar item is how you stop that session.
 - **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
   `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
   SHA-256 checksum, from one commit.

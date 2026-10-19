@@ -1,6 +1,7 @@
 // Dev only (`vite serve`): answers /api/* from dev/fixtures/*.json and fakes the update socket.
 // Never part of the build. Env: WIRETRACE_FIXTURE_BULK=<n> adds n extra flows,
 // WIRETRACE_FIXTURE_MODE=proxy|both switches the setup dialog to proxy or both mode,
+// WIRETRACE_FIXTURE_TARGET=ios|android|... sets the session's --target (the device menu),
 // WIRETRACE_FIXTURE_403=1 answers every /api request with 403,
 // WIRETRACE_FIXTURE_NO_DEVICE=1 turns the report form's screenshots off.
 import fs from 'node:fs';
@@ -59,6 +60,25 @@ export default function fixtures() {
   } else if (process.env.WIRETRACE_FIXTURE_MODE === 'both') {
     state.mode = 'both';
   }
+  if (process.env.WIRETRACE_FIXTURE_TARGET) state.target = process.env.WIRETRACE_FIXTURE_TARGET;
+  const DEVICES = [
+    ['ios', 'iPhone'],
+    ['android', 'Android phone'],
+    ['android-emu', 'Android emulator'],
+    ['ios-sim', 'iOS Simulator'],
+    ['device', 'Another device'],
+  ];
+  const deviceList = () =>
+    DEVICES.map(([target, label]) => {
+      const simOff = target === 'ios-sim' && state.mode === 'wireguard';
+      return {
+        target,
+        label,
+        allowed: !simOff,
+        why_not: simOff ? 'The iOS Simulator needs the Wi-Fi proxy: stop and start Wiretrace for it.' : null,
+        device_logs: target === 'device' ? 'off (--target device has no device log)' : target.startsWith('android') ? 'com.example.app' : 'ExampleApp',
+      };
+    });
   const baseFlows = [...bulkFlows(bulkCount, epoch), ...shiftTimes(read('flows.json'), shift)];
   const details = shiftTimes(read('flow-details.json'), shift);
   const logs = { device: shiftTimes(read('logs-device.json'), shift), app: shiftTimes(read('logs-app.json'), shift) };
@@ -130,6 +150,14 @@ export default function fixtures() {
       return source === 'device' || source === 'app' ? [200, { lines: allLogs(source) }] : [400, { error: 'bad source' }];
     }
     if (method === 'GET' && p === '/api/mocks') return [200, { files: read('mocks.json') }];
+    if (method === 'GET' && p === '/api/devices') return [200, { devices: deviceList() }];
+    if (method === 'POST' && p === '/api/device') {
+      const device = deviceList().find((d) => d.target === body?.target);
+      if (!device) return [400, { error: 'Unknown device.' }];
+      if (!device.allowed) return [400, { error: device.why_not }];
+      if (device.target === state.target) return [204, null];
+      return [202, { switching: state.preset, target: device.target }];
+    }
     if (method === 'PUT' && p === '/api/faults') {
       const { filter, status, delay_ms: delay, drop } = body ?? {};
       if (typeof filter === 'string' && filter.trim() && !filter.trim().startsWith('~') && !filter.trim().startsWith('!'))
