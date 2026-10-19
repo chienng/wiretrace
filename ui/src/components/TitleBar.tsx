@@ -5,6 +5,7 @@ import { devicePill } from '../logic/device';
 import { deviceLabel, deviceLogsLine, deviceMenuState, modeLabel } from '../logic/devices';
 import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
+import { PAUSED_LABEL, PAUSED_TIP, recordingPill } from '../logic/recording';
 import { OFF_WHILE_VIEWING, presetMenuState, presetRowsState } from '../logic/presets';
 import { useNow } from '../hooks';
 import { useData, useDispatch, useStore } from '../store';
@@ -214,9 +215,17 @@ function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; 
   );
 }
 
-function Recording({ startedAt, reconnecting, fromApp }: { startedAt: number; reconnecting: boolean; fromApp: boolean }) {
+function Recording({ startedAt, reconnecting, paused, fromApp }: { startedAt: number; reconnecting: boolean; paused: boolean; fromApp: boolean }) {
   const now = useNow(1000);
-  if (reconnecting) return <span className="pill wait">Reconnecting…</span>;
+  const pill = recordingPill(reconnecting, paused);
+  if (pill === 'reconnecting') return <span className="pill wait">Reconnecting…</span>;
+  if (pill === 'paused') {
+    return (
+      <span className="pill wait" title={PAUSED_TIP}>
+        {PAUSED_LABEL}
+      </span>
+    );
+  }
   return (
     <span className="rec" title={fromApp ? APP_STOP_TIP : undefined}>
       Recording · {formatElapsed(now / 1000 - startedAt)}
@@ -263,7 +272,14 @@ export function TitleBar({ newCount }: Props) {
           Logs{crashes > 0 && <span className="c">{crashes} {crashes === 1 ? 'crash' : 'crashes'}</span>}
         </button>
       </div>
-      {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} fromApp={appState.from_app} />}
+      {appState && (
+        <Recording
+          startedAt={appState.started_at}
+          reconnecting={phase === 'reconnecting'}
+          paused={paused && !viewing}
+          fromApp={appState.from_app}
+        />
+      )}
       {ui.view === 'traffic' && !viewing && (
         <>
           <button
