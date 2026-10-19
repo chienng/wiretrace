@@ -19,6 +19,8 @@ PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> AB
 With `--ui wiretrace`, a session whose mitmdump exited on its own after the window wrote
 `.switch.json` goes back to PREPARE with the preset and target it names
 (docs/specs/013-switch-preset.md, 018-switch-device.md). A stop signal never does.
+With a `client` in that file, the next session's Wi-Fi proxy accepts only that address
+from its first connection (docs/specs/021-switch-to-another-phone.md).
 """
 
 from __future__ import annotations
@@ -84,6 +86,9 @@ TARGETS_SHOWN = ("ios", "android", "android-emu", "ios-sim", "device")
 TARGET_LABELS = {"ios": "iPhone", "android": "Android phone", "android-emu": "Android emulator",
                  "ios-sim": "iOS Simulator", "device": "Another device"}
 SIMULATOR_NEEDS_PROXY = "The iOS Simulator needs the Wi-Fi proxy: stop and start Wiretrace for it."
+# Spec 021, invariant 3. Neither names the address.
+CLIENT_NOT_PINNABLE = "The device to switch to does not have an address the Wi-Fi proxy can accept. Not started."
+CLIENT_WITH_CLIENTS = "This run names its devices with --client, so it does not switch them. Not started."
 
 RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
@@ -145,9 +150,24 @@ def client_problem(addresses: Sequence[str]) -> str | None:
     return None
 
 
+def pinnable_client(value: str) -> str | None:
+    """A client switch's address, normalized like addons/proxy_guard.py, or None when a session may not
+    start pinned to it: not an IP address, or loopback, link-local, unspecified or multicast."""
+    try:
+        address = ipaddress.ip_address(value.split("%", 1)[0])
+    except ValueError:
+        return None
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    if address.is_loopback or address.is_link_local or address.is_unspecified or address.is_multicast:
+        return None
+    return str(address)
+
+
 def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
                   proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
-                  ui_port: int = UI_PORT, clients: Sequence[str] = (), from_app: bool = False) -> list[str]:
+                  ui_port: int = UI_PORT, clients: Sequence[str] = (), from_app: bool = False,
+                  pinned: str | None = None) -> list[str]:
     kind = ui_kind(ui)
     cmd = [str(bin_dir / ("mitmweb" if kind == MITMWEB else "mitmdump"))]
     if mode == "wireguard":
@@ -182,6 +202,8 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         for address in (*LOOPBACK_CLIENTS, *clients):
             cmd += ["--set", f"qa_proxy_clients={address}"]
         cmd += ["--set", "qa_proxy_pin=" + ("false" if clients else "true")]
+        if pinned and not clients:
+            cmd += ["--set", f"qa_proxy_pinned={pinned}"]
     if kind == WIRETRACE:
         # The window is the only output; the token is made by the addon and never goes on a command line.
         cmd += ["--set", "flow_detail=0", "--set", f"qa_ui_port={ui_port}",
@@ -391,6 +413,8 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
     try:
         switched = False
         code = 0
+        # The address the next session's Wi-Fi proxy is pinned to: only ever from a client switch.
+        pinned: str | None = None
         while True:
             # A switch starts a session without a new run: the cap holds across switches too.
             if switched:
@@ -429,7 +453,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
                        menu_bar_text(kind, no_menu_bar, menu_problem)))
             child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients,
-                                      from_app=from_app)
+                                      from_app=from_app, pinned=pinned)
             har_cmd = har_command(bin_dir, flows, folder / session.HAR_TMP)
             # Checked again as late as possible: a signal during the banner must not start the child.
             if switched and signals[0]:
@@ -464,6 +488,16 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             if problem:
                 say(problem, err=True)
                 return 1
+            # Spec 021, invariant 3: the client is checked again; a switch without one pins nothing.
+            pinned = None
+            if outcome.switch_to.client is not None:
+                if clients:
+                    say(CLIENT_WITH_CLIENTS, err=True)
+                    return 1
+                pinned = pinnable_client(outcome.switch_to.client)
+                if pinned is None:
+                    say(CLIENT_NOT_PINNABLE, err=True)
+                    return 1
             target = outcome.switch_to.target
             # Invariant 8.
             if ports_busy(mode, kind, proxy_port, ui_port):
@@ -529,10 +563,12 @@ def create_folder(preset: Preset, target: str, meta: dict, sessions_dir: Path, *
 
 
 class Switch(NamedTuple):
-    """What `.switch.json` asks for: the next session's preset and target."""
+    """What `.switch.json` asks for: the next session's preset and target, and the address its Wi-Fi
+    proxy accepts (None: the first device to connect)."""
 
     name: str
     target: str
+    client: str | None = None
 
 
 @dataclass
@@ -544,13 +580,16 @@ class Outcome:
 
 
 def switch_line(switch: Switch, target: str) -> str:
+    if switch.client is not None:
+        return "Switching to another device on the Wi-Fi proxy: saving this session first."
     if switch.target != target and switch.target in TARGET_LABELS:
         return f"Switching to {TARGET_LABELS[switch.target]}: saving this session first."
     return "Switching presets: saving this session first."
 
 
 def take_switch(folder: Path) -> Switch | None:
-    """The preset and target in `.switch.json`, or None. The file is deleted whatever it holds (invariant 6)."""
+    """The preset, target and optional client in `.switch.json`, or None. The file is deleted whatever it
+    holds (invariant 6)."""
     path = folder / session.SWITCH
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -569,11 +608,14 @@ def take_switch(folder: Path) -> Switch | None:
         data = json.loads(raw)
     except ValueError:
         return None
-    if not isinstance(data, dict) or set(data) != {"name", "target"}:
+    if not isinstance(data, dict) or set(data) not in ({"name", "target"}, {"name", "target", "client"}):
         return None
     if not isinstance(data["name"], str) or not isinstance(data["target"], str):
         return None
-    return Switch(data["name"], data["target"])
+    client = data.get("client")
+    if "client" in data and not isinstance(client, str):
+        return None
+    return Switch(data["name"], data["target"], client)
 
 
 # RUNNING, STOPPING, KILLED

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { setForbiddenListener } from './api';
 import { CompareDialog } from './components/CompareDialog';
 import { LogsView } from './components/LogsView';
+import { ProxyDeviceBanner } from './components/ProxyDeviceBanner';
 import { ReportDialog } from './components/ReportDialog';
 import { RulesView } from './components/RulesView';
 import { SetupWizard } from './components/SetupWizard';
@@ -175,6 +176,7 @@ export function App() {
     <div className="app">
       <TitleBar newCount={newCount} />
       {view && <ViewingBanner name={view.name} cutOff={view.cutOff} />}
+      <ProxyDeviceBanner viewing={viewing} />
       <AppHint viewing={viewing} />
       <main className="main">
         {ui.view === 'traffic' && <TrafficView flows={filtered} selected={selected} counts={counts} hosts={hosts} filterError={server.error} />}

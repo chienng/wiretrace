@@ -4,7 +4,7 @@ A Tornado application on mitmproxy's own asyncio loop, so every hook and every r
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
 Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md,
-018-switch-device.md.
+018-switch-device.md, 021-switch-to-another-phone.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -52,6 +52,7 @@ from cli.start import (  # noqa: E402
     TARGETS,
     TARGETS_SHOWN,
     collector_command,
+    pinnable_client,
     target_problem,
 )
 
@@ -59,6 +60,14 @@ logger = logging.getLogger(__name__)
 
 COOKIE = "wiretrace_ui"
 ALREADY_SWITCHING = "Wiretrace is already switching to another session"
+# A client switch (spec 021): the kinds that connect over Wi-Fi, and its refusals.
+CLIENT_TARGETS = ("ios", "android", "device")
+NO_CLIENT_SWITCH = "This session does not pin a device on the Wi-Fi proxy"
+CONNECTS_FROM_MAC = "The iOS Simulator and the Android emulator connect from this Mac: they are always accepted."
+NOT_AN_ADDRESS = "Not a device address."
+NOT_WAITING = "That device is no longer waiting: ask it to connect again."
+# A refusal from an address already listed sends the state at most this often.
+WAITING_PUSH_S = 5.0
 RECEIVER_HOST = "qa-logs.internal"
 MAX_FLOWS = 10_000
 MAX_LOG_LINES = 50_000
@@ -205,13 +214,15 @@ def write_status_file(path: Path, payload: dict) -> None:
         raise
 
 
-def write_switch_file(path: Path, name: str, target: str) -> None:
-    """`{"name", "target"}` and nothing else, 0600 from the start, replaced whole (spec 018, invariant 1)."""
+def write_switch_file(path: Path, name: str, target: str, client: str | None = None) -> None:
+    """`{"name", "target"}`, plus `client` for a client switch, 0600 from the start, replaced whole
+    (spec 018, invariant 1)."""
+    payload = {"name": name, "target": target} if client is None else {"name": name, "target": target, "client": client}
     tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"name": name, "target": target}, f)
+            json.dump(payload, f)
         os.replace(tmp, path)
     finally:
         try:
@@ -970,6 +981,10 @@ class Devices(Guarded):
 class DeviceSwitch(SwitchRequest):
     async def post(self) -> None:
         body = self.small_json()
+        if isinstance(body, dict) and set(body) == {"target", "client"}:
+            # The target and the client are checked in invariant 2's order, after the 409s.
+            status, payload = await self.addon.switch_client(body["target"], body["client"])
+            return await self.answer_switch(status, payload)
         if not isinstance(body, dict) or set(body) != {"target"} or not isinstance(body["target"], str):
             return self.fail(400, "Unknown device.")
         status, payload = await self.addon.switch_device(body["target"])
@@ -1244,6 +1259,9 @@ class WiretraceUI:
         # Setup: when a device last connected, and failed TLS handshakes with API hosts. Nothing about the peer.
         self.device_seen_at: float | None = None
         self.tls_failures = 0
+        # The Wi-Fi proxy's refused addresses the page was last sent, and when (monotonic seconds).
+        self._waiting_sent: frozenset[str] = frozenset()
+        self._waiting_sent_at = 0.0
         # One previous session opened read-only; the live capture goes on meanwhile.
         self.viewed: Store | None = None
         self.view_generation = 0
@@ -1386,10 +1404,24 @@ class WiretraceUI:
     def client_connected(self, client) -> None:
         # proxy_guard runs first and sets `error` on a client it refuses: that is not the device.
         if getattr(client, "error", None):
+            try:
+                self.refusal_seen()
+            except Exception as e:
+                logger.error("Wiretrace UI: could not read the refused devices (%s)", type(e).__name__)
             return
         first = self.device_seen_at is None
         self.device_seen_at = time.time()
         if first:
+            self.hub.state_changed()
+
+    def refusal_seen(self) -> None:
+        """A new refused address reaches the page at once; a repeat at most every WAITING_PUSH_S."""
+        if not self.pin_option():
+            return
+        listed = frozenset(entry["address"] for entry in self.waiting_list())
+        now = time.monotonic()
+        if listed - self._waiting_sent or now - self._waiting_sent_at >= WAITING_PUSH_S:
+            self._waiting_sent, self._waiting_sent_at = listed, now
             self.hub.state_changed()
 
     def tls_failed_client(self, data) -> None:
@@ -1475,6 +1507,9 @@ class WiretraceUI:
         started = parse_ts(meta.get("started_at"))
         device_logs = meta.get("device_logs")
         device_logs_off = meta.get("device_logs_off")
+        pinning = self.pin_option() and mode != "wireguard"
+        guard = self.proxyguard() if pinning else None
+        pinned = getattr(guard, "pinned", None)
         return {
             "version": __version__,
             "preset": str(meta.get("preset") or ""),
@@ -1488,6 +1523,9 @@ class WiretraceUI:
             "proxy_port": ctx.options.listen_port if "listen_port" in ctx.options else 8888,
             # proxy_guard adds the option, and only in a mode with the Wi-Fi proxy.
             "proxy_pin": bool(ctx.options.qa_proxy_pin) if "qa_proxy_pin" in ctx.options else False,
+            # Spec 021: addresses only here and on the socket, both behind the token (invariant 5).
+            "proxy_device": pinned if isinstance(pinned, str) else None,
+            "proxy_waiting": self.waiting_list() if pinning and self.viewed is None else [],
             "from_app": bool(ctx.options.qa_ui_from_app),
             "wireguard_conf": self.wireguard_conf() if mode != "proxy" else None,
             "mac_ip": local_ip.get_local_ip() if mode != "wireguard" else None,
@@ -1704,12 +1742,12 @@ class WiretraceUI:
             return 204, {}
         return self.start_switch(name, self.current_target())
 
-    def start_switch(self, name: str, target: str) -> tuple[int, dict]:
+    def start_switch(self, name: str, target: str, client: str | None = None) -> tuple[int, dict]:
         """Write `.switch.json`; no await between the in-flight check and the write (spec 018, invariant 6)."""
         if self.switch_in_flight():
             return 409, {"error": ALREADY_SWITCHING}
         try:
-            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name, target)
+            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name, target, client)
         except OSError as e:
             logger.error("Wiretrace UI: could not write the switch request (%s)", type(e).__name__)
             return 500, {"error": "Could not switch: the session folder cannot be written"}
@@ -1762,6 +1800,65 @@ class WiretraceUI:
         if target == self.current_target():
             return 204, {}
         return self.start_switch(name, target)
+
+    # Switching to a device the Wi-Fi proxy refused (spec 021): a new session pinned to its address.
+
+    def proxyguard(self) -> Any:
+        try:
+            return ctx.master.addons.get("proxyguard")
+        except Exception:
+            return None
+
+    @staticmethod
+    def pin_option() -> bool:
+        """proxy_guard adds the option, and only in a mode with the Wi-Fi proxy."""
+        return "qa_proxy_pin" in ctx.options and bool(ctx.options.qa_proxy_pin)
+
+    def waiting_list(self) -> list[dict]:
+        """proxy_guard's refused addresses, the most recent first; empty without the guard."""
+        waiting = getattr(self.proxyguard(), "waiting", None)
+        if not callable(waiting):
+            return []
+        return [{"address": w.address, "first_at": w.first_at, "last_at": w.last_at, "count": w.count}
+                for w in waiting()]
+
+    def client_refusal(self, target: object, client: object) -> tuple[int, dict] | None:
+        """Invariant 2, in its order. Nothing here awaits, so a write right after acts on what was checked."""
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
+        if self.switch_in_flight():
+            return 409, {"error": ALREADY_SWITCHING}
+        if not self.pin_option() or self.current_mode() == "wireguard":
+            return 409, {"error": NO_CLIENT_SWITCH}
+        if target in ("ios-sim", "android-emu"):
+            return 400, {"error": CONNECTS_FROM_MAC}
+        if target not in CLIENT_TARGETS:
+            return 400, {"error": "Unknown device."}
+        address = pinnable_client(client) if isinstance(client, str) else None
+        if address is None:
+            return 400, {"error": NOT_AN_ADDRESS}
+        if address not in {entry["address"] for entry in self.waiting_list()}:
+            return 409, {"error": NOT_WAITING}
+        return None
+
+    async def switch_client(self, target: object, client: object) -> tuple[int, dict]:
+        """Check, read the preset in use, check again, then write `.switch.json` with the client."""
+        refusal = self.client_refusal(target, client)
+        if refusal:
+            return refusal
+        name = str(self.meta().get("preset") or "")
+        try:
+            await asyncio.to_thread(load_preset, name, self.presets_dir)
+        except PresetError as e:
+            return 400, {"error": str(e)}
+        except OSError:
+            return 400, {"error": "Could not read the preset file in use"}
+        # Other requests ran while the preset was read.
+        refusal = self.client_refusal(target, client)
+        if refusal:
+            return refusal
+        return self.start_switch(name, str(target), pinnable_client(str(client)))
 
     # Editing and creating presets (spec 013, extension A).
 

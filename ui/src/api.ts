@@ -125,9 +125,13 @@ export const api = {
   switchPreset: (name: string) =>
     request<{ switching: string } | null>('/api/preset', { method: 'POST', body: JSON.stringify({ name }) }),
   devices: async () => (await request<{ devices: DeviceInfo[] }>('/api/devices')).devices,
-  /** `{switching, target}` once mitmdump is shutting down; null when that device is already in use. */
-  switchDevice: (target: string) =>
-    request<{ switching: string; target: string } | null>('/api/device', { method: 'POST', body: JSON.stringify({ target }) }),
+  /** `{switching, target}` once mitmdump is shutting down; null when that device is already in use.
+   *  With `client`, the next session's Wi-Fi proxy accepts only that refused address (spec 021). */
+  switchDevice: (target: string, client?: string) =>
+    request<{ switching: string; target: string } | null>('/api/device', {
+      method: 'POST',
+      body: JSON.stringify(client === undefined ? { target } : { target, client }),
+    }),
   presetDetail: (name: string) => request<PresetDetail>(`/api/presets/${encodeURIComponent(name)}`),
   createPreset: (name: string, fields: PresetFields) =>
     request<{ name: string; revision: string }>('/api/presets', { method: 'POST', body: JSON.stringify({ name, fields }) }),

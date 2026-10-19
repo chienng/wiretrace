@@ -103,6 +103,10 @@ export interface AppState {
   proxy_port: number;
   /** The Wi-Fi proxy accepts only the first device that connects (no `--client`). */
   proxy_pin: boolean;
+  /** The address the Wi-Fi proxy accepts in this session; null until a device is pinned, or without pinning. */
+  proxy_device: string | null;
+  /** Devices the Wi-Fi proxy refused, the most recent first; empty without pinning or while viewing. */
+  proxy_waiting: ProxyWaiting[];
   /** Started from Wiretrace.app: there is no Terminal, the menu bar is the stop. */
   from_app: boolean;
   wireguard_conf: string | null;
@@ -121,6 +125,14 @@ export interface AppState {
   /** The previous session opened read-only, or null while showing the live one. */
   viewing: string | null;
   viewing_cut_off: boolean;
+}
+
+/** A device the Wi-Fi proxy refused: when first and last (Unix seconds), and how many times. */
+export interface ProxyWaiting {
+  address: string;
+  first_at: number;
+  last_at: number;
+  count: number;
 }
 
 /** Model and OS version only: never a serial, a UDID or the device's name. */

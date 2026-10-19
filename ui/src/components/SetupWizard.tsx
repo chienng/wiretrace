@@ -5,6 +5,7 @@ import { download } from '../download';
 import { useNow } from '../hooks';
 import { certificateSteps } from '../logic/certificate';
 import { devicePill, STATE_LABELS } from '../logic/device';
+import { acceptingLine } from '../logic/proxyDevices';
 import {
   appChecks,
   appHint,
@@ -216,12 +217,16 @@ function Restart({ preset, kind, copy, why }: { preset: string; kind: DeviceKind
 /** "Waiting for the device…" until the first connection, then "Connected"; the guest Wi-Fi hint after 30 s. */
 function Connection({ state, since }: { state: AppState; since: number }) {
   const now = useNow(1000);
+  const accepting = acceptingLine(state);
   if (state.device_seen_at !== null) {
     return (
-      <div className="okbox">
-        <b>Connected</b>
-        <div>The device reached Wiretrace. Next, make it trust Wiretrace.</div>
-      </div>
+      <>
+        <div className="okbox">
+          <b>Connected</b>
+          <div>The device reached Wiretrace. Next, make it trust Wiretrace.</div>
+        </div>
+        {accepting && <p className="tip">{accepting}</p>}
+      </>
     );
   }
   const late = now - since >= NO_CONNECTION_HINT_S * 1000;
@@ -234,6 +239,7 @@ function Connection({ state, since }: { state: AppState; since: number }) {
           <div>This changes to "Connected" as soon as the first packet arrives.</div>
         </div>
       </div>
+      {accepting && <p className="tip">{accepting}</p>}
       {late && (
         <p className="tip">
           No connection after {NO_CONNECTION_HINT_S} seconds? Phone and Mac may be on a guest Wi-Fi that blocks

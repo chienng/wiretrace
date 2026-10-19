@@ -280,7 +280,8 @@ Simulator always uses the proxy and has no switch.
 The Wi-Fi proxy accepts this Mac and the **first other device** that connects, until
 Wiretrace stops. Anyone else on the same Wi-Fi network who connects first takes that place:
 your phone then gets no page, and the Terminal (or `app-start.log`) prints one line telling
-you to restart Wiretrace or to pass `--client <its IP address>`. Apps that ignore the proxy
+you to restart Wiretrace or to pass `--client <its IP address>`. In the Wiretrace window, a
+banner offers to switch to it instead (*Switching phones on the Wi-Fi proxy* in Part 3). Apps that ignore the proxy
 setting (Flutter, some React Native libraries) are not captured this way: use WireGuard.
 
 **WireGuard** (for apps that ignore the proxy):
@@ -417,7 +418,8 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
 - **Who may use the Wi-Fi proxy** (`both` and `proxy`): the Mac itself is always accepted (the
   iOS Simulator and the Android emulator connect that way). The first other device that
   connects is the only other device accepted until you stop Wiretrace. A later device gets no
-  page, and the Terminal prints one line telling you to restart or to pass `--client`. To allow
+  page, and the Terminal prints one line telling you to restart or to pass `--client`; with
+  `--ui wiretrace`, the window offers to switch to it. To allow
   a known phone instead of pinning the first one, repeat `--client` with its IP address:
   `./wiretrace start --preset staging --ui wiretrace --client 192.168.1.20`. A phone cannot
   open the Mac's own addresses (for example `http://127.0.0.1:8081/`) through this proxy.
@@ -734,6 +736,22 @@ proxy, so stop and start Wiretrace for it. The menu is off while a previous sess
 The Setup wizard offers the same switch: when the card you pick is not the session's device,
 *Use <device> for this session* opens the same dialog, and the new tab goes on with *Connect
 to this Mac*.
+
+**Switching phones on the Wi-Fi proxy.** When the proxy refuses a phone because another one
+is accepted, a banner under the title bar says so within a second: *Another device wants to
+use the Wi-Fi proxy: 192.168.2.72, since 19:21. Only 192.168.2.71 is accepted in this
+session.* *Setup → Connect to this Mac* and the device label's tooltip name the accepted
+phone too (*Wi-Fi proxy: accepting 192.168.2.71*). Leave the proxy set on every phone you
+use. To move to the refused phone, click **Switch to it…**, choose what it is (iPhone, Android
+phone or Another device; two iPhones are fine), and click *Save and switch*: this session is
+saved, and a new one starts with the same preset, mode and ports that accepts only that phone
+from its first request. The phone you left now shows in the new session's banner, so switching
+back is the same click. **Ignore** hides the banner for that phone until the session ends,
+reloads included; another phone shows it again, and with several waiting phones it shows the
+latest one and *+N more*. Nothing is remembered after Wiretrace stops. There is no banner with
+`--mode wireguard` (the tunnel has no pin: turn it off on one phone and on on the other), with
+`--client`, or while a previous session is open. With `--ui mitmweb` or `--no-ui`, stop
+Wiretrace, take the proxy off the first phone, and start again, or start with `--client`.
 
 **Editing and creating presets.** In the same menu, *Edit presets…* opens the *Presets* sheet
 with the preset in use selected, and *New preset…* opens it on a blank form. The form has the
