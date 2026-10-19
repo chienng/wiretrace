@@ -54,7 +54,8 @@ run() {
     fi
 }
 
-run osacompile -o "$app" "$ROOT/app/Wiretrace.applescript"
+# -s: stay open, so the Dock icon lasts while a session records (docs/specs/020-app-stays-in-the-dock.md).
+run osacompile -s -o "$app" "$ROOT/app/Wiretrace.applescript"
 printf '%s\n' "$ROOT" > "$app/Contents/Resources/wiretrace-root"
 # The bytes only, not a copy: a downloaded folder's quarantine flag must not come along.
 cat "$ROOT/app/Wiretrace.icns" > "$app/Contents/Resources/applet.icns" || not_created "app/Wiretrace.icns unreadable"

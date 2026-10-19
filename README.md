@@ -76,10 +76,10 @@ check passes, opens it for you (`./install --no-open` does not). You can start r
 new Terminal window is needed.
 
 **4. Start capturing** in the Wiretrace app that the setup opened. Next time, open
-**Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. To keep it in the Dock, in
-Finder choose **Go → Home**, open **Applications**, and drag **Wiretrace** onto the Dock. (The
-app quits once the session starts, so it shows in the Dock only while starting unless you
-keep it there.)
+**Wiretrace** (the blue **W** icon) from Launchpad or Spotlight. While a session records, its
+icon stays in the Dock: right-click it → **Options** → **Keep in Dock** to keep it there.
+(Or, at any time, drag **Wiretrace** from **Go → Home → Applications** in Finder onto the
+Dock.)
 
 The app asks nothing: it starts the project and device you used last. The first time, that is
 the project `default`, which comes with Wiretrace, on an iPhone. The Wiretrace window opens
@@ -263,7 +263,8 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   `--ui wiretrace` you get mitmweb and no Rules view; `--no-ui` runs in the Terminal only.
 - **Wiretrace app.** The setup builds `~/Applications/Wiretrace.app` on your Mac, with the
   Wiretrace icon. Open it from Launchpad, Spotlight or the Dock and the Wiretrace window opens
-  on the project and device used last; the menu bar item is how you stop that session.
+  on the project and device used last. The app stays in the Dock while the session records;
+  the menu bar item is how you stop that session.
 - **Release files.** `make tarball` (or `make release`, which also makes the `.dmg`) runs
   `scripts/build-release.sh`, which builds a `.tar.gz` and a `.dmg`, each with a
   SHA-256 checksum, from one commit.

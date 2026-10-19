@@ -33,7 +33,8 @@ Day-to-day use needs no Terminal, no `cd`, and no command line to remember.
       iOS tools step and before doctor. It creates `~/Applications/Wiretrace.app` (and
       `~/Applications` when missing) and prints `created: ~/Applications/Wiretrace.app`.
 - [ ] Setup's last lines say: open Wiretrace from Launchpad or Spotlight; to keep it in the
-      Dock, right-click its Dock icon → Options → Keep in Dock.
+      Dock, right-click its Dock icon → Options → Keep in Dock. (Since spec 020 the app
+      stays open while its session records, so that icon is there to right-click.)
 - [ ] Running setup again rebuilds the app with the current version. Running it from another
       folder (a moved or newer install) makes the app open that folder, and setup prints
       `Wiretrace.app now opens <new folder> (it opened <old folder>)`.

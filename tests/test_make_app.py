@@ -126,6 +126,41 @@ def test_019_01_the_applet_shows_no_dialog_once_started_and_one_while_still_star
     assert '"Wiretrace is still starting "' in ending
 
 
+def test_020_01_the_app_is_a_stay_open_applet(tmp_path):
+    assert make_app(tmp_path).returncode == 0
+    app = tmp_path / "Applications" / "Wiretrace.app"
+    assert plist_value(app, "OSAAppletStayOpen") == "true"
+
+
+def handler(source: str, name: str) -> str:
+    start = source.index(f"\non {name}")
+    return source[start:source.index(f"\nend {name.split('(')[0]}", start)]
+
+
+def test_020_02_the_applet_watches_the_session_and_quits_when_none_is_left():
+    source = (ROOT / "app" / "Wiretrace.applescript").read_text()
+    idle = handler(source, "idle")
+    assert "recordingNow()" in idle and "if idleChecks >= idleChecksToQuit then quit" in idle
+    assert "set idleChecks to 0" in idle
+    assert "return checkEverySeconds" in idle
+    assert "property checkEverySeconds : 5" in source and "property idleChecksToQuit : 3" in source
+    # A failed `app state` reads as no session.
+    recording_now = handler(source, "recordingNow()")
+    assert "on error\n\t\treturn \"\"" in recording_now
+    assert "showRecording(recordingPreset)" in handler(source, "reopen")
+    # Every path without a session quits: giveUp quits, and so does "No project yet".
+    assert "quit" in handler(source, "giveUp(message)")
+    run = handler(source, "run")
+    assert run.count("giveUp(") == 4
+    no_project = run[run.index('if projectName is "" then'):run.index("set progress total steps to -1")]
+    assert "\t\tquit\n" in no_project
+    # The progress bar is cleared on both outcomes of the start.
+    after_start = run[run.index("app start --project"):]
+    assert after_start.count("clearProgress()") == 2
+    # The applet never stops a session: the menu bar is the only stop (spec 014).
+    assert "kill" not in source and "app stop" not in source
+
+
 def test_the_applet_source_compiles(tmp_path):
     result = subprocess.run(["osacompile", "-o", str(tmp_path / "check.scpt"), str(ROOT / "app" / "Wiretrace.applescript")],
                             capture_output=True, text=True)

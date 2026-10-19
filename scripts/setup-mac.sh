@@ -37,7 +37,7 @@ finish() {
         echo "Wiretrace is ready: start it with ./wiretrace start (see the README)."
     fi
     if [ "$app_made" -eq 1 ]; then
-        echo "To keep it in the Dock: in Finder, Go > Home > Applications, and drag Wiretrace onto the Dock."
+        echo "To keep it in the Dock: while it records, right-click its Dock icon > Options > Keep in Dock (or drag it from ~/Applications onto the Dock)."
     fi
     echo "To type adb or uv yourself, open a new Terminal window first (or run: exec zsh)."
 }

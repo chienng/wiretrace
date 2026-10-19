@@ -239,8 +239,9 @@ def test_setup_opens_the_app_when_the_check_passes(tmp_path):
     out, opened = run_setup_finish(tmp_path, app_made=1, status=0, open_app=1)
     assert opened == ["/Apps/Wiretrace.app"]
     assert "the Wiretrace app is opening" in out
-    # The app quits once the session starts, so its Dock icon is gone too soon to right-click.
-    assert "drag Wiretrace onto the Dock" in out and "Keep in Dock" not in out
+    # The app stays open while its session records (spec 020), so its Dock icon can be kept.
+    assert "while it records, right-click its Dock icon > Options > Keep in Dock" in out
+    assert "drag it from ~/Applications onto the Dock" in out
     assert "choose your project and device" not in out
     assert "To type adb or uv yourself, open a new Terminal window" in out
     assert "so the PATH changes apply" not in out

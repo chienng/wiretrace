@@ -112,9 +112,10 @@ The setup also builds **Wiretrace** in `~/Applications`, on your Mac, so macOS o
 without asking. You can start every session from it instead of Terminal:
 
 1. The setup opens **Wiretrace** the first time. Later, open it (the blue **W** icon) from
-   Launchpad or Spotlight. To keep it in the Dock, in Finder choose **Go → Home**, open
-   **Applications**, and drag **Wiretrace** onto the Dock. The app quits once the session
-   starts, so without that it shows in the Dock only for the few seconds it takes to start.
+   Launchpad or Spotlight. The app stays open, with its icon in the Dock, while the session
+   records, and closes by itself within 20 seconds after it stops. To keep the icon in the
+   Dock, right-click it → **Options** → **Keep in Dock** (or drag **Wiretrace** from
+   **Go → Home → Applications** in Finder onto the Dock).
 2. The app asks nothing. It starts the project (a preset) and the device you used last; the
    first time, the project `default` on an iPhone. If that project was deleted, it starts
    `default`.
@@ -127,10 +128,11 @@ without asking. You can start every session from it instead of Terminal:
    remembers the switch for next time.
 
 A blue strip under the window's title bar says the same, until you click **Got it**; that
-browser then stops showing it. The session keeps recording when the app closes. To stop it
-and save `flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top
-right; pointing at *Recording* in the window reminds you): a session started from the app
-has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
+browser then stops showing it. Quitting the app (⌘Q, or **Quit** in its Dock menu) does not
+stop the session. To stop it and save `flows.har`, use **Stop session** in the **Wiretrace**
+menu (the W icon at the top right; pointing at *Recording* in the window reminds you): a
+session started from the app has no Terminal window. If Wiretrace is already recording,
+opening the app or clicking its Dock icon says so and starts nothing.
 Every device in the app accepts both ways to connect, the Wi-Fi proxy and the WireGuard tunnel
 (Part 2, Step 2).
 
