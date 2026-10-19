@@ -8,7 +8,9 @@
 - **Date**: 2026-10-16 (scoped down the same day from a draft where the `.dmg` held an app
   that installed Wiretrace; that part is now out of scope)
 - **Repo**: wiretrace
-- **Status**: approved (2026-10-16; bundle identifier `com.safemeet.wiretrace`)
+- **Status**: approved (2026-10-16; bundle identifier `com.safemeet.wiretrace`). The
+  project and device lists were removed by spec 018 (Extension A): the app starts the last
+  choice, and both are changed from the window's title bar.
 - **Tier**: L (a session can run with no Terminal, so the menu bar becomes the only stop; the
   window token must stay out of every file the app path writes). Gates E, A, B, C, R, P, D.
 - **Branch**: `feature/app-launcher` (from `main`)

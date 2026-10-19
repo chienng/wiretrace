@@ -42,6 +42,16 @@ export interface PresetInfo {
   app: string | null;
 }
 
+/** One row of the device menu: whether this session can switch to it, and its device logs with the preset in use. */
+export interface DeviceInfo {
+  target: string;
+  label: string;
+  allowed: boolean;
+  why_not: string | null;
+  /** The app whose log is collected, or "off (why)". */
+  device_logs: string;
+}
+
 /** The form's values for a preset file. An empty string or list is left out of the file. `name` is not here. */
 export interface PresetFields {
   api_hosts: string[];
@@ -91,6 +101,8 @@ export interface AppState {
   device_logs_off: string | null;
   default_filter: string;
   proxy_port: number;
+  /** The Wi-Fi proxy accepts only the first device that connects (no `--client`). */
+  proxy_pin: boolean;
   wireguard_conf: string | null;
   mac_ip: string | null;
   faults: Faults;

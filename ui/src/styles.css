@@ -355,6 +355,9 @@ button.static-select:hover:not(:disabled) { background: #f4f4f6; }
 .src.pick:hover { background: var(--side); }
 .src.pick.on { background: var(--blue-soft); }
 .pop-foot.plain { color: var(--muted); }
+/* ---------- device menu ---------- */
+button.pill { border: 0; }
+.src.pick:disabled { background: transparent; }
 .switch-error { margin-top: 12px; }
 .switch-foot .tip { margin: 0; }
 .pop-rows { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; display: flex; flex-direction: column; }

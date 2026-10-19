@@ -104,12 +104,14 @@ without asking. You can start every session from it instead of Terminal:
 1. The setup opens **Wiretrace** the first time. Later, open it (the blue **W** icon) from
    Launchpad or Spotlight. To keep it in the
    Dock, right-click its Dock icon → **Options** → **Keep in Dock**.
-2. Choose your project (a preset: `default`, or one you created in Step 6), then your device.
-   The last ones you used are selected.
+2. The app asks nothing. It starts the project (a preset) and the device you used last; the
+   first time, the project `default` on an iPhone. If that project was deleted, it starts
+   `default`.
 3. After a few seconds the Wiretrace window opens in your browser and the **Wiretrace** menu
    (the W icon at the top right of the screen) appears.
-
-<!-- Screenshot of the two lists: taken during the spec 014 runtime check. -->
+4. To use another project or device, switch from the window's title bar (*Switching the
+   preset* and *Switching the device* under *The Wiretrace window (preview)*). The app
+   remembers the switch for next time.
 
 The session keeps recording after the app's last message closes. To stop it and save
 `flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top right): a session started from the app
@@ -701,6 +703,21 @@ Each session has one preset, so the new one gets its own session folder, rules
 (`rules/<preset>.json`) and mocks. The menu is off while a previous session is open. Ctrl+C,
 or *Stop session* in the menu bar, still ends Wiretrace and never starts the chosen preset.
 
+**Switching the device.** The label next to the preset, for example *iPhone · Proxy +
+WireGuard*, is a menu of the devices: iPhone, Android phone, Android emulator, iOS Simulator
+and Another device. Each row says whether device logs will be on with the preset in use (the
+app name) or why not. Choose another device and Wiretrace asks first, with what to do on the
+phones: disconnect the old one (Wi-Fi proxy off, or tunnel off) and connect the new one the
+same way. Click *Save and switch*: this session is saved as for a preset switch, and a new
+session starts for that device, with the same preset, mode and ports. It has its own session
+folder and device log, and a new browser tab opens. The Wi-Fi proxy accepts the first phone
+that connects to it (unless you started with `--client`), so remove the proxy from the old
+phone first. With `--mode wireguard`, the iOS Simulator is off in the menu: it needs the Wi-Fi
+proxy, so stop and start Wiretrace for it. The menu is off while a previous session is open.
+The Setup wizard offers the same switch: when the card you pick is not the session's device,
+*Use <device> for this session* opens the same dialog, and the new tab goes on with *Connect
+to this Mac*.
+
 **Editing and creating presets.** In the same menu, *Edit presets…* opens the *Presets* sheet
 with the preset in use selected, and *New preset…* opens it on a blank form. The form has the
 API hosts (one per line), the Android package, the iOS process, the request ID header, the
@@ -727,7 +744,7 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests. *Clear* hides what is in the list now; everything is
   still saved to the session folder. It also shows the preset (a menu, see *Switching the
-  preset* above), the target and mode, and the
+  preset* above), the device and mode (a menu, see *Switching the device*), and the
   device pill: the phone's model, OS version and connection (for example *Pixel 8 · Android 15
   · USB*), green while its logs stream in, or *Device logs off* with the reason when you point
   at it. Then come the buttons *Rules* (with the number of rules that are on), *Setup* and
@@ -769,8 +786,8 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   the newest 50,000 lines of each log; the files in the session folder keep all of them. The
   full view adds:
   - the device picker: what is being collected now and its state, the other log sources with
-    the `--target` that collects them (Wiretrace does not switch at run time: stop and start
-    again with that target), and the app logs sent by the QA build;
+    the `--target` that collects them (the picker does not switch: use the device menu in the
+    title bar), and the app logs sent by the QA build;
   - *Pause logs* (with the number of new lines), *Clear* (hides the lines, the files keep
     them), *Export .txt* (the lines shown now, **not masked**: check them before you share),
     a tag filter, and *Only lines linked to requests*;
@@ -780,7 +797,8 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   - the line detail: *Copy line*, *Copy ±50 lines*, the linked request with *Open in Traffic*,
     the requests within 5 seconds of the line, and *Show only this tag*.
 - **Setup.** A wizard in five steps, each of which you can open from the list on the left:
-  *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`),
+  *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`;
+  another card offers *Use <device> for this session*),
   *Connect to this Mac* (the address `<Mac IP>:<port>` and the Wi-Fi proxy steps, or the QR code
   and WireGuard steps; in the default `both` mode a **Wi-Fi proxy** | **WireGuard** switch picks
   which, and the later steps follow it; with `--mode wireguard`, the command to restart in proxy

@@ -1,8 +1,9 @@
-"""`wiretrace app …`: what Wiretrace.app asks for. The applet only shows lists and dialogs.
+"""`wiretrace app …`: what Wiretrace.app asks for. The applet only shows dialogs.
 
-`state` says whether a session is recording and lists the projects and the devices;
-`start` starts a session detached and returns once it records, fails, or takes too
-long. Spec: docs/specs/014-mac-app-install-and-launcher.md.
+`state` says whether a session is recording, lists the projects and the devices, and names
+the project and device the next start uses; `start` starts a session detached and returns
+once it records, fails, or takes too long. Specs: docs/specs/014-mac-app-install-and-launcher.md,
+018-switch-device.md (extension A: no lists, the last choice is started).
 """
 
 from __future__ import annotations
@@ -28,8 +29,11 @@ DEVICES = {
     "Android emulator on this Mac": ("android-emu", "both"),
     "Another device, with a Wi-Fi proxy": ("device", "both"),
 }
+DEVICE_FOR_TARGET = {target: label for label, (target, _mode) in DEVICES.items()}
 # The shipped example is a template, not a project.
 HIDDEN_PRESETS = ("example",)
+DEFAULT_PROJECT = "default"
+DEFAULT_DEVICE = "iPhone"
 LAST = ".app-last"
 START_LOG = "app-start.log"
 POLL_S = 0.25
@@ -54,16 +58,34 @@ def recording(sessions_dir: Path = session.SESSIONS_DIR, now: float | None = Non
     return None
 
 
-def read_last(wiretrace_dir: Path, names: list[str]) -> tuple[str, str] | None:
-    """The project and device used last, when both still exist."""
+def _last_parts(wiretrace_dir: Path) -> tuple[str, str]:
+    """`.app-last` as (project, device), each "" when unreadable. Neither part is checked here."""
     try:
         text = (wiretrace_dir / LAST).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
-        return None
+        return "", ""
     project, _, device = text.strip().partition(" ")
+    return project, device
+
+
+def read_last(wiretrace_dir: Path, names: list[str]) -> tuple[str, str] | None:
+    """The project and device used last, when both still exist."""
+    project, device = _last_parts(wiretrace_dir)
     if project in names and device in DEVICES:
         return project, device
     return None
+
+
+def next_choice(wiretrace_dir: Path, names: list[str]) -> tuple[str, str] | None:
+    """What the app starts: the last project and device, each on its own falling back; None with no project."""
+    if not names:
+        return None
+    project, device = _last_parts(wiretrace_dir)
+    if project not in names:
+        project = DEFAULT_PROJECT if DEFAULT_PROJECT in names else names[0]
+    if device not in DEVICES:
+        device = DEFAULT_DEVICE
+    return project, device
 
 
 def write_last(wiretrace_dir: Path, project: str, device: str) -> None:
@@ -71,6 +93,17 @@ def write_last(wiretrace_dir: Path, project: str, device: str) -> None:
     tmp = path.with_name(f"{LAST}.tmp")
     tmp.write_text(f"{project} {device}\n", encoding="utf-8")
     os.replace(tmp, path)
+
+
+def remember(wiretrace_dir: Path, project: str, target: str) -> None:
+    """After a switch in the window of a session the app started. A failed write only loses the default."""
+    device = DEVICE_FOR_TARGET.get(target)
+    if device is None:
+        return
+    try:
+        write_last(wiretrace_dir, project, device)
+    except OSError:
+        pass
 
 
 def state(wiretrace_dir: Path = WIRETRACE_DIR, presets_dir: Path = PRESETS_DIR,
@@ -83,6 +116,9 @@ def state(wiretrace_dir: Path = WIRETRACE_DIR, presets_dir: Path = PRESETS_DIR,
     last = read_last(wiretrace_dir, names)
     if last:
         lines.append(f"last {last[0]} {last[1]}")
+    chosen = next_choice(wiretrace_dir, names)
+    if chosen:
+        lines.append(f"next {chosen[0]} {chosen[1]}")
     return lines
 
 

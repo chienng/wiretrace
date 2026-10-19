@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { AppState } from '../types';
+import type { AppState, DeviceInfo } from '../types';
+import { OFF_WHILE_VIEWING } from './presets';
 import {
+  clearResume,
+  RESUME_MAX_AGE_MS,
+  storeResume,
+  takeResume,
+  wizardSwitch,
   appChecks,
   appHint,
   beforeYouStart,
@@ -293,5 +299,92 @@ describe('setup wizard with the proxy and WireGuard together', () => {
     expect(setupSummary('iphone', both, [api], 'wireguard')[0]?.label).toBe('iPhone connected to this Mac through WireGuard');
     expect(setupSummary('ios-sim', both, [api], 'wireguard')[0]?.label).toBe('iOS Simulator connected to this Mac through the proxy');
     expect(setupSummary('iphone', both, [api])[0]?.label).toContain('through the proxy');
+  });
+});
+
+function device(over: Partial<DeviceInfo> = {}): DeviceInfo {
+  return { target: 'android', label: 'Android phone', allowed: true, why_not: null, device_logs: 'com.example.app', ...over };
+}
+
+describe('switching from the wizard (spec 018, A-10)', () => {
+  const android = device();
+  const sim = device({ target: 'ios-sim', label: 'iOS Simulator', allowed: false, why_not: 'The iOS Simulator needs the Wi-Fi proxy' });
+
+  it('shows no box when the chosen card is the session device', () => {
+    expect(wizardSwitch('iphone', 'ios', [android], null, null)).toBeNull();
+    expect(wizardSwitch('android', 'android', [android], null, null)).toBeNull();
+  });
+  it('names the session device and offers the chosen one', () => {
+    expect(wizardSwitch('android', 'ios', [android], null, null)).toEqual({
+      note: 'This session collects iPhone logs.',
+      button: 'Use Android for this session',
+      device: android,
+      disabled: false,
+    });
+  });
+  it('is disabled with why_not when /api/devices does not allow that device', () => {
+    expect(wizardSwitch('ios-sim', 'ios', [android, sim], null, null)).toMatchObject({ disabled: true, title: sim.why_not });
+  });
+  it('is disabled while a previous session is open', () => {
+    expect(wizardSwitch('android', 'ios', [android], null, '2026-10-15_080000_myapp_android')).toMatchObject({ disabled: true, title: OFF_WHILE_VIEWING });
+  });
+  it('waits for the list, and says why when it failed', () => {
+    expect(wizardSwitch('android', 'ios', null, null, null)).toMatchObject({ disabled: true, title: 'Loading the devices…' });
+    expect(wizardSwitch('android', 'ios', null, 'Forbidden', null)).toMatchObject({ disabled: true, title: 'Forbidden' });
+  });
+  it('says there are no device logs for --target device', () => {
+    expect(wizardSwitch('android', 'device', [android], null, null)?.note).toBe('This session collects no device logs.');
+  });
+});
+
+function memory(): Storage {
+  const items = new Map<string, string>();
+  return {
+    getItem: (k: string) => items.get(k) ?? null,
+    setItem: (k: string, v: string) => void items.set(k, v),
+    removeItem: (k: string) => void items.delete(k),
+    clear: () => items.clear(),
+    key: () => null,
+    get length() {
+      return items.size;
+    },
+  };
+}
+
+describe('resume entry (spec 018, A-11)', () => {
+  const now = 1_760_000_000_000;
+
+  it('opens Setup at Connect when fresh, and is removed', () => {
+    const s = memory();
+    storeResume(s, now - 5_000);
+    expect(takeResume(s, now)).toBe(true);
+    expect(s.getItem('wiretrace.resume')).toBeNull();
+    expect(takeResume(s, now)).toBe(false);
+  });
+  it('holds only the step and the time', () => {
+    const s = memory();
+    storeResume(s, now);
+    expect(JSON.parse(s.getItem('wiretrace.resume') as string)).toEqual({ step: 'connect', at: now });
+  });
+  it('is ignored when older than two minutes, and removed', () => {
+    const s = memory();
+    storeResume(s, now - RESUME_MAX_AGE_MS - 1);
+    expect(takeResume(s, now)).toBe(false);
+    expect(s.getItem('wiretrace.resume')).toBeNull();
+  });
+  it('is ignored when malformed or absent', () => {
+    const s = memory();
+    for (const raw of ['not json', 'null', '"connect"', '{"step":"trust","at":0}', `{"step":"connect","at":"${now}"}`]) {
+      s.setItem('wiretrace.resume', raw);
+      expect(takeResume(s, now)).toBe(false);
+    }
+    expect(takeResume(s, now)).toBe(false);
+    expect(takeResume(null, now)).toBe(false);
+  });
+  it('can be withdrawn when the switch does not happen', () => {
+    const s = memory();
+    storeResume(s, now);
+    clearResume(s);
+    expect(takeResume(s, now)).toBe(false);
   });
 });

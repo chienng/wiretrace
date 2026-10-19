@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { api } from '../api';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { api, ApiError } from '../api';
 import { copyText } from '../clipboard';
 import { download } from '../download';
 import { useNow } from '../hooks';
@@ -40,26 +40,36 @@ import {
   tunnelSteps,
   usesTunnel,
   wireguardSteps,
+  wizardSwitch,
   type ConnectionChoice,
   type DeviceKind,
   type Step,
   type StepKey,
+  type WizardSwitch,
 } from '../logic/setup';
-import { useDispatch, useStore } from '../store';
-import type { AppState } from '../types';
+import { browserStorage as storage } from '../storage';
+import { useData, useDispatch, useStore } from '../store';
+import type { AppState, DeviceInfo } from '../types';
 import { Modal } from './Modal';
+import { SwitchDeviceDialog } from './SwitchDeviceDialog';
 
 const CHOICES: readonly { id: ConnectionChoice; label: string }[] = [
   { id: 'proxy', label: 'Wi-Fi proxy' },
   { id: 'wireguard', label: 'WireGuard' },
 ];
 
-function storage(): Storage | null {
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
+/** Offers to switch the session to the chosen card's device, through the title bar's confirm dialog. */
+function SwitchBox({ box, onUse }: { box: WizardSwitch; onUse: (device: DeviceInfo) => void }) {
+  const { device } = box;
+  return (
+    <div className="hintbox gap-top">
+      <p>{box.note}</p>
+      <button type="button" className="btn primary small" disabled={box.disabled} title={box.title} onClick={() => device && onUse(device)}>
+        {box.button}
+      </button>
+      {box.disabled && box.title && <p className="tip">{box.title}</p>}
+    </div>
+  );
 }
 
 function Qr({ text, onFail }: { text: string; onFail: () => void }) {
@@ -447,8 +457,7 @@ function Summary({ state, kind, choice }: { state: AppState; kind: DeviceKind; c
   );
 }
 
-function DeviceLogsStep({ state, kind }: { state: AppState; kind: DeviceKind }) {
-  const target = deviceChoice(kind).target;
+function DeviceLogsStep({ state, kind, switchBox }: { state: AppState; kind: DeviceKind; switchBox: ReactNode }) {
   const pill = devicePill(state);
   const status = state.device_status;
   return (
@@ -471,13 +480,9 @@ function DeviceLogsStep({ state, kind }: { state: AppState; kind: DeviceKind }) 
             <b>Device logs are off</b>
             {state.device_logs_off ? `: ${state.device_logs_off}.` : '.'}
           </p>
-          {state.target !== target && (
-            <p>
-              They are collected only when Wiretrace is started with <span className="kbd">--target {target}</span>.
-            </p>
-          )}
         </div>
       )}
+      {switchBox}
       <ol className="instr gap-top">
         {deviceLogSteps(kind).map((s) => (
           <li key={s}>{s}</li>
@@ -491,14 +496,32 @@ const STEP_IDS = [1, 2, 3, 4, 5] as const;
 type StepId = (typeof STEP_IDS)[number];
 const STEP_KEYS: Record<StepId, StepKey> = { 1: 'device', 2: 'connect', 3: 'trust', 4: 'check', 5: 'logs' };
 
-export function SetupWizard() {
+/** `startAtConnect`: the tab was opened by a switch started from this wizard. */
+export function SetupWizard({ startAtConnect = false }: { startAtConnect?: boolean }) {
   const { appState, flows } = useStore();
+  const { viewing } = useData();
   const dispatch = useDispatch();
-  const [step, setStep] = useState<StepId>(1);
+  const [step, setStep] = useState<StepId>(startAtConnect ? 2 : 1);
   const [kind, setKind] = useState<DeviceKind>(() => deviceFromTarget(appState?.target ?? ''));
   const [alt, setAlt] = useState(false);
   const [choice, setChoice] = useState<ConnectionChoice>(() => loadChoice(storage()));
-  const close = () => dispatch({ type: 'ui', patch: { dialog: null } });
+  const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+  const [devicesError, setDevicesError] = useState<string | null>(null);
+  const [switchTo, setSwitchTo] = useState<DeviceInfo | null>(null);
+  useEffect(() => {
+    let live = true;
+    api
+      .devices()
+      .then((list) => live && setDevices(list))
+      .catch((e: unknown) => live && setDevicesError(e instanceof ApiError ? e.message : 'Could not list the devices'));
+    return () => {
+      live = false;
+    };
+  }, []);
+  // The confirm dialog handles Escape and its backdrop itself: the wizard stays open under it.
+  const close = () => {
+    if (!switchTo) dispatch({ type: 'ui', patch: { dialog: null } });
+  };
   if (!appState) return null;
 
   const choose = (c: ConnectionChoice) => {
@@ -524,6 +547,8 @@ export function SetupWizard() {
     5: 'Optional, USB',
   };
   const stepClass = (id: StepId) => (id === step ? 'cur' : done(id) ? 'done' : 'todo');
+  const box = wizardSwitch(kind, appState.target, devices, devicesError, viewing);
+  const switchBox = box && <SwitchBox box={box} onUse={setSwitchTo} />;
 
   return (
     <Modal title="Connect a test device" onClose={close} wide>
@@ -552,13 +577,14 @@ export function SetupWizard() {
               <h4>Which device do you test on?</h4>
               <p className="lead">The next steps are written for this kind of device.</p>
               <DeviceCards kind={kind} onPick={setKind} />
+              {switchBox}
               <BeforeYouStart kind={kind} wireguard={wg} />
             </>
           )}
           {step === 2 && <ConnectStep state={appState} kind={kind} setKind={setKind} choice={choice} onChoose={choose} copy={copy} />}
           {step === 3 && <TrustStep state={appState} kind={kind} choice={choice} copy={copy} />}
           {step === 4 && <CheckAppStep state={appState} kind={kind} choice={choice} onTrust={() => setStep(3)} />}
-          {step === 5 && <DeviceLogsStep state={appState} kind={kind} />}
+          {step === 5 && <DeviceLogsStep state={appState} kind={kind} switchBox={switchBox} />}
           {proxyAlt && (
             <Restart
               preset={appState.preset}
@@ -592,6 +618,7 @@ export function SetupWizard() {
           </div>
         </div>
       </div>
+      {switchTo && <SwitchDeviceDialog device={switchTo} state={appState} fromWizard onClose={() => setSwitchTo(null)} />}
     </Modal>
   );
 }

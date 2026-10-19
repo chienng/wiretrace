@@ -65,7 +65,8 @@ def state(home: Path, now: float | None = None) -> list[str]:
 def test_state_idle_lists_projects_without_example_and_the_devices(home):
     assert state(home) == ["idle", "project other", "project staging",
                            "device iPhone", "device Android phone", "device iOS Simulator on this Mac",
-                           "device Android emulator on this Mac", "device Another device, with a Wi-Fi proxy"]
+                           "device Android emulator on this Mac", "device Another device, with a Wi-Fi proxy",
+                           "next other iPhone"]
 
 
 def test_state_running_when_a_status_file_is_fresh(home):
@@ -85,7 +86,7 @@ def test_state_ignores_folders_that_are_not_sessions(home):
 
 def test_state_last_names_an_existing_project_and_a_known_device(home):
     (home / app.LAST).write_text("other Android phone\n")
-    assert state(home)[-1] == "last other Android phone"
+    assert state(home)[-2:] == ["last other Android phone", "next other Android phone"]
 
 
 @pytest.mark.parametrize("last", ["deleted Android phone", "example iPhone", "staging Toaster", "", "staging"])
@@ -96,7 +97,63 @@ def test_state_does_not_print_a_last_choice_that_no_longer_exists(home, last):
 
 def test_state_without_presets_lists_no_project(tmp_path):
     lines = app.state(tmp_path, tmp_path / "presets", tmp_path / "sessions")
-    assert lines[0] == "idle" and not any(line.startswith("project ") for line in lines)
+    assert lines[0] == "idle" and not any(line.startswith(("project ", "next ")) for line in lines)
+
+
+# What the app starts without asking (spec 018, extension A). The number is the spec's test number.
+
+def next_choice(home: Path):
+    return app.next_choice(home, app.projects(home / "presets"))
+
+
+def test_018_a1_the_last_project_is_started_while_it_is_listed(home):
+    (home / "presets" / "default.yaml").write_text(PRESET.format(name="default"))
+    (home / app.LAST).write_text("staging Android phone\n")
+    assert next_choice(home) == ("staging", "Android phone")
+
+
+def test_018_a1_a_deleted_last_project_falls_back_to_default_then_to_the_first_listed(home):
+    (home / app.LAST).write_text("deleted Android phone\n")
+    assert next_choice(home) == ("other", "Android phone")
+    (home / "presets" / "default.yaml").write_text(PRESET.format(name="default"))
+    assert next_choice(home) == ("default", "Android phone")
+
+
+def test_018_a1_no_project_is_no_choice(tmp_path):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "example.yaml").write_text(PRESET.format(name="example"))
+    assert app.next_choice(tmp_path, app.projects(tmp_path / "presets")) is None
+
+
+@pytest.mark.parametrize("last", ["staging Toaster", "staging", "", None, "staging iOS Simulator"])
+def test_018_a2_an_unknown_or_missing_last_device_is_iphone_and_the_project_is_kept(home, last):
+    if last is not None:
+        (home / app.LAST).write_text(last)
+    project = "staging" if last and last.startswith("staging") else "other"
+    assert next_choice(home) == (project, "iPhone")
+
+
+def test_018_a3_state_prints_next_last_and_never_the_example(home):
+    (home / app.LAST).write_text("example Android emulator on this Mac\n")
+    lines = state(home)
+    assert lines[-1] == "next other Android emulator on this Mac"
+    assert not any("example" in line for line in lines)
+
+
+@pytest.mark.parametrize("target, device", [("ios", "iPhone"), ("android", "Android phone"),
+                                            ("ios-sim", "iOS Simulator on this Mac"),
+                                            ("android-emu", "Android emulator on this Mac"),
+                                            ("device", "Another device, with a Wi-Fi proxy")])
+def test_018_remember_writes_the_project_and_the_app_label_of_the_target(home, target, device):
+    app.remember(home, "staging", target)
+    assert (home / app.LAST).read_text() == f"staging {device}\n"
+
+
+def test_018_remember_ignores_an_unknown_target_and_a_failed_write(home, tmp_path):
+    app.remember(home, "staging", "phone")
+    assert not (home / app.LAST).exists()
+    app.remember(tmp_path / "missing", "staging", "ios")
+    assert not (tmp_path / "missing").exists()
 
 
 # app start

@@ -3,7 +3,8 @@
 A Tornado application on mitmproxy's own asyncio loop, so every hook and every request runs
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
-Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md.
+Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md,
+018-switch-device.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -43,12 +44,21 @@ if str(ROOT) not in sys.path:
 from cli import __version__, report, report_text, screenshot, session  # noqa: E402
 from cli import bodies  # noqa: E402
 from cli import preset as presetfile  # noqa: E402
-from cli.preset import PRESETS_DIR, PresetError, list_presets, load_preset  # noqa: E402
-from cli.start import APP_KEYS, DEVICE_LOGS  # noqa: E402
+from cli.preset import PRESETS_DIR, Preset, PresetError, list_presets, load_preset  # noqa: E402
+from cli.start import (  # noqa: E402
+    APP_KEYS,
+    DEVICE_LOGS,
+    TARGET_LABELS,
+    TARGETS,
+    TARGETS_SHOWN,
+    collector_command,
+    target_problem,
+)
 
 logger = logging.getLogger(__name__)
 
 COOKIE = "wiretrace_ui"
+ALREADY_SWITCHING = "Wiretrace is already switching to another session"
 RECEIVER_HOST = "qa-logs.internal"
 MAX_FLOWS = 10_000
 MAX_LOG_LINES = 50_000
@@ -195,13 +205,13 @@ def write_status_file(path: Path, payload: dict) -> None:
         raise
 
 
-def write_switch_file(path: Path, name: str) -> None:
-    """`{"name": ...}` and nothing else, 0600 from the start, replaced whole (spec 013, invariant 4)."""
+def write_switch_file(path: Path, name: str, target: str) -> None:
+    """`{"name", "target"}` and nothing else, 0600 from the start, replaced whole (spec 018, invariant 1)."""
     tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump({"name": name}, f)
+            json.dump({"name": name, "target": target}, f)
         os.replace(tmp, path)
     finally:
         try:
@@ -223,6 +233,19 @@ def preset_entry(name: str, presets_dir: Path, target: str) -> dict:
     app = preset.app.get(APP_KEYS[source]) if source else None
     app = app if isinstance(app, str) and app else None
     return {"name": name, "api_hosts": list(preset.api_hosts), "device_logs": app is not None, "app": app}
+
+
+def device_entry(target: str, preset: Preset | None, mode: str, collector_for: Any, bin_dir: Path) -> dict:
+    """The device menu's line: whether this session can switch to it, and its device logs with this preset."""
+    why_not = target_problem(target, mode)
+    if preset is None:
+        logs = "off (the preset in use does not load)"
+    else:
+        # Only the argument list is built; nothing is started and the path is never opened.
+        cmd, problem = collector_for(preset, target, bin_dir, Path(session.DEVICE_LOG))
+        logs = preset.app[APP_KEYS[DEVICE_LOGS[target]]] if cmd else f"off ({problem})"
+    return {"target": target, "label": TARGET_LABELS[target], "allowed": why_not is None, "why_not": why_not,
+            "device_logs": logs}
 
 
 def summary(flow: http.HTTPFlow) -> dict:
@@ -919,12 +942,8 @@ class PresetDetail(PresetForm):
             ctx.master.shutdown()
 
 
-class PresetSwitch(Guarded):
-    async def post(self) -> None:
-        body = self.small_json()
-        if not isinstance(body, dict) or not isinstance(body.get("name"), str):
-            return self.fail(400, "The body must be {name}")
-        status, payload = await self.addon.switch_preset(body["name"])
+class SwitchRequest(Guarded):
+    async def answer_switch(self, status: int, payload: dict) -> None:
         self.set_status(status)
         if status == 204:
             return self.finish()
@@ -932,6 +951,29 @@ class PresetSwitch(Guarded):
         if status == 202:
             # Only once the page has its answer: the launcher saves this session and starts the next.
             ctx.master.shutdown()
+
+
+class PresetSwitch(SwitchRequest):
+    async def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or not isinstance(body.get("name"), str):
+            return self.fail(400, "The body must be {name}")
+        status, payload = await self.addon.switch_preset(body["name"])
+        await self.answer_switch(status, payload)
+
+
+class Devices(Guarded):
+    async def get(self) -> None:
+        self.write({"devices": await self.addon.list_devices()})
+
+
+class DeviceSwitch(SwitchRequest):
+    async def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or set(body) != {"target"} or not isinstance(body["target"], str):
+            return self.fail(400, "Unknown device.")
+        status, payload = await self.addon.switch_device(body["target"])
+        await self.answer_switch(status, payload)
 
 
 @tornado.web.stream_request_body
@@ -1191,6 +1233,9 @@ class WiretraceUI:
         self.screenshot_running = False
         self.last_report: Path | None = None
         self.presets_dir = PRESETS_DIR
+        # For the device menu's device-log line; tests replace both.
+        self.collector_for = collector_command
+        self.bin_dir = Path(sys.prefix) / "bin"
         # The preset `.switch.json` names once it is written; mitmdump is then shutting down.
         self.switching: str | None = None
         # One preset write at a time, so a refused restart never writes a file another request is racing for.
@@ -1301,6 +1346,8 @@ class WiretraceUI:
                 (r"/api/presets", Presets, handler_args),
                 (r"/api/presets/([A-Za-z0-9][A-Za-z0-9_-]{0,63})", PresetDetail, handler_args),
                 (r"/api/preset", PresetSwitch, handler_args),
+                (r"/api/devices", Devices, handler_args),
+                (r"/api/device", DeviceSwitch, handler_args),
                 (r"/api/rules", RulesApi, handler_args),
                 (r"/api/rules/test", RuleTest, handler_args),
                 (r"/api/rules/([a-z0-9]{6,32})/rearm", RuleRearm, handler_args),
@@ -1437,6 +1484,8 @@ class WiretraceUI:
             "device_logs_off": device_logs_off if isinstance(device_logs_off, str) and device_logs_off else None,
             "default_filter": ctx.options.qa_ui_default_filter,
             "proxy_port": ctx.options.listen_port if "listen_port" in ctx.options else 8888,
+            # proxy_guard adds the option, and only in a mode with the Wi-Fi proxy.
+            "proxy_pin": bool(ctx.options.qa_proxy_pin) if "qa_proxy_pin" in ctx.options else False,
             "wireguard_conf": self.wireguard_conf() if mode != "proxy" else None,
             "mac_ip": local_ip.get_local_ip() if mode != "wireguard" else None,
             "faults": faults,
@@ -1618,10 +1667,13 @@ class WiretraceUI:
 
         return await asyncio.to_thread(entries)
 
+    def current_target(self) -> str:
+        return str(self.meta().get("target") or "")
+
     def switch_refusal(self) -> tuple[int, dict] | None:
         """The 409s of a switch that come before anything else: a previous session is open, or no session folder."""
         if self.viewed is not None:
-            return 409, {"error": "Switching the preset is off while a previous session is open"}
+            return 409, {"error": "Switching is off while a previous session is open"}
         if not ctx.options.qa_ui_session_dir:
             return 409, {"error": "No session folder: start Wiretrace with ./wiretrace start"}
         return None
@@ -1647,19 +1699,66 @@ class WiretraceUI:
             return refusal
         if name == str(self.meta().get("preset") or ""):
             return 204, {}
-        return self.start_switch(name)
+        return self.start_switch(name, self.current_target())
 
-    def start_switch(self, name: str) -> tuple[int, dict]:
-        """Write `.switch.json`; no await between the in-flight check and the write."""
+    def start_switch(self, name: str, target: str) -> tuple[int, dict]:
+        """Write `.switch.json`; no await between the in-flight check and the write (spec 018, invariant 6)."""
         if self.switch_in_flight():
-            return 409, {"error": "Wiretrace is already switching to another preset"}
+            return 409, {"error": ALREADY_SWITCHING}
         try:
-            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name)
+            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name, target)
         except OSError as e:
             logger.error("Wiretrace UI: could not write the switch request (%s)", type(e).__name__)
             return 500, {"error": "Could not switch: the session folder cannot be written"}
         self.switching = name
-        return 202, {"switching": name}
+        return 202, {"switching": name, "target": target}
+
+    # Switching the device (spec 018): one device per session, the same preset and mode.
+
+    def current_mode(self) -> str:
+        mode = self.meta().get("mode")
+        return mode if isinstance(mode, str) else ""
+
+    async def current_preset(self) -> Preset | None:
+        try:
+            return await asyncio.to_thread(load_preset, str(self.meta().get("preset") or ""), self.presets_dir)
+        except (PresetError, OSError):
+            return None
+
+    async def list_devices(self) -> list[dict]:
+        preset, mode = await self.current_preset(), self.current_mode()
+        collector_for, bin_dir = self.collector_for, self.bin_dir
+
+        def entries() -> list[dict]:
+            return [device_entry(target, preset, mode, collector_for, bin_dir) for target in TARGETS_SHOWN]
+
+        # The adb lookup reads the disk.
+        return await asyncio.to_thread(entries)
+
+    async def switch_device(self, target: str) -> tuple[int, dict]:
+        """Invariants 2, 3, 5 and 6: check the target and the preset in use, then write `.switch.json`."""
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
+        if target not in TARGETS:
+            return 400, {"error": "Unknown device."}
+        problem = target_problem(target, self.current_mode())
+        if problem:
+            return 400, {"error": problem}
+        name = str(self.meta().get("preset") or "")
+        try:
+            await asyncio.to_thread(load_preset, name, self.presets_dir)
+        except PresetError as e:
+            return 400, {"error": str(e)}
+        except OSError:
+            return 400, {"error": "Could not read the preset file in use"}
+        # Other requests ran while the preset was read.
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
+        if target == self.current_target():
+            return 204, {}
+        return self.start_switch(name, target)
 
     # Editing and creating presets (spec 013, extension A).
 
@@ -1736,7 +1835,7 @@ class WiretraceUI:
             if in_use:
                 refusal = self.switch_refusal()
                 if refusal is None and self.switch_in_flight():
-                    refusal = 409, {"error": "Wiretrace is already switching to another preset"}
+                    refusal = 409, {"error": ALREADY_SWITCHING}
                 if refusal:
                     return refusal
                 if not restart:
@@ -1747,7 +1846,7 @@ class WiretraceUI:
             # Other requests ran while the file was written; the preset is saved either way.
             refusal = self.switch_refusal()
             if refusal is None:
-                status, payload = self.start_switch(name)
+                status, payload = self.start_switch(name, self.current_target())
                 if status == 202:
                     return status, payload
             return 500, {"error": "Saved, but the session could not restart: stop and start again"}

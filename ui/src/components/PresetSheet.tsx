@@ -174,7 +174,7 @@ export function PresetSheet({ current, initial, onClose }: Props) {
       } else {
         const result = await api.savePreset(selected, detail?.revision ?? '', fields, restart);
         if (result.switching) {
-          dispatch({ type: 'switching', preset: result.switching });
+          dispatch({ type: 'switching', to: result.switching });
           return;
         }
         await refreshList();

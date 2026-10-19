@@ -1,14 +1,16 @@
 import { api, ApiError } from '../api';
 import markUrl from '../assets/mark.svg';
 import { devicePill } from '../logic/device';
+import { deviceLabel, deviceLogsLine, deviceMenuState, modeLabel } from '../logic/devices';
 import { formatElapsed, formatVersion } from '../logic/format';
 import { isCrash } from '../logic/logs';
 import { OFF_WHILE_VIEWING, presetMenuState, presetRowsState } from '../logic/presets';
 import { useNow } from '../hooks';
 import { useData, useDispatch, useStore } from '../store';
-import type { PresetInfo } from '../types';
+import type { AppState, DeviceInfo, PresetInfo } from '../types';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PresetSheet } from './PresetSheet';
+import { SwitchDeviceDialog } from './SwitchDeviceDialog';
 import { SwitchPresetDialog } from './SwitchPresetDialog';
 
 interface Props {
@@ -120,6 +122,97 @@ function PresetMenu({ current, target, viewing }: { current: string; target: str
   );
 }
 
+/** The device label: a menu of the targets this session can switch to. Another device is confirmed in a dialog first. */
+function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; viewing: string | null }) {
+  const [open, setOpen] = useState(false);
+  const [devices, setDevices] = useState<DeviceInfo[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [chosen, setChosen] = useState<DeviceInfo | null>(null);
+  const box = useRef<HTMLDivElement>(null);
+  const menu = deviceMenuState(viewing);
+
+  useEffect(() => {
+    if (viewing) {
+      setOpen(false);
+      setChosen(null);
+    }
+  }, [viewing]);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    setError(null);
+    api
+      .devices()
+      .then((list) => live && setDevices(list))
+      .catch((e: unknown) => live && setError(e instanceof ApiError ? e.message : 'Could not list the devices'));
+    const away = (e: MouseEvent) => {
+      if (box.current && !box.current.contains(e.target as Node)) setOpen(false);
+    };
+    const escape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('mousedown', away);
+    document.addEventListener('keydown', escape);
+    return () => {
+      live = false;
+      document.removeEventListener('mousedown', away);
+      document.removeEventListener('keydown', escape);
+    };
+  }, [open]);
+
+  const choose = (device: DeviceInfo) => {
+    setOpen(false);
+    if (device.target !== state.target) setChosen(device);
+  };
+
+  return (
+    <div className="picker" ref={box}>
+      <button
+        type="button"
+        className={`pill ${seen ? 'ok' : 'wait'} picker-btn`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={menu.disabled}
+        title={menu.title}
+        onClick={() => setOpen(!open)}
+      >
+        {deviceLabel(state.target)} · {modeLabel(state.mode)}
+        <span className="caret">▾</span>
+      </button>
+      {open && (
+        <div className="pop" role="menu" aria-label="Devices">
+          <div className="pop-h">Devices</div>
+          {error && <div className="pop-foot plain">{error}</div>}
+          {!error && !devices && <div className="pop-foot plain">Loading…</div>}
+          {devices?.map((device) => {
+            const current = device.target === state.target;
+            return (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={current}
+                className={`src pick${current ? ' on' : ''}`}
+                key={device.target}
+                disabled={!device.allowed && !current}
+                onClick={() => choose(device)}
+              >
+                <span className="src-main">
+                  <span className="name">{device.label}</span>
+                  <span className="sub">{device.allowed || current ? deviceLogsLine(device.device_logs) : device.why_not}</span>
+                </span>
+                {current && <span className="state ok">In use</span>}
+              </button>
+            );
+          })}
+          <div className="pop-foot plain">Another device saves this session and starts a new one with the same preset.</div>
+        </div>
+      )}
+      {chosen && <SwitchDeviceDialog device={chosen} state={state} onClose={() => setChosen(null)} />}
+    </div>
+  );
+}
+
 function Recording({ startedAt, reconnecting }: { startedAt: number; reconnecting: boolean }) {
   const now = useNow(1000);
   if (reconnecting) return <span className="pill wait">Reconnecting…</span>;
@@ -187,9 +280,7 @@ export function TitleBar({ newCount }: Props) {
       {appState && pill && (
         <>
           <PresetMenu current={appState.preset} target={appState.target} viewing={viewing} />
-          <span className={`pill ${seen ? 'ok' : 'wait'}`} title="Target and mode">
-            {appState.target} · {appState.mode === 'wireguard' ? 'WireGuard' : appState.mode === 'both' ? 'Proxy + WireGuard' : 'Proxy'}
-          </span>
+          <DeviceMenu state={appState} seen={seen} viewing={viewing} />
           <span className={`pill ${pill.tone}`} title={pill.title}>
             {pill.text}
           </span>

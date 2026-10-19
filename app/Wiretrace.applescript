@@ -1,6 +1,7 @@
 -- Wiretrace.app: start a session without Terminal. scripts/make-app.sh compiles this on the
--- tester's Mac. The logic is in `wiretrace app` (cli/app.py); this only shows lists and dialogs.
--- Spec: docs/specs/014-mac-app-install-and-launcher.md.
+-- tester's Mac. The logic is in `wiretrace app` (cli/app.py); this only shows dialogs. It starts
+-- the project and device `app state` names on its `next` line; the window switches either.
+-- Specs: docs/specs/014-mac-app-install-and-launcher.md, 018-switch-device.md (extension A).
 --
 -- ASCII only: the ellipsis is made with `character id`.
 
@@ -30,24 +31,19 @@ on run
 		return
 	end try
 	set recordingPreset to ""
-	set projectNames to {}
-	set deviceNames to {}
-	set lastProject to ""
-	set lastDevice to ""
+	set projectName to ""
+	set deviceName to ""
 	repeat with stateLine in paragraphs of stateText
 		set stateLine to stateLine as text
 		if stateLine starts with "running " then
 			set recordingPreset to text 9 thru -1 of stateLine
-		else if stateLine starts with "project " then
-			set end of projectNames to text 9 thru -1 of stateLine
-		else if stateLine starts with "device " then
-			set end of deviceNames to text 8 thru -1 of stateLine
-		else if stateLine starts with "last " then
-			set lastText to text 6 thru -1 of stateLine
-			set spaceAt to offset of " " in lastText
-			if spaceAt > 1 and spaceAt < (length of lastText) then
-				set lastProject to text 1 thru (spaceAt - 1) of lastText
-				set lastDevice to text (spaceAt + 1) thru -1 of lastText
+		else if stateLine starts with "next " then
+			-- A project name has no space; the device label may.
+			set nextText to text 6 thru -1 of stateLine
+			set spaceAt to offset of " " in nextText
+			if spaceAt > 1 and spaceAt < (length of nextText) then
+				set projectName to text 1 thru (spaceAt - 1) of nextText
+				set deviceName to text (spaceAt + 1) thru -1 of nextText
 			end if
 		end if
 	end repeat
@@ -56,25 +52,13 @@ on run
 		display dialog "Wiretrace is already recording " & recordingPreset & ". Use the Wiretrace menu (the W icon at the top right) to open the window or stop." with title appTitle buttons {"OK"} default button "OK"
 		return
 	end if
-	if projectNames is {} then
+	if projectName is "" then
 		set answer to display dialog "No project yet. Add one to the presets folder (user guide, Part 2), then open Wiretrace again." with title appTitle buttons {"Open presets folder", "OK"} default button "OK"
 		if button returned of answer is "Open presets folder" then
 			do shell script "open " & quoted form of (root & "/presets")
 		end if
 		return
 	end if
-
-	set projectDefault to item 1 of projectNames
-	if projectNames contains lastProject then set projectDefault to lastProject
-	set picked to choose from list projectNames with title appTitle with prompt "Project:" default items {projectDefault} OK button name "Next" cancel button name "Quit"
-	if picked is false then return
-	set projectName to item 1 of picked
-
-	set deviceDefault to item 1 of deviceNames
-	if deviceNames contains lastDevice then set deviceDefault to lastDevice
-	set picked to choose from list deviceNames with title appTitle with prompt "Device:" default items {deviceDefault} OK button name "Start" cancel button name "Quit"
-	if picked is false then return
-	set deviceName to item 1 of picked
 
 	set progress total steps to -1
 	set progress completed steps to 0
@@ -87,11 +71,11 @@ on run
 		return
 	end try
 	if startOutput is "starting" then
-		set message to "Wiretrace is still starting " & projectName & ". The window opens when it is ready."
+		set message to "Wiretrace is still starting " & projectName & " on " & deviceName & ". The window opens when it is ready."
 	else
-		set message to "Wiretrace is recording " & projectName & "."
+		set message to "Wiretrace is recording " & projectName & " on " & deviceName & "."
 	end if
-	display dialog message & " Stop it from the Wiretrace menu (the W icon at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
+	display dialog message & " Change either from the window's title bar. Stop it from the Wiretrace menu (the W icon at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
 end run
 
 on showError(message)

@@ -110,6 +110,13 @@ def test_an_app_with_another_identifier_is_left_as_it_is(tmp_path, plist):
     assert [p.name for p in (tmp_path / "Applications").iterdir()] == ["Wiretrace.app"]
 
 
+def test_018_a9_the_applet_shows_no_list_and_starts_the_next_choice():
+    source = (ROOT / "app" / "Wiretrace.applescript").read_text()
+    assert "choose from list" not in source
+    assert 'stateLine starts with "next "' in source
+    assert 'app start --project " & quoted form of projectName & " --device " & quoted form of deviceName' in source
+
+
 def test_the_applet_source_compiles(tmp_path):
     result = subprocess.run(["osacompile", "-o", str(tmp_path / "check.scpt"), str(ROOT / "app" / "Wiretrace.applescript")],
                             capture_output=True, text=True)

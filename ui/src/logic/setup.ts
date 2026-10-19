@@ -1,4 +1,6 @@
-import type { AppState, FlowSummary } from '../types';
+import type { AppState, DeviceInfo, FlowSummary } from '../types';
+import { deviceLabel } from './devices';
+import { OFF_WHILE_VIEWING } from './presets';
 
 export type DeviceKind = 'iphone' | 'android' | 'ios-sim' | 'android-emu';
 
@@ -93,6 +95,73 @@ export function storeChoice(storage: Pick<Storage, 'setItem'> | null, choice: Co
     storage?.setItem(CHOICE_KEY, choice);
   } catch {
     // Storage full or off: the choice is kept only while the window is open.
+  }
+}
+
+export interface WizardSwitch {
+  /** "This session collects iPhone logs." */
+  note: string;
+  button: string;
+  device: DeviceInfo | null;
+  disabled: boolean;
+  title?: string;
+}
+
+/**
+ * The box offering to switch the session to the chosen card's device; null when the card is the session's.
+ * `devices` is null until /api/devices answers, and `error` is set when it failed.
+ */
+export function wizardSwitch(
+  kind: DeviceKind,
+  target: string,
+  devices: readonly DeviceInfo[] | null,
+  error: string | null,
+  viewing: string | null,
+): WizardSwitch | null {
+  const chosen = deviceChoice(kind);
+  if (chosen.target === target) return null;
+  const note = target === 'device' ? 'This session collects no device logs.' : `This session collects ${deviceLabel(target)} logs.`;
+  const button = `Use ${chosen.label} for this session`;
+  const device = devices?.find((d) => d.target === chosen.target) ?? null;
+  if (viewing) return { note, button, device, disabled: true, title: OFF_WHILE_VIEWING };
+  if (!device) return { note, button, device, disabled: true, title: error ?? (devices ? 'Unknown device' : 'Loading the devices…') };
+  if (!device.allowed) return { note, button, device, disabled: true, title: device.why_not ?? undefined };
+  return { note, button, device, disabled: false };
+}
+
+const RESUME_KEY = 'wiretrace.resume';
+/** A resume entry older than this is left over from an earlier switch, not this one. */
+export const RESUME_MAX_AGE_MS = 2 * 60 * 1000;
+
+/** Written just before a switch from the wizard: the new tab opens Setup on Connect. */
+export function storeResume(storage: Pick<Storage, 'setItem'> | null, now: number): void {
+  try {
+    storage?.setItem(RESUME_KEY, JSON.stringify({ step: 'connect', at: now }));
+  } catch {
+    // Storage full or off: the new tab opens as after a title-bar switch.
+  }
+}
+
+export function clearResume(storage: Pick<Storage, 'removeItem'> | null): void {
+  try {
+    storage?.removeItem(RESUME_KEY);
+  } catch {
+    // Nothing to do: an entry left behind expires.
+  }
+}
+
+/** Reads and removes the resume entry: true when it is fresh. */
+export function takeResume(storage: Pick<Storage, 'getItem' | 'removeItem'> | null, now: number): boolean {
+  try {
+    const raw = storage?.getItem(RESUME_KEY);
+    if (raw == null) return false;
+    storage?.removeItem(RESUME_KEY);
+    const entry: unknown = JSON.parse(raw);
+    if (typeof entry !== 'object' || entry === null) return false;
+    const { step, at } = entry as { step?: unknown; at?: unknown };
+    return step === 'connect' && typeof at === 'number' && now - at >= 0 && now - at <= RESUME_MAX_AGE_MS;
+  } catch {
+    return false;
   }
 }
 

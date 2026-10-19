@@ -17,8 +17,8 @@ is no Terminal, so the menu is the only stop: a menu that ends is a stop too
 States (docs/specs/002-start-launcher-presets-sessions.md, 004-log-collectors-and-app-log-receiver.md):
 PREPARE -> RUNNING -> STOPPING -> KILLED -> FINALIZING -> DONE, or PREPARE -> ABORTED.
 With `--ui wiretrace`, a session whose mitmdump exited on its own after the window wrote
-`.switch.json` goes back to PREPARE with that preset (docs/specs/013-switch-preset.md).
-A stop signal never does.
+`.switch.json` goes back to PREPARE with the preset and target it names
+(docs/specs/013-switch-preset.md, 018-switch-device.md). A stop signal never does.
 """
 
 from __future__ import annotations
@@ -37,6 +37,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from importlib import metadata
 from pathlib import Path
+from typing import NamedTuple
 
 from . import __version__, doctor, redact, session
 from .preset import PRESETS_DIR, Preset, PresetError, allow_hosts_regexes, load_preset
@@ -78,6 +79,11 @@ SAVE_FILTER = r"!~d ^qa-logs\.internal$ & !~d ^mitm\.it$"
 DEVICE_LOGS = {"android": "android", "android-emu": "android", "ios": "ios", "ios-sim": "ios-sim"}
 DEVICE_LOG_NAMES = {"android": "Android", "ios": "iPhone", "ios-sim": "iOS Simulator"}
 APP_KEYS = {"android": "android_package", "ios": "ios_process", "ios-sim": "ios_process"}
+# The window's device menu, in this order.
+TARGETS_SHOWN = ("ios", "android", "android-emu", "ios-sim", "device")
+TARGET_LABELS = {"ios": "iPhone", "android": "Android phone", "android-emu": "Android emulator",
+                 "ios-sim": "iOS Simulator", "device": "Another device"}
+SIMULATOR_NEEDS_PROXY = "The iOS Simulator needs the Wi-Fi proxy: stop and start Wiretrace for it."
 
 RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
@@ -225,6 +231,15 @@ def collector_command(preset: Preset, target: str, bin_dir: Path, out: Path, *,
         return None, f"{tool} not found"
     return [sys.executable, "-m", "collectors", "--target", target, "--app", app,
             "--out", str(out), "--status", str(out.parent / session.DEVICE_STATUS), f"--{tool}", found], ""
+
+
+def target_problem(target: str, mode: str) -> str | None:
+    """Why a session in `mode` cannot switch to `target`, or None. The window and the launcher both ask."""
+    if target not in TARGETS:
+        return "Unknown device."
+    if target == "ios-sim" and mode == "wireguard":
+        return SIMULATOR_NEEDS_PROXY
+    return None
 
 
 def count_mocks(mocks_dir: Path) -> int:
@@ -433,23 +448,37 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 switch=kind == WIRETRACE,
                 outcome=outcome,
                 from_app=from_app,
+                target=target,
             )
             # Invariant 9: only the Wiretrace window loops.
             if kind != WIRETRACE or outcome.state != RUNNING or outcome.switch_to is None or signals[0]:
                 return code
-            # Invariant 3: the preset is loaded again here, before anything is spawned for it.
+            # Invariant 3: the preset and the target are checked again here, before anything is spawned.
             try:
-                preset = load_preset(outcome.switch_to, presets_dir)
+                preset = load_preset(outcome.switch_to.name, presets_dir)
             except PresetError as e:
                 say(str(e), err=True)
                 return 1
+            problem = target_problem(outcome.switch_to.target, mode)
+            if problem:
+                say(problem, err=True)
+                return 1
+            target = outcome.switch_to.target
             # Invariant 8.
             if ports_busy(mode, kind, proxy_port, ui_port):
                 return 1
+            if from_app:
+                remember_for_app(wiretrace_dir, preset.name, target)
             switched = True
     finally:
         for sig, handler in previous.items():
             signal.signal(sig, handler)
+
+
+def remember_for_app(wiretrace_dir: Path, preset: str, target: str) -> None:
+    """What Wiretrace.app starts next time. Imported here: `cli/app.py` imports this module."""
+    from .app import remember
+    remember(wiretrace_dir, preset, target)
 
 
 def ports_busy(mode: str, kind: str, proxy_port: int, ui_port: int) -> bool:
@@ -491,16 +520,29 @@ def create_folder(preset: Preset, target: str, meta: dict, sessions_dir: Path, *
     return None
 
 
+class Switch(NamedTuple):
+    """What `.switch.json` asks for: the next session's preset and target."""
+
+    name: str
+    target: str
+
+
 @dataclass
 class Outcome:
     """What `supervise` saw, for the loop in `run`. Left as it is, it means "no switch"."""
 
     state: str | None = None
-    switch_to: str | None = None
+    switch_to: Switch | None = None
 
 
-def take_switch(folder: Path) -> str | None:
-    """The preset name in `.switch.json`, or None. The file is deleted whatever it holds (invariant 6)."""
+def switch_line(switch: Switch, target: str) -> str:
+    if switch.target != target and switch.target in TARGET_LABELS:
+        return f"Switching to {TARGET_LABELS[switch.target]}: saving this session first."
+    return "Switching presets: saving this session first."
+
+
+def take_switch(folder: Path) -> Switch | None:
+    """The preset and target in `.switch.json`, or None. The file is deleted whatever it holds (invariant 6)."""
     path = folder / session.SWITCH
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -519,9 +561,11 @@ def take_switch(folder: Path) -> str | None:
         data = json.loads(raw)
     except ValueError:
         return None
-    if not isinstance(data, dict) or set(data) != {"name"} or not isinstance(data["name"], str):
+    if not isinstance(data, dict) or set(data) != {"name", "target"}:
         return None
-    return data["name"]
+    if not isinstance(data["name"], str) or not isinstance(data["target"], str):
+        return None
+    return Switch(data["name"], data["target"])
 
 
 # RUNNING, STOPPING, KILLED
@@ -685,12 +729,12 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
               collector_cmd: list[str] | None = None, rules: redact.Rules | None = None, *,
               menu_cmd: list[str] | None = None, menu_token: str | None = None,
               child_env: dict[str, str] | None = None, switch: bool = False,
-              outcome: Outcome | None = None, from_app: bool = False) -> int:
+              outcome: Outcome | None = None, from_app: bool = False, target: str = "") -> int:
     """Spawn the child and take it to DONE. The stop-signal handlers must already append to `stops`.
 
     `switch`: read and delete `.switch.json` once the child has exited. `outcome` gets the state
-    the child exited in and the preset that file named. `from_app`: a menu that ends, or that
-    cannot start, stops the session.
+    the child exited in and what that file asked for. `from_app`: a menu that ends, or that
+    cannot start, stops the session. `target`: this session's, so a device switch is named as one.
     """
     tool = Path(child_cmd[0]).name
     try:
@@ -721,7 +765,7 @@ def supervise(child_cmd: list[str], har_cmd: list[str], folder: Path, stops: lis
             outcome.state, outcome.switch_to = state, switch_to
         switching = state == RUNNING and switch_to is not None
         if switching:
-            say("Switching presets: saving this session first.")
+            say(switch_line(switch_to, target))
         elif state == RUNNING:
             say(f"{tool} exited on its own (exit code {child.returncode}).", err=True)
         if collector:
