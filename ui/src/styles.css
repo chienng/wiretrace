@@ -49,8 +49,8 @@ button:disabled { cursor: default; opacity: .5; }
 .tb-group { display: flex; align-items: center; gap: 10px; flex: none; }
 .tb-group.end { margin-left: auto; }
 .title { display: flex; align-items: center; gap: 10px; margin-right: 6px; white-space: nowrap; }
-.title .mark { width: 32px; height: 32px; flex: none; }
-.title .name { display: flex; flex-direction: column; font-weight: 600; font-size: 15px; line-height: 1.15; }
+.title .mark { width: 36px; height: 36px; flex: none; }
+.title .name { display: flex; flex-direction: column; font-weight: 600; font-size: 16px; line-height: 1.15; }
 .title .version { min-height: 14px; font-weight: 400; font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
 
 .btn {
