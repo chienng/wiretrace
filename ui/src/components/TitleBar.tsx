@@ -168,7 +168,12 @@ export function TitleBar({ newCount }: Props) {
       {appState && <Recording startedAt={appState.started_at} reconnecting={phase === 'reconnecting'} />}
       {ui.view === 'traffic' && !viewing && (
         <>
-          <button type="button" className="btn small" onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })} aria-pressed={paused}>
+          <button
+            type="button"
+            className={`btn small${paused ? ' toggled' : ''}`}
+            onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })}
+            aria-pressed={paused}
+          >
             {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
           </button>
         </>
