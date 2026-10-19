@@ -28,7 +28,7 @@ TIMEOUT_S = 10
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
 PORTS = [
     ("udp", "0.0.0.0", 51820, "WireGuard"),
-    ("tcp", "0.0.0.0", 8080, "proxy"),
+    ("tcp", "0.0.0.0", 8888, "proxy"),
     ("tcp", "127.0.0.1", 8081, "mitmweb UI"),
 ]
 PACKAGES = ["pyyaml", "pymobiledevice3", "httpx", "keyring"]
@@ -222,7 +222,7 @@ def check_firewall(run: Run = _run, python: Path | None = None) -> list[Result]:
         if enabled is False:
             return [Result(OK, name, "off")]
         if parse_fw_block_all(run([SOCKETFILTERFW, "--getblockall"])):
-            return [Result(FAIL, name, "blocks all incoming connections; ask IT for an allow rule (UDP 51820, TCP 8080)")]
+            return [Result(FAIL, name, "blocks all incoming connections; ask IT for an allow rule (UDP 51820, TCP 8888)")]
         app = parse_fw_app(run([SOCKETFILTERFW, "--getappblocked", str(python)]))
     except (OSError, subprocess.CalledProcessError):
         return [Result(WARN, name, "could not read the firewall state")]
@@ -234,7 +234,7 @@ def check_firewall(run: Run = _run, python: Path | None = None) -> list[Result]:
     return [Result(
         WARN, name,
         "on; macOS will ask to allow incoming connections on first start. "
-        "If no prompt appears, the firewall is managed: ask IT for an allow rule (UDP 51820, TCP 8080)",
+        "If no prompt appears, the firewall is managed: ask IT for an allow rule (UDP 51820, TCP 8888)",
     )]
 
 

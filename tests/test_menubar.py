@@ -102,6 +102,11 @@ def test_other_targets_and_proxy_mode():
         "iOS · Proxy · iPhone")
 
 
+def test_both_mode_is_proxy_plus_wireguard():
+    assert row(render(status(mode="both", device_model=None), 1_000.0, False), "Device").value == (
+        "Android · Proxy + WireGuard")
+
+
 def test_updated_at_exactly_five_seconds_old_is_live_and_older_is_stale():
     fresh = status(updated_at=1_000.0)
     assert is_fresh(fresh, 1_000.0 + FRESH_S)

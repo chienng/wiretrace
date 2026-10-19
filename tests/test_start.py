@@ -364,8 +364,9 @@ def test_nothing_captured_removes_the_session_folder(launch):
     assert "Nothing was captured" in run.output
 
 
+@pytest.mark.parametrize("mode", ["proxy", "both"])
 @pytest.mark.parametrize("family", [socket.AF_INET, socket.AF_INET6])
-def test_port_in_use_starts_nothing(tmp_path, capsys, family):
+def test_port_in_use_starts_nothing(tmp_path, capsys, family, mode):
     (tmp_path / "presets").mkdir()
     (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
     with socket.socket(family) as holder:
@@ -374,12 +375,13 @@ def test_port_in_use_starts_nothing(tmp_path, capsys, family):
         holder.bind(("0.0.0.0" if family == socket.AF_INET else "::", 0))
         holder.listen()
         port = holder.getsockname()[1]
-        code = start.run("staging", "android", "proxy", ui=False, presets_dir=tmp_path / "presets",
+        code = start.run("staging", "android", mode, ui=False, presets_dir=tmp_path / "presets",
                          sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=port,
                          wiretrace_dir=tmp_path / "wiretrace")
 
     assert code == 1
-    assert f"TCP {port}" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"TCP {port}" in err and "Not started." in err
     assert not (tmp_path / "sessions").exists()
 
 
@@ -453,7 +455,7 @@ def test_mitmweb_command_wireguard():
 
 def test_mitmdump_filter_is_an_option_not_positional():
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"))
-    assert cmd[:5] == ["/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8080"]
+    assert cmd[:5] == ["/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8888"]
     assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
 
 
@@ -529,6 +531,72 @@ def test_needed_ports():
     assert labels("wireguard", False) == ["WireGuard"]
     assert labels("proxy", True) == ["proxy", "mitmweb UI"]
     assert start.needed_ports("proxy", False, 9999) == [("tcp", "0.0.0.0", 9999, "proxy")]
+    assert start.needed_ports("both", False, 9999) == [
+        ("udp", "0.0.0.0", 51820, "WireGuard"), ("tcp", "0.0.0.0", 9999, "proxy")]
+    assert labels("both", start.WIRETRACE) == ["WireGuard", "proxy", "Wiretrace UI"]
+
+
+# Both modes in one session (spec 017)
+
+def test_both_command_runs_the_proxy_and_wireguard_and_loads_the_guard():
+    cmd = start.build_command(PRESET_WITH_FILTER, "both", start.WIRETRACE, Path("/s/flows.mitm"), Path("/v/bin"),
+                              proxy_port=9999)
+    assert cmd[:7] == ["/v/bin/mitmdump", "--mode", "regular", "--listen-port", "9999", "--mode", "wireguard@51820"]
+    assert cmd.count("--mode") == 2 and cmd.count("--listen-port") == 1
+    scripts = [cmd[i + 1] for i, a in enumerate(cmd) if a == "-s"]
+    assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON), str(start.PROXY_GUARD), str(start.UI_ADDON)]
+    assert "qa_proxy_clients=127.0.0.0/8" in cmd and "qa_proxy_clients=::1" in cmd
+    assert "qa_proxy_pin=true" in cmd
+    named = start.build_command(PRESET_WITH_FILTER, "both", False, Path("/s/flows.mitm"), Path("/v/bin"),
+                                clients=("192.168.1.20",))
+    assert "qa_proxy_clients=192.168.1.20" in named and "qa_proxy_pin=false" in named
+
+
+def test_proxy_and_wireguard_commands_are_unchanged():
+    base = [
+        "--allow-hosts", r"(^|\.)a\.example\.com(:\d+)?$", "--allow-hosts", r"(^|\.)b\.example\.com(:\d+)?$",
+        "--allow-hosts", start.RECEIVER_ALLOW_HOSTS, "--allow-hosts", start.ONBOARDING_ALLOW_HOSTS,
+        "--save-stream-file", "/s/flows.mitm", "-s", str(start.QA_ADDON), "-s", str(start.APP_LOGS_ADDON),
+    ]
+    options = [
+        "--set", "qa_api_hosts=a.example.com", "--set", "qa_api_hosts=b.example.com",
+        "--set", "qa_mocks_dir=/d/mocks/staging", "--set", f"qa_wiretrace_dir={Path('/d').resolve()}",
+        "--set", "qa_rules_file=/d/rules/staging.json", "--set", "qa_request_id_header=X-Request-ID",
+        "--set", "qa_app_log_file=/s/app.log.jsonl", "--set", f"save_stream_filter={start.SAVE_FILTER}",
+    ]
+    proxy = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
+                                wiretrace_dir=Path("/d"))
+    assert proxy == [
+        "/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8888", *base, "-s", str(start.PROXY_GUARD),
+        *options, "--set", "qa_proxy_clients=127.0.0.0/8", "--set", "qa_proxy_clients=::1",
+        "--set", "qa_proxy_pin=true", "--set", "dumper_filter=!~t image",
+    ]
+    wireguard = start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"),
+                                    wiretrace_dir=Path("/d"))
+    assert wireguard == [
+        "/v/bin/mitmweb", "--mode", "wireguard", *base, *options, "--set", "view_filter=!~t image",
+    ]
+
+
+@pytest.mark.parametrize("ui", [True, False, start.WIRETRACE])
+def test_both_banner_gives_both_ways_and_the_pinning_note(ui):
+    text = start.banner(PRESET_WITH_FILTER, "android", "both", ui, Path("/s"), proxy_port=9999)
+    lines = text.splitlines()
+    assert "Phone: set the Wi-Fi proxy to this Mac's IP address, port 9999." in lines
+    tunnel = next(line for line in lines if line.startswith("Phone, if an app ignores the proxy:"))
+    assert "turn the WireGuard tunnel on instead" in tunnel
+    assert ("scan the QR code" in tunnel) or ("enter the configuration printed below" in tunnel)
+    assert ("Wi-Fi proxy: only the first other device that connects is accepted, unless --client names it."
+            in lines)
+    for single in ("proxy", "wireguard"):
+        assert "Phone, if an app ignores the proxy" not in start.banner(PRESET_WITH_FILTER, "android", single, ui, Path("/s"))
+
+
+def test_the_default_mode_is_both_and_the_three_modes_are_accepted(monkeypatch):
+    assert parse_start(monkeypatch)[0][2] == "both"
+    for mode in ("both", "proxy", "wireguard"):
+        assert parse_start(monkeypatch, "--mode", mode)[0][2] == mode
+    assert start.PROXY_PORT == 8888 and start.WIREGUARD_PORT == 51820
 
 
 # Integration: real mitmdump
@@ -912,7 +980,7 @@ def test_command_loads_the_receiver_and_keeps_its_flows_out_of_the_session():
     assert not any(a.startswith("qa_api_hosts=") and ("qa-logs" in a or "mitm.it" in a) for a in cmd)
 
 
-@pytest.mark.parametrize("mode", ["wireguard", "proxy"])
+@pytest.mark.parametrize("mode", ["wireguard", "proxy", "both"])
 @pytest.mark.parametrize("ui", [True, False, start.WIRETRACE])
 def test_command_lets_the_certificate_page_load_for_every_mode_and_ui(mode, ui):
     # Regression: mitm.it was not in --allow-hosts, so the phone's browser reached the real site
@@ -1187,7 +1255,7 @@ def parse_start(monkeypatch, *argv):
 
 def test_ui_defaults_to_mitmweb(monkeypatch):
     args, kwargs = parse_start(monkeypatch)
-    assert kwargs["ui"] == "mitmweb" and args == ("staging", "device", "wireguard")
+    assert kwargs["ui"] == "mitmweb" and args == ("staging", "device", "both")
 
 
 def test_ui_wiretrace_and_mitmweb_are_accepted(monkeypatch):
@@ -1525,7 +1593,7 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
 def test_the_version_is_0_7_2():
     from cli import __version__
 
-    assert __version__ == "0.9.0"
+    assert __version__ == "0.9.1"
 
 
 def test_main_sets_a_private_umask(monkeypatch):

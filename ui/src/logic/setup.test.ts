@@ -13,6 +13,7 @@ import {
   emulatorConf,
   endpointOf,
   firstApiFlow,
+  loadChoice,
   needsProxy,
   nextLabel,
   nextTime,
@@ -23,9 +24,13 @@ import {
   setupSummary,
   STEP_LABELS,
   stepDone,
+  storeChoice,
   trustChecklist,
   trustHint,
   tunnelSteps,
+  wireguardSteps,
+  type ConnectionChoice,
+  type DeviceKind,
 } from './setup';
 import { flow } from './testing';
 
@@ -225,5 +230,68 @@ describe('setup wizard for first-time testers', () => {
     ]);
     expect(nextTime('iphone', true)).toBe('Next time: switch the WireGuard tunnel on, then start Wiretrace. The certificate stays installed.');
     expect(nextTime('android', false)).toContain('set the Wi-Fi proxy again');
+  });
+});
+
+describe('setup wizard with the proxy and WireGuard together', () => {
+  const KINDS: DeviceKind[] = ['iphone', 'android', 'ios-sim', 'android-emu'];
+  const CHOICES: ConnectionChoice[] = ['proxy', 'wireguard'];
+
+  it('follows the mode, and the choice only in both mode', () => {
+    for (const kind of KINDS) {
+      for (const choice of CHOICES) {
+        expect(wireguardSteps('proxy', choice, kind)).toBe(false);
+        expect(wireguardSteps('wireguard', choice, kind)).toBe(!needsProxy(kind));
+        expect(wireguardSteps('both', choice, kind)).toBe(choice === 'wireguard' && !needsProxy(kind));
+      }
+    }
+  });
+
+  it('always gives the iOS Simulator the proxy steps', () => {
+    for (const mode of ['both', 'wireguard', 'proxy']) {
+      for (const choice of CHOICES) expect(wireguardSteps(mode, choice, 'ios-sim')).toBe(false);
+    }
+  });
+
+  it('starts on the Wi-Fi proxy and remembers the choice', () => {
+    const store = new Map<string, string>();
+    const storage = { getItem: (k: string) => store.get(k) ?? null, setItem: (k: string, v: string) => void store.set(k, v) };
+    expect(loadChoice(storage)).toBe('proxy');
+    storeChoice(storage, 'wireguard');
+    expect(loadChoice(storage)).toBe('wireguard');
+    storeChoice(storage, 'proxy');
+    expect(loadChoice(storage)).toBe('proxy');
+  });
+
+  it('reads a missing, unknown or unreadable stored value as the Wi-Fi proxy', () => {
+    expect(loadChoice(null)).toBe('proxy');
+    for (const value of ['', 'WireGuard', 'both', 'tunnel']) {
+      expect(loadChoice({ getItem: () => value })).toBe('proxy');
+    }
+    expect(
+      loadChoice({
+        getItem: () => {
+          throw new Error('denied');
+        },
+      }),
+    ).toBe('proxy');
+    expect(() =>
+      storeChoice(
+        {
+          setItem: () => {
+            throw new Error('full');
+          },
+        },
+        'wireguard',
+      ),
+    ).not.toThrow();
+  });
+
+  it('sums up the way the device connects in both mode', () => {
+    const both = state({ mode: 'both', device_seen_at: 1 });
+    expect(setupSummary('iphone', both, [api], 'proxy')[0]?.label).toBe('iPhone connected to this Mac through the proxy');
+    expect(setupSummary('iphone', both, [api], 'wireguard')[0]?.label).toBe('iPhone connected to this Mac through WireGuard');
+    expect(setupSummary('ios-sim', both, [api], 'wireguard')[0]?.label).toBe('iOS Simulator connected to this Mac through the proxy');
+    expect(setupSummary('iphone', both, [api])[0]?.label).toContain('through the proxy');
   });
 });

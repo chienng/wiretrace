@@ -102,16 +102,20 @@ def test_state_without_presets_lists_no_project(tmp_path):
 # app start
 
 @pytest.mark.parametrize("device, target, mode", [
-    ("iPhone", "ios", "wireguard"),
-    ("Android phone", "android", "wireguard"),
-    ("iOS Simulator on this Mac", "ios-sim", "proxy"),
-    ("Android emulator on this Mac", "android-emu", "wireguard"),
-    ("Another device, with a Wi-Fi proxy", "device", "proxy"),
+    ("iPhone", "ios", "both"),
+    ("Android phone", "android", "both"),
+    ("iOS Simulator on this Mac", "ios-sim", "both"),
+    ("Android emulator on this Mac", "android-emu", "both"),
+    ("Another device, with a Wi-Fi proxy", "device", "both"),
 ])
 def test_each_device_starts_its_target_and_mode_in_app_mode(device, target, mode):
     assert app.start_command("staging", device) == [
         sys.executable, "-m", "cli", "start", "--preset", "staging", "--target", target, "--mode", mode,
         "--ui", "wiretrace", "--from-app"]
+
+
+def test_every_device_starts_both_modes():
+    assert {mode for _, mode in app.DEVICES.values()} == {"both"}
 
 
 def test_an_unknown_device_is_exit_2(home):

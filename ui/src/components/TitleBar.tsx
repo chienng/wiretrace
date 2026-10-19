@@ -183,7 +183,7 @@ export function TitleBar({ newCount }: Props) {
         <>
           <PresetMenu current={appState.preset} target={appState.target} viewing={viewing} />
           <span className={`pill ${seen ? 'ok' : 'wait'}`} title="Target and mode">
-            {appState.target} · {appState.mode === 'wireguard' ? 'WireGuard' : 'Proxy'}
+            {appState.target} · {appState.mode === 'wireguard' ? 'WireGuard' : appState.mode === 'both' ? 'Proxy + WireGuard' : 'Proxy'}
           </span>
           <span className={`pill ${pill.tone}`} title={pill.title}>
             {pill.text}

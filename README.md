@@ -3,7 +3,7 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.9.0**.
+Current version: **0.9.1**.
 
 **Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
 the steps below do not work for them. Follow the guide of your version instead:
@@ -25,7 +25,7 @@ The same two files are also in your download: `~/wiretrace/README.md` and
 - Internet access to `github.com`, `pypi.org` and `dl.google.com` during setup.
 - A test build of the app that trusts user-installed CA certificates and has certificate
   pinning turned off. Store builds cannot be decrypted.
-- The WireGuard app on the phone (for WireGuard mode).
+- The WireGuard app on the phone, only for apps that ignore the Wi-Fi proxy.
 - For Android: a phone with USB debugging, or an emulator. For iOS: an iPhone that trusts
   the Mac, or the iOS Simulator (needs Xcode's command line tools).
 
@@ -36,15 +36,15 @@ Use Wiretrace only with apps, devices and accounts you are allowed to test.
 Run every command below in **Terminal**, one block at a time. The
 [user guide](docs/user-guide.md) explains each step in more detail.
 
-**1. Download.** From the Releases page, download `wiretrace-0.9.0-macos.tar.gz` and
-`wiretrace-0.9.0-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
+**1. Download.** From the Releases page, download `wiretrace-0.9.1-macos.tar.gz` and
+`wiretrace-0.9.1-macos.tar.gz.sha256` into your Downloads folder. Do not double-click them.
 
 **2. Check and unpack** into your home folder. The first line must print `OK`:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.9.0-macos.tar.gz.sha256
-tar -xzf wiretrace-0.9.0-macos.tar.gz -C ~
+shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
+tar -xzf wiretrace-0.9.1-macos.tar.gz -C ~
 ```
 
 **3. Install** (a few minutes, no password needed, never use `sudo`):
@@ -66,8 +66,9 @@ right-click its Dock icon → **Options** → **Keep in Dock**.
 1. Choose the project: `default`, which comes with Wiretrace, or
    [a preset you created](#your-own-preset-optional).
 2. Choose the device: iPhone, Android phone, the iOS Simulator or Android emulator on this
-   Mac, or another device with a Wi-Fi proxy. For a Wi-Fi proxy, set the phone's proxy to
-   this Mac's IP address, port 8080; the setup wizard shows the steps.
+   Mac, or another device with a Wi-Fi proxy. Every choice accepts both ways to connect: the
+   phone's Wi-Fi proxy (this Mac's IP address, port 8888), or the WireGuard tunnel for an app
+   that ignores the proxy. The setup wizard shows the steps.
 
 The Wiretrace window opens in your browser, and the **Wiretrace** menu (the W icon at
 the top right of the screen) appears.
@@ -91,18 +92,12 @@ cd ~/wiretrace
 ./wiretrace start --preset default --target android --ui wiretrace
 ```
 
-A phone without the WireGuard app, or one that should use a Wi-Fi proxy instead:
-
-```bash
-cd ~/wiretrace
-./wiretrace start --preset default --mode proxy --ui wiretrace
-```
-
-Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8080. The setup wizard shows
-the steps.
+Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8888, or turn the WireGuard
+tunnel on if the app ignores the proxy. Wiretrace listens for both at once; the setup wizard
+shows the steps. `--mode proxy` or `--mode wireguard` starts one of the two only.
 
 With a preset you created, change `default` to its name. For the Android emulator use
-`--target android-emu`; for the iOS Simulator use `--target ios-sim --mode proxy --ui wiretrace` (see
+`--target android-emu`; for the iOS Simulator use `--target ios-sim` (see
 [Part 3 of the user guide](docs/user-guide.md#part-3--test-with-wiretrace-every-session)).
 Without `--ui wiretrace` you get mitmweb instead. The Terminal also takes the options the app
 does not have, such as `--client` or `--no-ui`.
@@ -110,14 +105,19 @@ does not have, such as `--client` or `--no-ui`.
 </details>
 
 **5. The first time only, connect the phone:** click *Setup* in the window and follow the
-wizard: install the WireGuard app, scan the QR code, turn the tunnel on, then open `http://mitm.it` on the phone
-and install the certificate. On an iPhone, also turn on full trust for it in Settings →
+wizard: set the phone's Wi-Fi proxy (or, with the *Wi-Fi proxy | WireGuard* switch on
+WireGuard, install the WireGuard app, scan the QR code and turn the tunnel on), then open
+`http://mitm.it` on the phone and install the certificate. The Wi-Fi proxy accepts this Mac
+and the first other device that connects; any other device is refused until Wiretrace
+restarts (or name the device with `--client <its IP address>` in Terminal). On an iPhone, also turn on full trust for it in Settings →
 General → About → Certificate Trust Settings. Details:
 [Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
 
 **6. Test, stop, report.** Test your app, then choose **Stop session** in the
 **Wiretrace** menu, the W icon at the top right (or press Ctrl+C, if you started in Terminal). Wiretrace writes
-`flows.har` (secrets masked) into the session folder. For a bug ticket, in Terminal:
+`flows.har` (secrets masked) into the session folder. When you are done testing, set the
+phone's Wi-Fi proxy back to off (or turn the tunnel off): without Wiretrace running, the phone
+has no internet through it. For a bug ticket, in Terminal:
 
 ```bash
 cd ~/wiretrace
@@ -202,8 +202,9 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 - **Setup check.** `./wiretrace doctor` checks Python, mitmproxy, the ports, the macOS
   firewall, `adb` and connected devices, and the CA certificate, and says what to fix.
-- **Capture.** `./wiretrace start` runs mitmproxy in WireGuard mode (UDP 51820, the
-  default) or as a Wi-Fi proxy (`--mode proxy`, TCP 8080). `--target` is `android`, `ios`,
+- **Capture.** `./wiretrace start` runs mitmproxy as a Wi-Fi proxy (TCP 8888) and a WireGuard
+  server (UDP 51820) at the same time, in one session. `--mode proxy` or `--mode wireguard`
+  starts one of the two only. `--target` is `android`, `ios`,
   `android-emu`, `ios-sim` or `device`. Each session is saved in its own folder under
   `sessions/`, as it happens.
 - **Presets.** One YAML file per project and environment. Only the listed API hosts are

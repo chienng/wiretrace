@@ -22,11 +22,11 @@ from .start import WIRETRACE_DIR
 
 # What the app lists, in this order, and what each choice starts.
 DEVICES = {
-    "iPhone": ("ios", "wireguard"),
-    "Android phone": ("android", "wireguard"),
-    "iOS Simulator on this Mac": ("ios-sim", "proxy"),
-    "Android emulator on this Mac": ("android-emu", "wireguard"),
-    "Another device, with a Wi-Fi proxy": ("device", "proxy"),
+    "iPhone": ("ios", "both"),
+    "Android phone": ("android", "both"),
+    "iOS Simulator on this Mac": ("ios-sim", "both"),
+    "Android emulator on this Mac": ("android-emu", "both"),
+    "Another device, with a Wi-Fi proxy": ("device", "both"),
 }
 # The shipped example is a template, not a project.
 HIDDEN_PRESETS = ("example",)
