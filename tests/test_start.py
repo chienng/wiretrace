@@ -10,6 +10,7 @@ import subprocess
 import sys
 import threading
 import time
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -758,7 +759,8 @@ def test_old_sessions_are_deleted_before_the_new_one_and_counted(launch):
     os.kill(run.proc.pid, signal.SIGINT)
 
     assert run.finish() == 0, run.output
-    assert "Deleted 1 old session(s) (older than 14 days)." in run.output
+    assert ("Deleted 1 old session(s): Wiretrace keeps the 5 newest, none older than 14 days."
+            in run.output)
     assert run.output.index("Deleted 1 old session") < run.output.index("Saving to")
     assert not (run.sessions / "2020-01-01_000000_staging_android").exists()
     assert len(run.folders()) == 1
@@ -1683,6 +1685,26 @@ def test_a_switch_saves_the_session_and_starts_the_named_preset(launch):
     assert "Switching presets: saving this session first." in run.output
     assert "exited on its own" not in run.output
     assert "preset other, target android" in run.output and "Decrypting other.example.com" in run.output
+
+
+def test_a_switch_keeps_only_the_five_newest_previous_sessions(launch, tmp_path):
+    now = datetime.now()
+    previous = []
+    for hours in range(5, 0, -1):
+        folder = tmp_path / "sessions" / f"{now - timedelta(hours=hours):%Y-%m-%d_%H%M%S}_staging_android"
+        folder.mkdir(parents=True)
+        (folder / session.META).write_text("{}")
+        previous.append(folder)
+    run = launch("switch:other,normal", ui="wiretrace")
+    wait_for(lambda: started_count(run) == 2)
+    os.kill(run.proc.pid, signal.SIGINT)
+
+    assert run.finish() == 0, run.output
+    # Five previous at the start: none deleted. At the switch the first session is one of
+    # six, so the oldest goes before the next folder is made.
+    assert run.output.count("Deleted 1 old session(s)") == 1
+    assert not previous[0].exists() and all(folder.is_dir() for folder in previous[1:])
+    assert len(run.folders()) == 6
 
 
 def test_a_stop_signal_wins_over_a_switch_file_on_disk(launch):

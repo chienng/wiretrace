@@ -32,6 +32,8 @@ SWITCH = ".switch.json"
 HAR_TMP = ".flows.har.tmp"
 HAR_MASKED = ".flows.har.masked"
 KEEP_DAYS = 14
+# Previous sessions kept: removal runs before the next session's folder is created.
+KEEP_SESSIONS = 5
 NAME = re.compile(r"(\d{4}-\d{2}-\d{2}_\d{6})_[A-Za-z0-9][A-Za-z0-9_-]*_(?:android|ios|android-emu|ios-sim|device)")
 
 
@@ -124,14 +126,19 @@ def list_sessions(sessions_dir: Path = SESSIONS_DIR) -> list[Path]:
     return sorted(found, key=lambda p: (started(p.name), p.name))
 
 
-def remove_old(sessions_dir: Path, now: datetime, keep_days: int = KEEP_DAYS) -> int:
-    """Delete session folders that started more than `keep_days` days before `now`. Returns how many."""
+def remove_old(sessions_dir: Path, now: datetime, keep_days: int = KEEP_DAYS,
+               keep_count: int = KEEP_SESSIONS) -> int:
+    """Delete session folders that started more than `keep_days` days before `now`, and all but the
+    newest `keep_count` of the others. Returns how many. A folder without meta.json is neither
+    deleted nor counted."""
     if now.tzinfo is not None:
         now = now.astimezone().replace(tzinfo=None)
     cutoff = now - timedelta(days=keep_days)
+    folders = [folder for folder in list_sessions(sessions_dir) if (folder / META).is_file()]
+    newest = set(folders[-keep_count:]) if keep_count > 0 else set()
     removed = 0
-    for folder in list_sessions(sessions_dir):
-        if started(folder.name) >= cutoff or not (folder / META).is_file():
+    for folder in folders:
+        if started(folder.name) >= cutoff and folder in newest:
             continue
         try:
             shutil.rmtree(folder)

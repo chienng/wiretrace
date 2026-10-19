@@ -996,9 +996,9 @@ Rules for the app:
 - Turn the WireGuard tunnel off when you are not testing.
 - When a device leaves testing: delete the tunnel, and remove the **mitmproxy** profile /
   certificate (iPhone: VPN & Device Management; Android: Security → Trusted credentials → User).
-- Wiretrace deletes a session folder in `~/wiretrace/sessions/` by itself when you start a new
-  session and the folder is more than 14 days old (counted from the date in its name). It
-  tells you how many it deleted. **To keep a session, move its folder out of `sessions/`**
+- Wiretrace keeps the **5 newest** previous sessions in `~/wiretrace/sessions/`, none older
+  than 14 days (counted from the date in its name). When you start a session, or switch the
+  preset or the device, it deletes the others and tells you how many. **To keep a session, move its folder out of `sessions/`**
   (for example to `~/Documents/bugs/`) before then. Only folders that Wiretrace created are
   deleted; other files and folders in `sessions/` stay. Delete sessions you no longer need
   earlier by hand: `flows.mitm` and the log files contain tokens and log lines.
@@ -1044,7 +1044,7 @@ Rules for the app:
 | `Nothing to report: the session has no traffic and no log lines.` | The session captured nothing, so there is nothing to put in a zip. See *No requests appear at all*. |
 | `Warning: the preset of this session cannot be loaded (…)` (from `./wiretrace report`) | The preset was renamed, deleted or has a mistake. The report still hides the built-in names and the names the preset had when the session was captured, but not names added to the preset since. Fix or restore the preset file and run the report again. |
 | `Could not write the report: …` | The zip could not be saved, for example because the disk is full. No partial zip is left. Free some space and run the command again. |
-| `Deleted … old session(s) (older than 14 days).` | Normal, when you start Wiretrace. It removed old session folders. To keep a session, move its folder out of `sessions/` before then (Part 4). |
+| `Deleted … old session(s): Wiretrace keeps the 5 newest, none older than 14 days.` | Normal, when you start Wiretrace or switch the preset or the device. It removed old session folders. To keep a session, move its folder out of `sessions/` before then (Part 4). |
 | `redact.… is not a known key`, or `'redact.headers' entry …` (in `presets/<name>.yaml: …`) | The `redact:` section of the preset has an unknown key or an invalid name. Use only `headers` and `json_fields`, each a list (Part 1, Step 6). |
 | mitmweb opens instead of the Wiretrace window, or there is no *Rules* button | Start with `--ui wiretrace`; without it you get mitmweb. If the Terminal banner has no `Rules:` line, the `wiretrace` folder is from before rules: update it (see *Updating and removing*). |
 | The Rules view shows a red message about the rules file | `rules/<preset>.json` was edited by hand and has a mistake; the message says which rule and field. The previous rules stay in effect. Fix the file, or save from the window, which writes a valid file. |
