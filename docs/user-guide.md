@@ -759,7 +759,8 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   (for example *v0.9.1*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
-  you read it and counts the new requests. *Clear* hides what is in the list now; everything is
+  you read it and counts the new requests; meanwhile the title bar shows *List paused*
+  instead of the recording time. Wiretrace keeps recording; *Resume* lists what came in. *Clear* hides what is in the list now; everything is
   still saved to the session folder. It also shows the preset (a menu, see *Switching the
   preset* above), the device and mode (a menu, see *Switching the device*), and the
   device pill: the phone's model, OS version and connection (for example *Pixel 8 · Android 15
