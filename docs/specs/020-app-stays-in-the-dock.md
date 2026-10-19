@@ -9,8 +9,7 @@
 - **Status**: approved (2026-10-19)
 - **Tier**: M (one feature in one repo: the applet, its build flag, docs). No token, file
   format, window or capture change. Gates A, C, R, P.
-- **Branch**: `feature/app-hint-in-window` (spec 019 is not merged yet, and this changes what
-  happens right after the start 019 made silent).
+- **Branch**: `feature/app-stays-in-dock`, from `main` (`975b046`, spec 019 merged).
 - **Related**: spec 014 (Wiretrace.app; the menu bar is the only stop of an app session);
   spec 018 Extension A (the app starts the last choice, no dialogs); spec 019 (no dialog
   after a successful start).

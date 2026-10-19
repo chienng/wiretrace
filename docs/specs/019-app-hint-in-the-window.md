@@ -3,7 +3,8 @@
 - **Summary**: Wiretrace.app stops showing a dialog after every successful start. The
   window of a session started from the app shows the same advice once, as a strip under the
   title bar, until the tester dismisses it; after that, the *Recording* label keeps it as a
-  tooltip.
+  tooltip. (Without that dialog the app quit within seconds of the start; spec 020 keeps it
+  open while the session records.)
 - **Date**: 2026-10-19
 - **Repo**: wiretrace
 - **Status**: approved (2026-10-19)
