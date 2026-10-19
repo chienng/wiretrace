@@ -8,8 +8,8 @@ address is closed. `qa_proxy_pinned` takes that slot before the first connection
 the window's client switch starts a session pinned to the device it chose
 (docs/specs/021-switch-to-another-phone.md).
 
-Refused addresses are kept in memory, at most MAX_WAITING, for the window's banner.
-They are never printed.
+Refused addresses a session may be pinned to are kept in memory, at most MAX_WAITING,
+for the window's banner. They are never printed.
 
 A client that is not on this Mac cannot open a server connection to a loopback,
 link-local or unspecified address. Value types stay `NamedTuple`: a dataclass
@@ -192,8 +192,10 @@ class ProxyGuard:
         # mitmproxy closes the connection when this is set. The text has no address.
         client.error = "connection refused"
         self.refused += 1
-        if ip:
-            self._record(ip)
+        # The window offers a switch to each listed address, so only pinnable ones are listed.
+        address = pinnable(ip) if ip else None
+        if address:
+            self._record(address)
         if self.refused == 1:
             print(REFUSAL, flush=True)
 

@@ -7,7 +7,8 @@
   across restarts.
 - **Date**: 2026-10-19
 - **Repo**: wiretrace
-- **Status**: approved (2026-10-19)
+- **Status**: implemented (2026-10-19). Runtime-checked with addresses on one Mac in mode
+  `proxy`; the manual test with two iPhones in mode `both` is not run yet.
 - **Tier**: L (changes which device the Wi-Fi proxy accepts; a window action stops the capture
   process; `.switch.json` gains a key the launcher acts on). Gates E, A, B, C, R, P. D n/a (one
   repo).
@@ -34,41 +35,41 @@ already moves the traffic.
 
 ## Acceptance criteria
 
-- [ ] With `--ui wiretrace`, pinning on (mode `proxy` or `both`, no `--client`), and a device
+- [x] With `--ui wiretrace`, pinning on (mode `proxy` or `both`, no `--client`), and a device
       pinned: when the proxy refuses a device at another address, a banner under the title bar
       appears within 1 s: "Another device wants to use the Wi-Fi proxy: 192.168.2.72, since
       19:21. Only 192.168.2.71 is accepted in this session." with **Switch to it…** and
       **Ignore**.
-- [ ] **Ignore** hides the banner for that address until the session ends, reloads included.
+- [x] **Ignore** hides the banner for that address until the session ends, reloads included.
       A refusal from a different address shows the banner again. With several waiting
       addresses, the banner shows the most recent one that is not ignored, and "+N more".
-- [ ] **Switch to it…** opens a dialog: "Switch to the device at 192.168.2.72?", a choice of
+- [x] **Switch to it…** opens a dialog: "Switch to the device at 192.168.2.72?", a choice of
       device kind (iPhone, Android phone, Another device; the current one preselected when it
       is one of these), the device-log line for that kind (spec 018's text), and: "This
       session is saved and a new one starts. Only this device is accepted on the Wi-Fi proxy;
       the device at 192.168.2.71 is refused until you switch back." Cancel changes nothing.
-- [ ] Confirm saves the session the way spec 018 does and starts a new one with the chosen
+- [x] Confirm saves the session the way spec 018 does and starts a new one with the chosen
       kind and the same preset, mode, ports and `--from-app`. The new session accepts
       192.168.2.72 from its first connection and refuses 192.168.2.71, which then shows in the
       new session's banner, so switching back is the same click.
-- [ ] Choosing the kind already in use is allowed here (two iPhones), unlike the device menu.
-- [ ] Setup's *Connect to this Mac* step and the device pill's tooltip name the accepted
+- [x] Choosing the kind already in use is allowed here (two iPhones), unlike the device menu.
+- [x] Setup's *Connect to this Mac* step and the device pill's tooltip name the accepted
       address when a device is pinned: "Wi-Fi proxy: accepting 192.168.2.71".
-- [ ] No banner, no waiting list and no client switch: in `wireguard` mode, with `--client`
+- [x] No banner, no waiting list and no client switch: in `wireguard` mode, with `--client`
       (pinning off), with `--ui mitmweb` or `--no-ui`, and while a previous session is open
       (the reason Setup, Rules and the menus use). A client switch request in these cases is
       refused with 409 and changes nothing.
-- [ ] A client switch is refused with 409 for an address the running session has not refused
+- [x] A client switch is refused with 409 for an address the running session has not refused
       or no longer lists, and with 400 for a value that is not an IP address, for the iOS
       Simulator or the Android emulator (they connect from this Mac), or for an unknown kind.
-- [ ] A second switch (any kind) while one is in flight is refused with 409. Ctrl+C or
+- [x] A second switch (any kind) while one is in flight is refused with 409. Ctrl+C or
       **Stop session** still ends Wiretrace without starting the next session.
-- [ ] Device, preset and the Terminal output behave as before: a device or preset switch
+- [x] Device, preset and the Terminal output behave as before: a device or preset switch
       without a client starts a session that pins the first device to connect; the refusal
       line in the Terminal is unchanged and has no address.
-- [ ] No address of a waiting or accepted device is written to `meta.json`, `.status.json`, the
+- [x] No address of a waiting or accepted device is written to `meta.json`, `.status.json`, the
       Terminal, the menu bar, `flows.har` or a bug report.
-- [ ] User guide: switching phones on the Wi-Fi proxy (the banner, Ignore, switching back);
+- [x] User guide: switching phones on the Wi-Fi proxy (the banner, Ignore, switching back);
       the restart route stays for `--ui mitmweb`. All Python and frontend tests pass;
       `ui/dist` reproduces.
 
@@ -81,6 +82,8 @@ already moves the traffic.
      as client addresses (IPv4-mapped IPv6 to IPv4).
    - Refusals of regular-listener clients are recorded per address: first seen, last seen,
      count. At most 8 addresses; the one seen least recently is dropped. Kept in memory only.
+     Only addresses `qa_proxy_pinned` would accept are recorded: the window offers a switch to
+     each listed address.
 2. `addons/wiretrace_ui.py`
    - Its `client_connected` already skips a client proxy_guard refused. On such a client it
      reads proxy_guard's list (`ctx.master.addons.get("proxyguard")`) and pushes the state when
@@ -91,6 +94,9 @@ already moves the traffic.
    - `POST /api/device` accepts `{"target"}` as today, or `{"target", "client"}`. With a
      client: the checks of the acceptance criteria, in the order of invariant 2, then
      `start_switch` writes `.switch.json` with the three keys.
+   - From `load` to the end of the process, mitmproxy's Terminal lines are formatted without
+     the client address (its connection lines, and its `block_global` / `block_private`
+     warning).
 3. `cli/start.py`
    - `take_switch` accepts exactly `{name, target}` or `{name, target, client}`; any other
      shape is ignored as today.

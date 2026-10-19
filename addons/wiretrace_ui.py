@@ -8,6 +8,7 @@ Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.m
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
+While it is loaded, mitmproxy's own Terminal lines name no client address.
 """
 
 from __future__ import annotations
@@ -33,6 +34,7 @@ from typing import Any
 import tornado.web
 import tornado.websocket
 from mitmproxy import ctx, exceptions, flowfilter, http
+from mitmproxy.addons.termlog import TermLogHandler
 from tornado import httpserver, netutil
 from tornado.escape import json_encode
 
@@ -68,6 +70,8 @@ NOT_AN_ADDRESS = "Not a device address."
 NOT_WAITING = "That device is no longer waiting: ask it to connect again."
 # A refusal from an address already listed sends the state at most this often.
 WAITING_PUSH_S = 5.0
+# mitmproxy's block_global / block_private warning, which names the client in its text.
+BLOCKED_CLIENT = re.compile(r"Client connection from \S+ killed by (block_\w+) option\.")
 RECEIVER_HOST = "qa-logs.internal"
 MAX_FLOWS = 10_000
 MAX_LOG_LINES = 50_000
@@ -212,6 +216,42 @@ def write_status_file(path: Path, payload: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def terminal_record(record: logging.LogRecord) -> logging.LogRecord:
+    """A mitmproxy log record as the Terminal may print it: no client address (spec 021).
+
+    A copy, so the record other handlers see is unchanged."""
+    message = record.getMessage()
+    blocked = BLOCKED_CLIENT.fullmatch(message)
+    if getattr(record, "client", None) is None and blocked is None:
+        return record
+    copy = logging.makeLogRecord(record.__dict__)
+    copy.client = None
+    if blocked is not None:
+        copy.msg, copy.args = f"Client connection from another device killed by {blocked[1]} option.", None
+    return copy
+
+
+class TerminalFormatter(logging.Formatter):
+    """mitmproxy's Terminal formatter, given terminal_record's copy of each record.
+
+    A formatter, not a filter: MitmLogHandler.filter returns a bool, which drops a replaced record."""
+
+    def __init__(self, inner: logging.Formatter | None) -> None:
+        super().__init__()
+        self.inner = inner or logging.Formatter()
+
+    def format(self, record: logging.LogRecord) -> str:
+        return self.inner.format(terminal_record(record))
+
+
+def redact_terminal() -> None:
+    """Wraps the formatter of mitmproxy's Terminal handlers, once; it stays for the process."""
+    for handler in logging.getLogger().handlers:
+        # By name: a reloaded `-s` script brings a new TerminalFormatter class.
+        if isinstance(handler, TermLogHandler) and type(handler.formatter).__name__ != TerminalFormatter.__name__:
+            handler.setFormatter(TerminalFormatter(handler.formatter))
 
 
 def write_switch_file(path: Path, name: str, target: str, client: str | None = None) -> None:
@@ -1276,6 +1316,8 @@ class WiretraceUI:
     # Options
 
     def load(self, loader) -> None:
+        # Before the listener accepts, and kept after done(): connections still close then.
+        redact_terminal()
         loader.add_option("qa_ui_port", int, 8081, "Port of the Wiretrace window on 127.0.0.1.")
         loader.add_option("qa_ui_session_dir", str, "",
                           "Session folder: meta.json, the log files and the report.")

@@ -27,6 +27,9 @@ import tornado.httpclient
 import tornado.websocket
 import zstandard
 from mitmproxy import ctx
+from mitmproxy.addons.block import Block
+from mitmproxy.addons.termlog import TermLogHandler
+from mitmproxy.log import MitmFormatter
 from mitmproxy.test import taddons, tflow
 
 from addons import wiretrace_ui, qa_tools
@@ -2944,6 +2947,69 @@ def test_021_no_address_reaches_meta_status_the_terminal_or_a_report(tmp_path, c
             assert PHONE_A not in text and PHONE_B not in text
 
     client_scenario(body, tmp_path)
+
+
+class TerminalLines(logging.Handler):
+    """Formats like mitmproxy's Terminal handler once the window wrapped its formatter."""
+
+    def __init__(self):
+        super().__init__()
+        self.setFormatter(wiretrace_ui.TerminalFormatter(MitmFormatter(False)))
+        self.lines: list[str] = []
+
+    def emit(self, record):
+        self.lines.append(self.format(record))
+
+
+def test_021_a_terminal_line_drops_the_client_address_and_leaves_the_record_alone():
+    record = logging.makeLogRecord({"name": "mitmproxy.proxy.server", "levelno": logging.INFO,
+                                    "levelname": "INFO", "msg": "client connect", "client": (PHONE_B, 52201)})
+    plain = logging.makeLogRecord({"msg": "HTTP(S) proxy listening at *:8888."})
+    lines = TerminalLines()
+    lines.handle(record)
+    lines.handle(plain)
+    assert lines.lines[0].endswith("] client connect") and PHONE_B not in lines.lines[0]
+    assert record.client == (PHONE_B, 52201)
+    assert wiretrace_ui.terminal_record(plain) is plain
+
+
+def test_021_mitmproxys_block_warning_reaches_the_terminal_without_the_address():
+    lines = TerminalLines()
+    root = logging.getLogger()
+    root.addHandler(lines)
+    try:
+        block = Block()
+        with taddons.context(block) as tctx:
+            tctx.configure(block, block_private=True)
+            client = tflow.tclient_conn()
+            client.peername = (PHONE_B, 52201)
+            block.client_connected(client)
+    finally:
+        root.removeHandler(lines)
+    assert client.error
+    assert any(line.endswith("Client connection from another device killed by block_private option.")
+               for line in lines.lines)
+    assert not any(PHONE_B in line for line in lines.lines)
+
+
+def test_021_the_window_redacts_the_terminal_from_load_to_the_end_of_the_process():
+    out = io.StringIO()
+    terminal = TermLogHandler(out)
+    terminal.install()
+
+    async def body(ui, client, tctx):
+        assert isinstance(terminal.formatter, wiretrace_ui.TerminalFormatter)
+        assert isinstance(terminal.formatter.inner, MitmFormatter)
+
+    try:
+        scenario(body)
+        scenario(body)
+        terminal.handle(logging.makeLogRecord({"msg": "client disconnect", "levelno": logging.INFO,
+                                               "client": (PHONE_B, 52201)}))
+    finally:
+        terminal.uninstall()
+    assert "client disconnect" in out.getvalue()
+    assert PHONE_B not in out.getvalue()
 
 
 # Editing and creating presets (spec 013, extension A). The number is the spec's test number.

@@ -254,6 +254,15 @@ def test_021_wireguard_and_accepted_clients_are_never_recorded():
     assert addon.waiting() == []
 
 
+@pytest.mark.parametrize("ip", ["169.254.1.1", "fe80::1%en0", "0.0.0.0", "224.0.0.1"])
+def test_021_an_address_no_session_can_be_pinned_to_is_refused_but_not_listed(ip):
+    addon = guard("127.0.0.0/8", pin=True)
+    connect(addon, "192.0.2.10")
+    connect(addon, ip)
+    assert addon.refused == 1
+    assert addon.waiting() == []
+
+
 def test_021_the_refusal_line_is_unchanged_and_has_no_address(capsys):
     addon = configured(qa_proxy_pin=True, qa_proxy_pinned="192.0.2.72")
     connect(addon, "192.0.2.71")
