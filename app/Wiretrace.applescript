@@ -1,7 +1,8 @@
 -- Wiretrace.app: start a session without Terminal. scripts/make-app.sh compiles this on the
 -- tester's Mac. The logic is in `wiretrace app` (cli/app.py); this only shows dialogs. It starts
 -- the project and device `app state` names on its `next` line; the window switches either.
--- Specs: docs/specs/014-mac-app-install-and-launcher.md, 018-switch-device.md (extension A).
+-- Specs: docs/specs/014-mac-app-install-and-launcher.md, 018-switch-device.md (extension A),
+-- 019-app-hint-in-the-window.md.
 --
 -- ASCII only: the ellipsis is made with `character id`.
 
@@ -70,12 +71,10 @@ on run
 		showError(errText)
 		return
 	end try
+	-- Once started, the window shows where to switch and how to stop: no dialog.
 	if startOutput is "starting" then
-		set message to "Wiretrace is still starting " & projectName & " on " & deviceName & ". The window opens when it is ready."
-	else
-		set message to "Wiretrace is recording " & projectName & " on " & deviceName & "."
+		display dialog "Wiretrace is still starting " & projectName & " on " & deviceName & ". The window opens when it is ready." with title appTitle buttons {"OK"} default button "OK" giving up after 15
 	end if
-	display dialog message & " Change either from the window's title bar. Stop it from the Wiretrace menu (the W icon at the top right)." with title appTitle buttons {"OK"} default button "OK" giving up after 15
 end run
 
 on showError(message)

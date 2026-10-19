@@ -1265,6 +1265,8 @@ class WiretraceUI:
         loader.add_option("qa_ui_open_browser", bool, True, "Open the Wiretrace window link at start.")
         loader.add_option("qa_ui_print_link", bool, True,
                           "Print the window link. Off when the output goes to a file (Wiretrace.app).")
+        loader.add_option("qa_ui_from_app", bool, False,
+                          "Started from Wiretrace.app: the window shows where to switch and how to stop.")
 
     def configure(self, updated) -> None:
         if not 0 <= ctx.options.qa_ui_port <= 65535:
@@ -1486,6 +1488,7 @@ class WiretraceUI:
             "proxy_port": ctx.options.listen_port if "listen_port" in ctx.options else 8888,
             # proxy_guard adds the option, and only in a mode with the Wi-Fi proxy.
             "proxy_pin": bool(ctx.options.qa_proxy_pin) if "qa_proxy_pin" in ctx.options else False,
+            "from_app": bool(ctx.options.qa_ui_from_app),
             "wireguard_conf": self.wireguard_conf() if mode != "proxy" else None,
             "mac_ip": local_ip.get_local_ip() if mode != "wireguard" else None,
             "faults": faults,

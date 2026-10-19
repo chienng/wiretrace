@@ -1966,6 +1966,14 @@ def test_after_a_switch_from_the_app_the_next_session_is_in_app_mode_too(tmp_pat
     for call in calls:
         assert call["kw"]["from_app"] is True and call["kw"]["menu_cmd"][-1] == "--app"
         assert "qa_ui_print_link=false" in call["cmd"]
+        # Spec 019, test 3: the new window still shows the app hint.
+        assert "qa_ui_from_app=true" in call["cmd"]
+
+
+def test_019_02_only_an_app_session_tells_the_window_it_came_from_the_app():
+    cmd = wiretrace_command(from_app=True)
+    assert cmd[cmd.index("qa_ui_from_app=true") - 1] == "--set"
+    assert not any(arg.startswith("qa_ui_from_app") for arg in wiretrace_command())
 
 
 def _switching_child_body() -> str:

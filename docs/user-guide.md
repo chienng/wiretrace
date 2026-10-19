@@ -110,13 +110,17 @@ without asking. You can start every session from it instead of Terminal:
    first time, the project `default` on an iPhone. If that project was deleted, it starts
    `default`.
 3. After a few seconds the Wiretrace window opens in your browser and the **Wiretrace** menu
-   (the W icon at the top right of the screen) appears.
+   (the W icon at the top right of the screen) appears. The app shows no message when the
+   start works; only when the window takes longer than usual does it say it is still
+   starting.
 4. To use another project or device, switch from the window's title bar (*Switching the
    preset* and *Switching the device* under *The Wiretrace window (preview)*). The app
    remembers the switch for next time.
 
-The session keeps recording after the app's last message closes. To stop it and save
-`flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top right): a session started from the app
+A blue strip under the window's title bar says the same, until you click **Got it**; that
+browser then stops showing it. The session keeps recording when the app closes. To stop it
+and save `flows.har`, use **Stop session** in the **Wiretrace** menu (the W icon at the top
+right; pointing at *Recording* in the window reminds you): a session started from the app
 has no Terminal window. If Wiretrace is already recording, the app says so and does nothing.
 Every device in the app accepts both ways to connect, the Wi-Fi proxy and the WireGuard tunnel
 (Part 2, Step 2).
