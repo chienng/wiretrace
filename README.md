@@ -191,16 +191,13 @@ changed or not saved.
 
 ## Design
 
-**The Wiretrace window today** (screenshot of 0.8.0 with the sample data in
-[`ui/dev/fixtures/`](ui/dev/fixtures/); every host, token and device in it is fake)
+Screens 1 to 4 and 5a below are **screenshots of Wiretrace 0.10.0** with the sample data in
+[`ui/dev/fixtures/`](ui/dev/fixtures/); every host, token and device in them is fake.
+Screens 5 and 6 are **design mockups**: they show where Wiretrace is going, and their data is
+illustrative. The mockups of every screen, with their source and notes, are in
+[`mockups/`](mockups/README.md).
 
-![Wiretrace 0.8.0 main window with sample data](docs/images/traffic.png)
-
-The images below are **design mockups**, not screenshots of the current product. All data
-in them is illustrative. They show where Wiretrace is going; the Wiretrace window (preview)
-builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
-
-| Mockup | Status |
+| Screen | Status |
 |---|---|
 | 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). The target pill is a device menu too: another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
@@ -209,29 +206,29 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 | 5. Send a bug report to YouTrack or Jira | Built: form to copy into YouTrack or Jira (screen 5a): title and description in Markdown or Jira wiki, masked HAR and log downloads, Android and Simulator screenshots. Not built: sending directly, signing in to the tracker, iPhone screenshots. |
 | 6. Menu-bar app | Built: status item while `./wiretrace start --ui wiretrace` runs (`--no-menu-bar` turns it off). Differences: no *Pause recording* (the window's Pause only freezes its list); *Show last error* instead of *Report last error*; the device line is target, mode and model. |
 
-**1. Main window** (design mockup)
+**1. Main window** (screenshot, 0.10.0)
 
-![Design mockup: main window](mockups/screens/01-main-window.png)
+![Wiretrace 0.10.0 main window with sample data](docs/images/traffic.png)
 
-**2. Device and app logs** (design mockup)
+**2. Device and app logs** (screenshot, 0.10.0)
 
-![Design mockup: device and app logs](mockups/screens/02-device-app-logs.png)
+![Wiretrace 0.10.0 device logs with a crash line selected](docs/images/logs.png)
 
-**3. Device setup wizard** (design mockup)
+**3. Device setup wizard** (screenshot, 0.10.0)
 
-![Design mockup: device setup wizard](mockups/screens/03-device-setup-wizard.png)
+![Wiretrace 0.10.0 setup wizard, connect step for an iPhone over the Wi-Fi proxy](docs/images/setup.png)
 
-**4. Mock and fault rules editor** (design mockup)
+**4. Mock and fault rules editor** (screenshot, 0.10.0)
 
-![Design mockup: mock and fault rules editor](mockups/screens/04-mock-fault-rules.png)
+![Wiretrace 0.10.0 rules view with a Rewrite rule open](docs/images/rules.png)
 
 **5. Bug report to YouTrack or Jira** (design mockup; sending directly is not built yet)
 
 ![Design mockup: bug report to YouTrack or Jira](mockups/screens/05-bug-report.png)
 
-**5a. Bug report form, copy and download** (design mockup)
+**5a. Bug report form, copy and download** (screenshot, 0.10.0)
 
-![Design mockup: bug report form to copy into YouTrack or Jira](mockups/screens/05a-bug-report-form.png)
+![Wiretrace 0.10.0 bug report form to copy into YouTrack or Jira](docs/images/bug-report.png)
 
 **6. Menu-bar app** (design mockup)
 

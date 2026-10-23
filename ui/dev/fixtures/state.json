@@ -10,7 +10,8 @@
  "proxy_port": 8889,
  "proxy_pin": true,
  "proxy_clients": [
-  {"address": "192.0.2.31", "seen_at": 1791900005.0, "requests": 0, "tls_failures": 0}
+  {"address": "192.0.2.31", "seen_at": 1791900005.0, "requests": 0, "tls_failures": 0},
+  {"address": "192.0.2.32", "seen_at": 1791900008.0, "requests": 0, "tls_failures": 3}
  ],
  "proxy_device": null,
  "proxy_waiting": [

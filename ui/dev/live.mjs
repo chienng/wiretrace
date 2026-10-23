@@ -28,6 +28,7 @@ export function liveFlow(n, epoch, done = true, prefix = 'live') {
     size: done ? 200 + ((n * 131) % 9000) : null,
     mime: done ? 'application/json' : null,
     request_id: `req-${prefix}-${n}`,
+    client: n % 4 === 0 ? '192.0.2.32' : '192.0.2.31',
     mock: n % 11 === 0,
     fault: n % 13 === 0 ? 'status 500' : null,
     websocket: false,

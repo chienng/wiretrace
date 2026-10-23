@@ -79,7 +79,10 @@ export default function fixtures() {
         device_logs: target === 'device' ? 'off (--target device has no device log)' : target.startsWith('android') ? 'com.example.app' : 'ExampleApp',
       };
     });
-  const baseFlows = [...bulkFlows(bulkCount, epoch), ...shiftTimes(read('flows.json'), shift)];
+  const baseFlows = [
+    ...bulkFlows(bulkCount, epoch),
+    ...shiftTimes(read('flows.json'), shift).map((f) => ({ ...f, client: f.client ?? '192.0.2.31' })),
+  ];
   const details = shiftTimes(read('flow-details.json'), shift);
   const logs = { device: shiftTimes(read('logs-device.json'), shift), app: shiftTimes(read('logs-app.json'), shift) };
   let reportBusy = false;
@@ -243,7 +246,7 @@ export default function fixtures() {
       h('Expected'), '', h('Actual'), '',
       h('Environment'),
       `${jira ? '*' : '-'} Preset: ${state.preset} · Target: ${state.target} · Mode: ${state.mode}`,
-      `${jira ? '*' : '-'} Device: Pixel 8 · Android 15 · Wiretrace 0.8.0`, '',
+      `${jira ? '*' : '-'} Device: Pixel 8 · Android 15 · Wiretrace ${state.version}`, '',
       ...(f ? [h('Failed request'), `${jira ? '*' : '-'} ${f.method} ${f.host}${f.path.split('?')[0]} → ${status} · ${f.duration_ms ?? '—'} ms`, ''] : []),
       'Log lines are masked by pattern only; check them before sharing.',
     ].join('\n');
