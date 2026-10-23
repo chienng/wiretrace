@@ -1,10 +1,12 @@
 import { createContext, useContext, useMemo, useReducer, type Dispatch, type ReactNode } from 'react';
 import type { InitialData } from './connection';
 import type { QuickFilter } from './logic/filters';
+import { loadShowEncrypted } from './logic/hosts';
 import { LEVELS, type Level } from './logic/logs';
-import { applyMessages, mergeFlows, mergeLogSets, type LogSets } from './logic/merge';
+import { applyMessages, mergeFlows, mergeLogSets, mergeTunnels, type LogSets } from './logic/merge';
 import { reportFlowId } from './logic/report';
-import type { AppState, FlowSummary, LogSource, Phase, RulesPayload, ServerMessage } from './types';
+import { browserStorage } from './storage';
+import type { AppState, FlowSummary, LogSource, Phase, RulesPayload, ServerMessage, TunnelRow } from './types';
 
 export type View = 'traffic' | 'logs' | 'rules';
 export type Dialog = null | 'setup' | 'report' | 'compare';
@@ -18,6 +20,10 @@ export interface UiState {
   searchInit: boolean;
   quick: QuickFilter;
   host: string | null;
+  /** Traffic of one device (its summary `client`); null for all devices. */
+  client: string | null;
+  /** Encrypted connections are listed in Traffic; remembered by the browser. */
+  showEncrypted: boolean;
   /** Ids listed when Pause was pressed; null while live. */
   frozen: ReadonlySet<string> | null;
   /** Ids hidden by Clear. */
@@ -51,6 +57,8 @@ export interface Store {
   loaded: boolean;
   appState: AppState | null;
   flows: FlowSummary[];
+  /** The live session's encrypted connections; a previous session has none. */
+  tunnels: TunnelRow[];
   logs: LogSets;
   /** Loaded when the Rules view opens; counters then follow the socket. */
   rules: RulesPayload | null;
@@ -95,6 +103,7 @@ export const initialStore: Store = {
   loaded: false,
   appState: null,
   flows: [],
+  tunnels: [],
   logs: { device: [], app: [] },
   rules: null,
   rulesStale: false,
@@ -108,6 +117,8 @@ export const initialStore: Store = {
     searchInit: false,
     quick: 'all',
     host: null,
+    client: null,
+    showEncrypted: true,
     frozen: null,
     hidden: new Set(),
     clearedSeq: { device: -Infinity, app: -Infinity },
@@ -138,18 +149,32 @@ export function reducer(store: Store, action: Action): Store {
       return store.phase === action.phase ? store : { ...store, phase: action.phase };
     case 'loaded': {
       const merged = applyMessages(
-        { flows: mergeFlows([], action.data.flows), logs: mergeLogSets({ device: [], app: [] }, [...action.data.device, ...action.data.app]) },
+        {
+          flows: mergeFlows([], action.data.flows),
+          logs: mergeLogSets({ device: [], app: [] }, [...action.data.device, ...action.data.app]),
+          tunnels: mergeTunnels([], action.data.tunnels),
+        },
         action.buffered,
       );
       const appState = latestState(action.data.state, action.buffered);
       const ui = store.ui.searchInit
         ? store.ui
         : { ...store.ui, search: appState.default_filter, searchInit: true };
-      return { ...store, loaded: true, appState, flows: merged.flows, logs: merged.logs, ui, view: keptView(store.view, appState) };
+      return {
+        ...store,
+        loaded: true,
+        appState,
+        flows: merged.flows,
+        tunnels: merged.tunnels,
+        logs: merged.logs,
+        ui,
+        view: keptView(store.view, appState),
+      };
     }
     case 'message': {
       const m = action.message;
       if (m.type === 'flows') return { ...store, flows: mergeFlows(store.flows, m.flows) };
+      if (m.type === 'tunnels') return { ...store, tunnels: mergeTunnels(store.tunnels, m.tunnels) };
       if (m.type === 'logs') return { ...store, logs: mergeLogSets(store.logs, m.lines) };
       if (m.type === 'rules') return applyRulesMessage(store, m);
       if (m.type === 'device') return store.appState ? { ...store, appState: { ...store.appState, device_status: m.status } } : store;
@@ -159,10 +184,20 @@ export function reducer(store: Store, action: Action): Store {
       return {
         ...store,
         view: action.view,
-        ui: { ...store.ui, view: store.ui.view === 'rules' ? 'traffic' : store.ui.view, selectedFlowId: null, selectedLog: null, host: null, dialog: null },
+        ui: {
+          ...store.ui,
+          view: store.ui.view === 'rules' ? 'traffic' : store.ui.view,
+          selectedFlowId: null,
+          selectedLog: null,
+          host: null,
+          client: null,
+          dialog: null,
+        },
       };
     case 'viewClosed':
-      return store.view ? { ...store, view: null, ui: { ...store.ui, selectedFlowId: null, selectedLog: null, host: null } } : store;
+      return store.view
+        ? { ...store, view: null, ui: { ...store.ui, selectedFlowId: null, selectedLog: null, host: null, client: null } }
+        : store;
     case 'switching':
       return { ...store, switching: action.to, ui: { ...store.ui, dialog: null } };
     case 'ui':
@@ -175,7 +210,7 @@ export function reducer(store: Store, action: Action): Store {
     case 'newRuleFrom':
       return { ...store, ui: { ...store.ui, view: 'rules', ruleSeed: action.flow } };
     case 'pause':
-      return { ...store, ui: { ...store.ui, frozen: new Set(store.flows.map((f) => f.id)) } };
+      return { ...store, ui: { ...store.ui, frozen: new Set([...store.flows, ...store.tunnels].map((f) => f.id)) } };
     case 'resume':
       return { ...store, ui: { ...store.ui, frozen: null } };
     case 'logsPause':
@@ -197,6 +232,7 @@ export function reducer(store: Store, action: Action): Store {
     case 'clear': {
       const hidden = new Set(store.ui.hidden);
       for (const f of store.flows) hidden.add(f.id);
+      for (const t of store.tunnels) hidden.add(t.id);
       return {
         ...store,
         ui: {
@@ -217,7 +253,7 @@ export function reducer(store: Store, action: Action): Store {
       const frozen = store.ui.frozen ? new Set(store.ui.frozen).add(action.id) : null;
       return {
         ...store,
-        ui: { ...store.ui, view: 'traffic', selectedFlowId: action.id, quick: 'all', host: null, search: '', hidden, frozen },
+        ui: { ...store.ui, view: 'traffic', selectedFlowId: action.id, quick: 'all', host: null, client: null, search: '', hidden, frozen },
       };
     }
     case 'openReport': {
@@ -259,7 +295,10 @@ const StoreContext = createContext<Store>(initialStore);
 const DispatchContext = createContext<Dispatch<Action>>(() => undefined);
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const [store, dispatch] = useReducer(reducer, initialStore);
+  const [store, dispatch] = useReducer(reducer, initialStore, (s) => ({
+    ...s,
+    ui: { ...s.ui, showEncrypted: loadShowEncrypted(browserStorage()) },
+  }));
   return (
     <DispatchContext.Provider value={dispatch}>
       <StoreContext.Provider value={store}>{children}</StoreContext.Provider>
@@ -272,16 +311,22 @@ export const useDispatch = () => useContext(DispatchContext);
 
 export interface ShownData {
   flows: FlowSummary[];
+  tunnels: TunnelRow[];
   logs: LogSets;
   /** The previous session shown, or null for the live one. */
   viewing: string | null;
 }
 
+const NO_TUNNELS: TunnelRow[] = [];
+
 /** The flows and logs the window shows: the opened previous session, else the live one. */
 export function useData(): ShownData {
-  const { view, flows, logs } = useStore();
+  const { view, flows, tunnels, logs } = useStore();
   return useMemo(
-    () => (view ? { flows: view.flows, logs: view.logs, viewing: view.name } : { flows, logs, viewing: null }),
-    [view, flows, logs],
+    () =>
+      view
+        ? { flows: view.flows, tunnels: NO_TUNNELS, logs: view.logs, viewing: view.name }
+        : { flows, tunnels, logs, viewing: null },
+    [view, flows, tunnels, logs],
   );
 }

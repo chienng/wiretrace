@@ -1,0 +1,956 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wiretrace — more devices, port, encrypted hosts, breakpoints (spec 022 mockups)</title>
+<style>
+/* Tokens and component styles copied from ui/src/styles.css, so the screens look like the built window. */
+:root {
+  --bg: #ececef; --win: #ffffff; --side: #f5f5f7; --line: #e2e2e6; --line-strong: #d1d1d6;
+  --text: #1d1d1f; --muted: #6e6e73; --faint: #a1a1a6; --blue: #0a66d8; --blue-soft: #e6f0fd;
+  --red: #d70015; --red-soft: #fde8ea; --orange: #c45a00; --orange-soft: #fff1e0;
+  --green: #1a7f37; --green-soft: #e3f5e8; --purple: #7b2fbf; --purple-soft: #f3e8fd;
+  --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif; }
+.page { padding: 24px 20px 40px; }
+.page > h1 { margin: 0 0 6px; font-size: 22px; }
+.page > p.intro { margin: 0 0 24px; color: var(--muted); max-width: 1100px; }
+.screen { margin-bottom: 36px; }
+.screen > h2 { margin: 0 0 10px; font-size: 16px; }
+.only .page { padding: 0; }
+.only .page > h1, .only .page > p.intro, .only .screen > h2 { display: none; }
+.only .screen { margin: 0; }
+.frame { position: relative; padding: 16px 20px; background: var(--bg); overflow: hidden; }
+.note { position: absolute; z-index: 30; font-size: 12px; color: #fff; background: #3a3a40; border-radius: 6px; padding: 6px 10px; box-shadow: 0 2px 8px rgba(0,0,0,.25); max-width: 420px; }
+.ring { outline: 2px dashed var(--purple); outline-offset: 2px; }
+.ring-in { outline: 2px dashed var(--purple); outline-offset: -2px; }
+
+/* ---------- browser ---------- */
+.browser { position: absolute; left: 20px; top: 16px; background: #fff; border-radius: 10px; overflow: hidden; box-shadow: 0 16px 40px rgba(0,0,0,.22), 0 0 0 1px rgba(0,0,0,.12); display: flex; flex-direction: column; }
+.tabs-b { height: 36px; flex: none; display: flex; align-items: flex-end; gap: 8px; padding: 0 10px; background: #dfe3ea; }
+.lights { display: flex; gap: 7px; align-self: center; margin-right: 10px; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; display: block; background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; } .lights i:nth-child(3) { background: #28c840; }
+.tab-b { height: 29px; min-width: 190px; display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #fff; border-radius: 9px 9px 0 0; font-size: 12px; }
+.tab-b svg { width: 14px; height: 14px; }
+.tab-b .x { margin-left: auto; color: var(--faint); }
+.urlbar { height: 34px; flex: none; display: flex; align-items: center; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.urlbar .url { flex: 1; height: 24px; display: flex; align-items: center; padding: 0 12px; border-radius: 12px; background: #f0f2f5; font-size: 12px; color: var(--muted); }
+.urlbar .url b { color: var(--text); font-weight: 500; }
+
+/* ---------- window ---------- */
+.app { flex: 1; min-height: 0; display: flex; flex-direction: column; background: #fff; position: relative; }
+.titlebar { min-height: 56px; flex: none; display: flex; align-items: center; gap: 10px; padding: 8px 16px; background: #f6f6f8; border-bottom: 1px solid var(--line); }
+.tb-group { display: flex; align-items: center; gap: 10px; }
+.tb-group.end { margin-left: auto; }
+.title { display: flex; align-items: center; gap: 10px; margin-right: 6px; white-space: nowrap; }
+.title .mark { width: 36px; height: 36px; }
+.title .name { display: flex; flex-direction: column; font-weight: 600; font-size: 16px; line-height: 1.15; }
+.title .version { font-weight: 400; font-size: 11.5px; color: var(--muted); }
+.btn { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 11px; border-radius: 7px; border: 1px solid var(--line-strong); background: #fff; font-size: 12.5px; white-space: nowrap; }
+.btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 500; }
+.btn.danger { color: var(--red); }
+.btn.small { height: 24px; padding: 0 8px; font-size: 12px; }
+.btn.dis { opacity: .45; }
+.btn .count { background: var(--orange-soft); color: var(--orange); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 600; }
+.static-select { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; white-space: nowrap; border-radius: 7px; border: 1px solid var(--line-strong); background: #fff; font-size: 12.5px; }
+.caret { font-size: 10px; color: var(--muted); }
+.rec { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 12px; border-radius: 14px; background: var(--red-soft); color: var(--red); font-weight: 500; font-size: 12.5px; white-space: nowrap; }
+.rec::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--red); }
+.pausedpill { display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 4px 0 12px; border-radius: 14px; background: var(--orange-soft); color: var(--orange); font-weight: 600; font-size: 12.5px; white-space: nowrap; }
+.pausedpill .btn { height: 22px; font-weight: 500; color: var(--text); }
+.pill { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border-radius: 14px; font-size: 12.5px; font-weight: 500; white-space: nowrap; }
+.pill.ok { background: var(--green-soft); color: var(--green); }
+.pill.ok::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--green); }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 8px; overflow: hidden; background: #fff; }
+.seg span { border-right: 1px solid var(--line-strong); padding: 4px 14px; font-size: 12px; white-space: nowrap; }
+.seg span:last-child { border-right: 0; }
+.seg span.on { background: var(--blue); color: #fff; font-weight: 500; }
+
+.banner { padding: 8px 14px; font-size: 12.5px; border-bottom: 1px solid var(--line); flex: none; }
+.banner.proxy { display: flex; align-items: center; gap: 10px; background: var(--orange-soft); color: var(--orange); }
+/* New in spec 022: a device asking to join stands out from the pale warning banners. */
+.banner.ask { display: flex; align-items: center; gap: 10px; background: #ffb21e; color: #3d2600; font-weight: 500; border-bottom-color: #e59a00; animation: ask-pulse 1.2s ease-in-out 3; }
+.banner.ask b { font-family: var(--mono); font-weight: 700; }
+.banner.ask .ico { width: 22px; height: 22px; border-radius: 6px; background: #3d2600; color: #ffb21e; display: grid; place-items: center; font-size: 13px; flex: none; }
+.banner.ask .btn { border-color: rgba(61,38,0,.35); }
+.banner.ask .btn.primary { background: #3d2600; border-color: #3d2600; color: #fff; }
+@keyframes ask-pulse { 0%, 100% { background: #ffb21e; } 50% { background: #ffd98a; } }
+@media (prefers-reduced-motion: reduce) { .banner.ask { animation: none; } }
+.tab-b .badge { background: #ffb21e; color: #3d2600; border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 700; }
+.banner .spacer { flex: 1; }
+
+.main-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr) 470px; }
+.main-body.rules { grid-template-columns: 430px minmax(0, 1fr); }
+.sidebar { background: var(--side); border-right: 1px solid var(--line); padding: 12px 8px; overflow: hidden; }
+.side-h { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 10px 8px 4px; }
+.side-i { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 8px; border-radius: 6px; white-space: nowrap; }
+.side-i .h { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.side-i .h.ip { font-family: var(--mono); font-size: 12px; }
+.side-i .n { margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.side-i .n.red { color: var(--red); font-weight: 600; }
+.side-i .n.warn { color: var(--orange); font-weight: 600; }
+.side-i.active { background: #dcdce1; font-weight: 500; }
+.side-i .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.side-i .caret { width: 8px; flex: none; }
+.side-i .lock { width: 12px; flex: none; text-align: center; font-size: 11px; }
+.side-group { margin: 2px 0; }
+.side-i.hover { background: #ebebef; }
+.proxyaddr { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; margin: 2px 8px 4px; padding: 6px 8px; border-radius: 7px; background: #fff; border: 1px solid var(--line); }
+.proxyaddr .a { font: 600 12.5px var(--mono); width: 100%; white-space: nowrap; }
+.mini { color: var(--blue); font-size: 11px; white-space: nowrap; }
+.side-h.sub { padding-top: 6px; }
+.side-i .rm { margin-left: auto; width: 18px; height: 18px; border-radius: 4px; display: grid; place-items: center; color: var(--muted); background: #dcdce1; font-size: 13px; line-height: 1; }
+
+.traffic { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
+.filterbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.search { flex: 1; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--faint); min-width: 0; font-size: 12.5px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 8px; border-radius: 11px; background: var(--blue-soft); color: var(--blue); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.chip.ip { font-family: var(--mono); font-size: 11.5px; }
+.chip::after { content: "×"; opacity: .6; }
+.toggle-label { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); white-space: nowrap; }
+.cb { width: 14px; height: 14px; border-radius: 4px; border: 1px solid var(--line-strong); display: inline-grid; place-items: center; font-size: 10px; color: #fff; }
+.cb.on { background: var(--blue); border-color: var(--blue); }
+.fhead, .frow { display: grid; grid-template-columns: 92px 92px 58px 50px minmax(0, 1fr) 62px 56px 80px; gap: 8px; padding: 0 8px; align-items: center; }
+.c-dev { font: 11.5px var(--mono); color: var(--muted); }
+.c-dev.mac { font-family: -apple-system, sans-serif; font-size: 12px; }
+.devcol { outline: 2px dashed var(--purple); outline-offset: -1px; }
+.fhead { font-weight: 500; color: var(--muted); font-size: 11.5px; padding-top: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); background: #fafafa; }
+.frow { height: 26px; border-bottom: 1px solid #f0f0f2; font-size: 12.5px; white-space: nowrap; }
+.frow > span { overflow: hidden; text-overflow: ellipsis; }
+.c-time { color: var(--muted); font-variant-numeric: tabular-nums; font-size: 12px; }
+.c-num { text-align: right; font-variant-numeric: tabular-nums; color: var(--muted); }
+.c-path { font-family: var(--mono); font-size: 12px; }
+.c-badges { display: flex; gap: 4px; justify-content: flex-end; }
+.frow.err .c-path { color: var(--red); }
+.frow.enc { color: var(--muted); background: #fbfbfc; }
+.frow.enc .c-path { color: var(--muted); }
+.frow.sel { background: var(--blue); color: #fff; }
+.frow.sel * { color: #fff !important; background: transparent !important; }
+.frow.sel .tag, .frow.sel .st { outline: 1px solid rgba(255,255,255,.5); outline-offset: -1px; }
+.frow.paused { background: var(--orange-soft); }
+.frow.paused.sel { background: var(--orange); }
+.m { font-family: var(--mono); font-size: 11.5px; font-weight: 600; }
+.m.get { color: var(--blue); } .m.post { color: var(--green); } .m.conn { color: var(--muted); }
+.st { font-family: var(--mono); font-size: 11.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; }
+.st.s2 { color: var(--green); background: var(--green-soft); }
+.st.s5 { color: var(--red); background: var(--red-soft); }
+.st.none { color: var(--muted); background: #f0f0f2; }
+.st.wait { color: var(--orange); background: #ffe2bf; }
+.tag { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; text-transform: uppercase; letter-spacing: .02em; }
+.tag.mock { color: var(--purple); background: var(--purple-soft); }
+.tag.enc { color: var(--muted); background: #ececf0; }
+.tag.paused { color: #fff; background: var(--orange); }
+.tag.edited { color: var(--orange); background: var(--orange-soft); }
+
+.detail { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
+.detail-head { padding: 12px 14px 10px; border-bottom: 1px solid var(--line); }
+.detail-head .line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.detail-head .url { font-family: var(--mono); font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.detail-head .meta { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; gap: 14px; flex-wrap: wrap; }
+.detail-head .meta b { color: var(--text); font-weight: 500; }
+.detail-head .meta b.ip { font-family: var(--mono); font-size: 11.5px; }
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.dtabs { display: flex; gap: 2px; padding: 0 10px; border-bottom: 1px solid var(--line); flex: none; }
+.dtab { padding: 8px 10px; color: var(--muted); font-weight: 500; border-bottom: 2px solid transparent; font-size: 12.5px; }
+.dtab.on { color: var(--blue); border-bottom-color: var(--blue); }
+.code { margin: 0; padding: 12px 14px; font: 12px/1.6 var(--mono); background: #fbfbfc; white-space: pre; flex: 1; }
+.code .k { color: #9b2393; } .code .s { color: #c41a16; } .code .n { color: #1c00cf; }
+.hsec { padding: 10px 14px; }
+.sec-h { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; margin-bottom: 6px; }
+.kvrow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 8px; padding: 3px 0; border-bottom: 1px solid #f2f2f4; font-size: 12px; }
+.kvrow .hk { color: var(--muted); }
+.kvrow .hv { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+.infobox { margin: 12px 14px; padding: 12px 14px; border-radius: 10px; background: #f5f5f7; color: var(--text); font-size: 12.5px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.infobox .t { font-weight: 600; }
+.warnline { margin: 0 14px; padding: 8px 10px; border-radius: 8px; background: var(--orange-soft); color: var(--orange); font-size: 12px; }
+
+/* breakpoint editor */
+.bp { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px; overflow: hidden; }
+.bp .row { display: flex; gap: 8px; align-items: center; }
+.textin { height: 28px; border: 1px solid var(--line-strong); border-radius: 7px; background: #fff; padding: 0 8px; font: 12px var(--mono); display: flex; align-items: center; min-width: 0; }
+.textin.sel { justify-content: space-between; }
+.lbl { font-size: 11.5px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.hdrs { display: flex; flex-direction: column; gap: 4px; }
+.hdrs .row .textin:first-child { width: 150px; flex: none; }
+.hdrs .row .textin:nth-child(2) { flex: 1; }
+.hdrs .x { color: var(--faint); width: 14px; text-align: center; }
+.hdrs .fixed .textin { background: #f5f5f7; color: var(--muted); }
+.bodyedit { flex: 1; min-height: 120px; border: 1px solid var(--line-strong); border-radius: 8px; padding: 8px 10px; font: 12px/1.6 var(--mono); white-space: pre; overflow: hidden; background: #fff; }
+.bodyedit .chg { background: #fff1c2; }
+.bp-foot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: #fbfbfc; }
+.linkbtn { color: var(--blue); font-size: 12px; }
+
+/* context menu */
+.ctx { position: absolute; z-index: 25; width: 300px; padding: 5px; border-radius: 9px; background: rgba(250,250,252,.98); box-shadow: 0 12px 34px rgba(0,0,0,.28), 0 0 0 .5px rgba(0,0,0,.25); font-size: 13px; }
+.ctx .r { height: 24px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border-radius: 5px; white-space: nowrap; }
+.ctx .r .hint { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+.ctx .r.hi { background: var(--blue); color: #fff; }
+.ctx .r.hi .hint { color: rgba(255,255,255,.75); }
+.ctx .r.dis { color: #8e8e93; font-size: 11.5px; height: 20px; }
+.ctx .sep { height: 1px; background: rgba(0,0,0,.12); margin: 5px 10px; }
+
+/* dialogs */
+.dim { position: absolute; inset: 0; background: rgba(30,30,35,.35); z-index: 20; }
+.sheet { position: absolute; z-index: 21; background: #fff; border-radius: 12px; box-shadow: 0 18px 50px rgba(0,0,0,.3); padding: 22px 26px; }
+.sheet h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
+.sheet .lead { color: var(--muted); margin: 0 0 14px; font-size: 12.5px; }
+.sheet .lead b { color: var(--text); font-weight: 500; }
+.sheet .ip { font-family: var(--mono); font-size: 12px; color: var(--text); }
+.sheet-foot { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
+.sheet-foot .grow { flex: 1; }
+.callout { padding: 10px 12px; border-radius: 8px; font-size: 12.5px; margin-bottom: 10px; }
+.callout.warn { background: var(--orange-soft); color: #7a3a00; }
+.callout.ok { background: var(--green-soft); color: var(--green); }
+.callout.info { background: #f5f5f7; color: var(--text); }
+.radio { display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: 8px; margin-bottom: 6px; }
+.radio.on { border: 2px solid var(--blue); background: var(--blue-soft); padding: 7px 9px; }
+.radio .o { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--line-strong); flex: none; margin-top: 2px; background: #fff; }
+.radio.on .o { border: 4px solid var(--blue); }
+.radio .l { font-weight: 500; } .radio .s2 { color: var(--muted); font-size: 12px; }
+.field-l { display: block; font-size: 11.5px; font-weight: 600; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: .03em; }
+.bigin { height: 34px; width: 160px; border: 1px solid var(--blue); box-shadow: 0 0 0 3px rgba(10,102,216,.18); border-radius: 8px; display: flex; align-items: center; padding: 0 10px; font: 15px var(--mono); }
+.hintline { color: var(--muted); font-size: 12px; margin-top: 6px; }
+ul.plain { margin: 0 0 6px; padding-left: 18px; font-size: 12.5px; } ul.plain li { margin-bottom: 5px; }
+
+/* setup sheet */
+.wizard { display: grid; grid-template-columns: 210px 1fr; border-top: 1px solid var(--line); margin: 0 -26px -22px; }
+.steps { background: var(--side); border-right: 1px solid var(--line); padding: 16px 14px; }
+.step { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; }
+.step .num { width: 24px; height: 24px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; font-weight: 600; border: 1.5px solid var(--line-strong); color: var(--muted); background: #fff; }
+.step.done .num { background: var(--green); border-color: var(--green); color: #fff; }
+.step.cur .num { background: var(--blue); border-color: var(--blue); color: #fff; }
+.step .slbl { font-weight: 500; } .step.todo .slbl { color: var(--muted); }
+.wiz-main { padding: 20px 28px 18px; min-width: 0; }
+.wiz-main h4 { margin: 0 0 4px; font-size: 18px; font-weight: 600; }
+.wiz-main .lead { color: var(--muted); font-size: 12.5px; margin: 0 0 14px; }
+.devcards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-bottom: 14px; }
+.devcard { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border: 1px solid var(--line-strong); border-radius: 10px; }
+.devcard .l { font-weight: 500; } .devcard .sub { color: var(--muted); font-size: 12px; }
+.devcard.on { border: 2px solid var(--blue); padding: 8px 11px; background: var(--blue-soft); }
+.addr { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.kbd { font-family: var(--mono); font-size: 15px; padding: 4px 10px; background: #f0f0f2; border-radius: 4px; }
+ol.instr { margin: 0; padding-left: 20px; } ol.instr li { margin-bottom: 8px; }
+.waiting { display: flex; align-items: center; gap: 12px; padding: 11px 14px; border-radius: 10px; background: var(--green-soft); color: var(--green); }
+.wiz-foot { margin-top: 14px; display: flex; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line); }
+
+/* rules */
+.rules-bar { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); flex: none; }
+.rules-file { font: 11.5px/1.4 var(--mono); color: var(--muted); }
+.rule-list { border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+.rule-list .hdr { display: flex; align-items: center; gap: 8px; padding: 12px; border-bottom: 1px solid var(--line); }
+.rule { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; padding: 11px 14px; border-bottom: 1px solid #f0f0f2; }
+.rule.sel { background: var(--blue-soft); box-shadow: inset 3px 0 0 var(--blue); }
+.rule .rt { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 12px; white-space: nowrap; overflow: hidden; }
+.rule .ra { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; grid-column: 1; white-space: nowrap; overflow: hidden; }
+.rule .ra .rn { color: var(--text); }
+.rule > .toggle { grid-row: span 2; align-self: center; }
+.toggle { flex: none; width: 34px; height: 20px; border-radius: 10px; background: var(--line-strong); position: relative; }
+.toggle::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+.toggle.on { background: #34c759; } .toggle.on::after { left: 16px; }
+.editor { padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; overflow: hidden; }
+.editor .row { display: flex; gap: 10px; align-items: flex-end; }
+.editor .field { display: flex; flex-direction: column; }
+.editor .textin { height: 30px; font: 12.5px -apple-system, sans-serif; }
+.editor .textin.mono { font: 12px var(--mono); }
+.sec-title { font-size: 13px; font-weight: 600; margin-top: 4px; }
+.muted { color: var(--muted); }
+.kind { font-size: 10.5px; font-weight: 600; padding: 1px 6px; border-radius: 5px; }
+.kind.chg { color: #0b6b6b; background: #d9f2f0; }
+.kind.ans { color: var(--muted); background: #ececf0; }
+
+/* rewrite and map remote */
+.tag.mapped { color: #0b6b6b; background: #d9f2f0; }
+.tag.rewritten { color: #8a5a00; background: #fff1c2; }
+.traffic.wide .fhead, .traffic.wide .frow { grid-template-columns: 92px 92px 50px 50px minmax(0, 1fr) 56px 50px 150px; }
+.ops { display: grid; grid-template-columns: 110px 170px 230px minmax(0, 1fr) 14px; gap: 6px; align-items: center; max-width: 900px; }
+.ops .h { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.ops .x { color: var(--faint); text-align: center; }
+.preview { font: 12px/1.7 var(--mono); padding: 8px 12px; border-radius: 8px; background: #f5f5f7; max-width: 640px; }
+.preview .to { color: #0b6b6b; font-weight: 600; }
+.chg-row { display: grid; grid-template-columns: 18px 74px minmax(0, 1fr); gap: 8px; padding: 5px 0; border-bottom: 1px solid #f2f2f4; font-size: 12px; align-items: baseline; }
+.chg-row .ok { color: var(--green); font-weight: 700; }
+.chg-row .skip { color: var(--faint); font-weight: 700; }
+.chg-row .on { color: var(--muted); }
+.chg-row code { font: 11.5px var(--mono); }
+.chg-row .why { color: var(--muted); }
+.mono { font-family: var(--mono); }
+.pathin { display: flex; align-items: center; gap: 0; }
+.pathin .pre { height: 30px; display: flex; align-items: center; padding: 0 8px; border: 1px solid var(--line-strong); border-right: 0; border-radius: 7px 0 0 7px; background: #f5f5f7; color: var(--muted); font: 12px var(--mono); }
+.pathin .textin { border-radius: 0 7px 7px 0; height: 30px; flex: 1; border-color: var(--blue); box-shadow: 0 0 0 3px rgba(10,102,216,.18); }
+.check { display: flex; gap: 8px; align-items: flex-start; padding: 10px 12px; border-radius: 8px; background: var(--blue-soft); margin: 10px 0; }
+.check .cb { margin-top: 2px; flex: none; }
+</style>
+</head>
+<body>
+<div class="page">
+<h1>More devices, port 8889, encrypted hosts, breakpoints, rewrite, map local, map remote (mockups for spec 022)</h1>
+<p class="intro">One Wiretrace, one window, one Wi-Fi proxy port. Up to four phones share it; the tester allows each one, and can remove it again. The default port becomes 8889, and it can be changed from the window. Connections Wiretrace does not decrypt show as Encrypted rows, and one right-click adds their host to the preset's API hosts. Rules can pause a request or a response at a breakpoint so it can be edited, rewrite headers and JSON fields, and map an endpoint to another server; a response becomes a mock file in one step (Map local). Designed at 1440 px. All data is illustrative; purple dashed outlines mark what is new.</p>
+
+<section class="screen" id="s10a">
+<h2>10a. Several phones on one port: the device list, and a new device asking to join</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="devices"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">Always visible: the Wi-Fi proxy address with <b>Copy</b> and <b>Change…</b> (port), then each accepted phone by IP and request count. Click one to filter Traffic; ⚠ counts failed TLS handshakes.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">The banner turns solid amber and pulses 3 times when a new device asks (steady with Reduce motion); the tab title shows "(1)". <b>Allow…</b> joins it to this session; <b>Switch to it…</b> starts over with only that device.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">The <b>Device</b> column, next to Time, shows which phone sent each request ("This Mac" for the simulator or emulator). The selected request names it too.</div>
+</div>
+</section>
+
+<section class="screen" id="s10b">
+<h2>10b. Allow a device: the tester checks the address first</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="devices" data-dialog="allow"></div>
+  <div class="note" style="left:20px;top:934px;max-width:700px">The limit is 4 devices besides this Mac. At the limit, <b>Allow…</b> in the banner is disabled: "This session accepts 4 devices at most. Switch to it to start a session with only this device."</div>
+</div>
+</section>
+
+<section class="screen" id="s10c">
+<h2>10c. Remove a device from the session</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="devices-remove" data-dialog="remove"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">Hovering a device row shows <b>×</b>; right-click offers <b>Remove from this session…</b> too. Any accepted device can be removed, the first one included, and its place becomes free.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">The proxy refuses it from then on: new connections and the next request on an open one. Encrypted tunnels it already has end when the phone closes them.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">With no device left, nobody gets in automatically: every device then has to be allowed from the banner.</div>
+</div>
+</section>
+
+<section class="screen" id="s10d">
+<h2>10d. Encrypted connections in Traffic, and right-click to decrypt a host</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="encrypted"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">Hosts outside the preset's API hosts pass through without being read. Each connection is now a grey <b>Encrypted</b> row: host and port, when it opened, how long it stayed open. No request or response content, and no size.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">Right-click (or <b>Decrypt this host…</b> in the detail) adds the host, or its parent domain, to the API hosts. <b>Show encrypted</b> and the <b>Encrypted</b> quick filter hide or isolate these rows.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">Encrypted rows stay in memory for the live session only: not in flows.mitm, the HAR, a bug report or a previous session.</div>
+</div>
+</section>
+
+<section class="screen" id="s10e">
+<h2>10e. Decrypt a host: saved to the preset and applied without a restart</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="encrypted" data-dialog="decrypt"></div>
+  <div class="note" style="left:20px;top:934px;max-width:800px">The host is written to <b>presets/default.yaml</b> and applied to the running session: new connections to it are decrypted, open ones stay encrypted until the app reconnects. Removing a host stays in Edit presets (which restarts the session, as today).</div>
+</div>
+</section>
+
+<section class="screen" id="s10f">
+<h2>10f. Setup: port 8889 by default, with Change port…</h2>
+<div class="frame" style="width:1480px;height:800px">
+  <div class="browser" style="width:1440px;height:708px;filter:saturate(.8)" data-win="behind" data-dialog="setup"></div>
+  <div class="note" style="left:20px;top:734px;max-width:900px">8889 by default, so Charles (8888) can run on the same Mac. The port is kept for the next sessions; <b>./wiretrace start --port N</b> overrides it for one run.</div>
+</div>
+</section>
+
+<section class="screen" id="s10g">
+<h2>10g. Change the Wi-Fi proxy port</h2>
+<div class="frame" style="width:1480px;height:800px">
+  <div class="browser" style="width:1440px;height:708px;filter:saturate(.8)" data-win="behind" data-dialog="port"></div>
+  <div class="note" style="left:20px;top:734px;max-width:900px">Opened from <b>Change…</b> in the sidebar's Wi-Fi proxy box, or from Setup. Changing the port saves this session and starts a new one on the new port, like a device switch. Accepted and allowed devices are not carried over: the first phone to connect is accepted again.</div>
+</div>
+</section>
+
+<section class="screen" id="s10h">
+<h2>10h. A breakpoint rule: pause a request, a response, or both</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="rules"></div>
+  <div class="note" style="left:20px;top:934px;max-width:700px">A breakpoint is a rule with the action <b>Pause</b>. It matches like any rule (method, host, path, body) and follows the rule order. It pauses only while the Wiretrace window is open, and at most 10 requests at once; the 11th passes through unpaused.</div>
+</div>
+</section>
+
+<section class="screen" id="s10i">
+<h2>10i. Paused request: edit it, then Continue or Abort</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="paused-req"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">The title bar counts paused requests, with <b>Continue all</b>. Paused rows are orange with a PAUSED tag.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">Method, path and query, headers and a text body can be edited. Host, Content-Length and Transfer-Encoding cannot: Wiretrace sets them.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px"><b>Abort</b> closes the request (the app sees a network error). If no Wiretrace window is open for 30 s, every paused request continues unchanged.</div>
+</div>
+</section>
+
+<section class="screen" id="s10j">
+<h2>10j. Paused response: change what the app receives</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="paused-resp"></div>
+  <div class="note" style="left:20px;top:934px;max-width:700px">At the response, the status, headers and a text body can be edited. A request that was edited or answered at a breakpoint keeps an EDITED tag and a "breakpoint" note in its comment, so a bug report shows it.</div>
+</div>
+</section>
+
+<section class="screen" id="s10k">
+<h2>10k. A Rewrite rule: change headers and JSON fields on every matching request</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="rules-rewrite"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px"><b>Changes</b> rules (Map remote, Rewrite) all apply, in order. Then the first <b>Answers</b> rule that matches (mock, status, delay, drop, pause) ends the search, as today.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">Each change: request or response; set, add or remove a header; set or remove a JSON field by path. Host, Content-Length and connection headers cannot be changed.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">When Wiretrace answers the request itself (mock, status, drop, mock file), the changes are not applied: nothing went to the server.</div>
+</div>
+</section>
+
+<section class="screen" id="s10l">
+<h2>10l. A Map remote rule: send matching requests to another server</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="rules-remote"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">Scheme, host and port change; path and query stay. Host is set to the target, and the target's certificate is checked as usual.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">Not this Mac or addresses on your network: refused on save, and again when the name resolves (the app then gets 502). That keeps phones from reaching this Mac's network through a rule.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">The app's tokens and cookies go to the target too. With http, the editor adds a plain-text warning.</div>
+</div>
+</section>
+
+<section class="screen" id="s10m">
+<h2>10m. Mapped and rewritten requests in Traffic, and what changed</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="mapped"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px"><b>MAPPED</b> and <b>REWRITTEN</b> tags. Traffic, Hosts and filters keep the host the app asked for; the detail adds <b>Sent to</b>.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px">The <b>Changes</b> tab lists each change, applied or skipped and why. Secret header values are masked. Request and Response show what was really sent and received.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">The comment names the rules and the target, never a value, so the HAR and a bug report show that a request was mapped or rewritten.</div>
+</div>
+</section>
+
+<section class="screen" id="s10n">
+<h2>10n. Right-click a request: Map local…</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="maplocal-menu"></div>
+  <div class="note" style="left:20px;top:934px;max-width:700px">Request rows get a right-click menu. <b>Map local…</b> is also in the detail, next to <b>Copy as mock</b>. Disabled for a previous session, a request still in flight, or a binary or over-1-MiB response (the tooltip says which).</div>
+</div>
+</section>
+
+<section class="screen" id="s10o">
+<h2>10o. Map local: save the response as a mock file and answer with it</h2>
+<div class="frame" style="width:1480px;height:1000px"><div class="browser" style="width:1440px;height:908px" data-win="maplocal-menu" data-dialog="maplocal"></div>
+  <div class="note" style="left:20px;top:934px;max-width:470px">The file goes into the preset's mocks folder, under <b>saved/</b> by default, so it answers only through its rule. An existing file needs <b>Replace</b>.</div>
+  <div class="note" style="left:510px;top:934px;max-width:470px"><b>Answer with it now</b> adds a Mock rule at the top of the rules. Off: only the file is written.</div>
+  <div class="note" style="left:1000px;top:934px;max-width:460px">The body is editable before saving: change a value, or remove tokens and personal data.</div>
+</div>
+</section>
+</div>
+
+<svg width="0" height="0" style="position:absolute">
+  <defs>
+    <symbol id="mark" viewBox="0 0 24 24">
+      <rect width="24" height="24" rx="5.5" fill="#0a66d8"/>
+      <path d="M4.2 7.4l3.6 9.4L12 9.6l4.2 7.2 3.6-9.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="4.2" cy="7.4" r="1.7" fill="#fff"/><circle cx="19.8" cy="7.4" r="1.7" fill="#fff"/>
+    </symbol>
+  </defs>
+</svg>
+
+<script>
+// Static mockup: the script only fills repeated markup.
+const mark = '<svg class="mark" viewBox="0 0 24 24"><use href="#mark"/></svg>';
+const MAC = '192.168.1.20';
+
+function chrome(asking) {
+  const badge = asking ? '<span class="badge ring">1</span>' : '';
+  return `<div class="tabs-b"><div class="lights"><i></i><i></i><i></i></div><div class="tab-b"><svg viewBox="0 0 24 24"><use href="#mark"/></svg>${badge}Wiretrace<span class="x">×</span></div></div>
+    <div class="urlbar"><div class="url"><b>127.0.0.1</b>:8081</div></div>`;
+}
+
+function titlebar(o = {}) {
+  const paused = o.paused ? `<span class="pausedpill ring">⏸ ${o.paused} paused <span class="btn small">Continue all</span></span>` : '';
+  return `<div class="titlebar">
+    <div class="tb-group"><span class="title">${mark}<span class="name">Wiretrace<span class="version">v0.10.0</span></span></span>
+      <span class="rec">Recording · 00:12:41</span><span class="btn small">Pause</span><span class="btn small">Clear</span>${paused}</div>
+    <div class="tb-group end">
+      <span class="seg"><span class="${o.view === 'rules' ? '' : 'on'}">Traffic</span><span>Logs</span></span>
+      <span class="static-select">Preset: default <span class="caret">▾</span></span>
+      <span class="pill ok">iPhone <span class="caret">▾</span></span>
+      <span class="btn" style="${o.view === 'rules' ? 'border-color:var(--blue);color:var(--blue)' : ''}">Rules<span class="count">${o.rules || 2} active</span></span>
+      <span class="btn">Setup</span>
+      <span class="btn primary">Report bug</span>
+    </div></div>`;
+}
+
+function proxyBanner() {
+  return `<div class="banner ask ring-in" role="alert">
+    <span class="ico"><svg width="12" height="14" viewBox="0 0 12 14"><rect x="1.5" y="0.75" width="9" height="12.5" rx="2" fill="none" stroke="#ffb21e" stroke-width="1.5"/><circle cx="6" cy="10.6" r="0.9" fill="#ffb21e"/></svg></span>
+    <span>Another device wants to use the Wi-Fi proxy: <b>192.168.1.63</b>, since 15:40. Accepted in this session: 192.168.1.31, 192.168.1.42, 192.168.1.57.</span>
+    <span class="spacer"></span>
+    <span class="btn small primary">Allow…</span><span class="btn small">Switch to it…</span><span class="btn small">Ignore</span></div>`;
+}
+
+const DEVICES = [
+  ['192.168.1.31', '201'],
+  ['192.168.1.42', '98'],
+  ['192.168.1.57', '13', 3],
+];
+function sidebar(o = {}) {
+  const devs = o.devices ? `<div class="ring-in" style="border-radius:8px;padding:2px 0 4px;margin:2px 0">
+      <div class="side-h">Wi-Fi proxy</div>
+      <div class="proxyaddr"><span class="a">${MAC}:${o.port || 8889}</span><span class="mini">Copy</span><span class="mini">Change…</span></div>
+      <div class="side-h sub">Devices</div>
+      <div class="side-i ${o.device ? '' : 'active'}"><span class="h">All devices</span><span class="n">312</span></div>
+      ${DEVICES.map(([ip, n, tls]) => {
+        const hover = o.hover === ip;
+        const counts = hover
+          ? '<span class="rm ring" title="Remove from this session…">×</span>'
+          : `${tls ? `<span class="n warn" title="Does not trust the certificate yet">⚠ ${tls}</span>` : ''}<span class="n" style="${tls ? 'margin-left:6px' : ''}">${n}</span>`;
+        return `<div class="side-i ${o.device === ip ? 'active' : ''} ${hover ? 'hover' : ''}"><span class="h ip">${ip}</span>${counts}</div>`;
+      }).join('')}
+    </div>` : '';
+  const enc = o.encrypted ? `<div class="side-i ring-in" style="border-radius:6px"><span class="lock">🔒</span><span class="h">Encrypted</span><span class="n">37</span></div>` : '';
+  return `<aside class="sidebar">
+    ${devs}
+    <div class="side-h">Sessions</div>
+    <div class="side-i active"><span class="dot" style="background:var(--red)"></span><span class="h">Current session</span><span class="n">00:12</span></div>
+    <div class="side-i"><span class="caret">▸</span><span class="h">Previous sessions</span><span class="n">4</span></div>
+    <div class="side-h">Quick filters</div>
+    <div class="side-i ${o.encrypted || o.device ? '' : 'active'}"><span class="h">All requests</span><span class="n">${o.encrypted ? 349 : 312}</span></div>
+    <div class="side-i"><span class="h">Errors</span><span class="n red">3</span></div>
+    <div class="side-i"><span class="h">Slow &gt; 1 s</span><span class="n">2</span></div>
+    <div class="side-i"><span class="h">Mocked</span><span class="n">4</span></div>
+    <div class="side-i"><span class="h">Faulted</span><span class="n">0</span></div>
+    <div class="side-i"><span class="h">WebSocket</span><span class="n">1</span></div>
+    ${enc}
+    <div class="side-h">Hosts</div>
+    <div class="side-i"><span class="h">api.example.com</span><span class="n">288</span></div>
+    <div class="side-i"><span class="h">auth.example.com</span><span class="n">24</span></div>
+    <div class="side-h">Saved filters</div>
+    <div class="side-i"><span class="h">Orders only</span></div>
+  </aside>`;
+}
+
+const fhead = '<div class="fhead"><span>Time</span><span>Device</span><span>Method</span><span>Status</span><span>Path</span><span style="text-align:right">Duration</span><span style="text-align:right">Size</span><span></span></div>';
+const CYCLE = ['192.168.1.31', '192.168.1.42', '192.168.1.31', 'This Mac', '192.168.1.57', '192.168.1.42'];
+function frow(r, i) {
+  const [time, method, status, path, dur, size, flags = '', device = CYCLE[i % CYCLE.length]] = r;
+  const dev = `<span class="c-dev ${device === 'This Mac' ? 'mac' : ''}">${device}</span>`;
+  const f = flags.split(' ');
+  const enc = method === 'CONNECT';
+  const cls = [status >= 500 ? 'err' : '', enc ? 'enc' : '', f.includes('sel') ? 'sel' : '', f.includes('paused') ? 'paused' : ''].join(' ');
+  const mcls = enc ? 'conn' : method.toLowerCase();
+  const st = enc ? '<span class="st none">🔒</span>'
+    : f.includes('waitreq') ? '<span class="st wait">…</span>'
+    : `<span class="st ${status >= 500 ? 's5' : 's2'}">${status}</span>`;
+  const badges = [
+    enc ? '<span class="tag enc">Encrypted</span>' : '',
+    f.includes('paused') ? '<span class="tag paused">Paused</span>' : '',
+    f.includes('edited') ? '<span class="tag edited">Edited</span>' : '',
+    f.includes('mock') ? '<span class="tag mock">Mock</span>' : '',
+    f.includes('mapped') ? '<span class="tag mapped">Mapped</span>' : '',
+    f.includes('rewritten') ? '<span class="tag rewritten">Rewritten</span>' : '',
+  ].join('');
+  return `<div class="frow ${cls}"><span class="c-time">${time}</span>${dev}<span class="m ${mcls}">${method}</span><span>${st}</span>
+    <span class="c-path">${path}</span><span class="c-num">${dur}</span><span class="c-num">${size}</span><span class="c-badges">${badges}</span></div>`;
+}
+
+const ROWS_42 = [
+  ['15:41:01.880', 'POST', 200, '/auth/v2/token/refresh', '102 ms', '1.2 KB'],
+  ['15:41:02.231', 'GET', 200, '/api/v1/profile', '45 ms', '2.8 KB'],
+  ['15:41:02.977', 'GET', 200, '/api/v1/home/feed?page=1', '230 ms', '41 KB'],
+  ['15:41:04.120', 'GET', 200, '/api/v1/products/88213', '133 ms', '6.1 KB'],
+  ['15:41:04.871', 'POST', 200, '/api/v1/cart/items', '201 ms', '0.9 KB'],
+  ['15:41:05.610', 'GET', 200, '/api/v1/cart', '151 ms', '3.3 KB'],
+  ['15:41:06.344', 'POST', 200, '/api/v1/promo/validate', '81 ms', '0.4 KB', 'mock'],
+  ['15:41:06.990', 'POST', 500, '/api/v1/orders', '842 ms', '0.3 KB', 'sel', '192.168.1.42'],
+  ['15:41:09.120', 'GET', 200, '/api/v1/cart', '138 ms', '3.3 KB'],
+  ['15:41:09.881', 'GET', 200, '/api/v1/notifications', '61 ms', '1.7 KB'],
+  ['15:41:10.402', 'POST', 200, '/api/v1/analytics/events', '55 ms', '0.2 KB'],
+  ['15:41:11.007', 'GET', 200, '/api/v1/home/feed?page=2', '214 ms', '39 KB'],
+  ['15:41:12.330', 'GET', 200, '/api/v1/products/77120', '119 ms', '5.8 KB'],
+  ['15:41:13.004', 'GET', 200, '/api/v1/profile', '43 ms', '2.8 KB'],
+];
+
+const ROWS_ENC = [
+  ['15:41:02.104', 'POST', 200, '/auth/v2/token/refresh', '96 ms', '1.2 KB'],
+  ['15:41:02.380', 'CONNECT', 0, 'firebaseinstallations.googleapis.com:443', '2.1 s', '—'],
+  ['15:41:02.420', 'GET', 200, '/api/v1/profile', '41 ms', '2.8 KB'],
+  ['15:41:02.711', 'CONNECT', 0, 'cdn.example.net:443', '12.4 s', '—', 'sel', '192.168.1.31'],
+  ['15:41:03.015', 'GET', 200, '/api/v1/home/feed?page=1', '212 ms', '41 KB'],
+  ['15:41:03.302', 'CONNECT', 0, 'images.example-cdn.com:443', '8.0 s', '—'],
+  ['15:41:03.330', 'CONNECT', 0, 'images.example-cdn.com:443', '7.9 s', '—'],
+  ['15:41:03.880', 'CONNECT', 0, 'o12345.ingest.sentry.io:443', '0.6 s', '—'],
+  ['15:41:04.388', 'GET', 200, '/api/v1/products/88213', '121 ms', '6.1 KB'],
+  ['15:41:05.002', 'POST', 200, '/api/v1/cart/items', '188 ms', '0.9 KB'],
+  ['15:41:05.410', 'CONNECT', 0, 'app-measurement.com:443', '1.4 s', '—'],
+  ['15:41:05.870', 'GET', 200, '/api/v1/cart', '140 ms', '3.3 KB'],
+  ['15:41:06.502', 'POST', 200, '/api/v1/promo/validate', '77 ms', '0.4 KB', 'mock'],
+  ['15:41:07.118', 'POST', 201, '/api/v1/orders', '388 ms', '0.6 KB'],
+  ['15:41:07.900', 'CONNECT', 0, 'cdn.example.net:443', 'open', '—'],
+];
+
+const ROWS_PAUSED = (which) => [
+  ['15:41:04.388', 'GET', 200, '/api/v1/products/88213', '121 ms', '6.1 KB'],
+  ['15:41:05.002', 'POST', 200, '/api/v1/cart/items', '188 ms', '0.9 KB'],
+  ['15:41:05.870', 'GET', 200, '/api/v1/cart', '140 ms', '3.3 KB'],
+  ['15:41:06.502', 'POST', 200, '/api/v1/promo/validate', '77 ms', '0.4 KB', 'mock'],
+  ['15:41:07.118', 'POST', 0, '/api/v1/orders', '0:14', '—', `paused waitreq ${which === 'req' ? 'sel' : ''}`, '192.168.1.42'],
+  ['15:41:07.640', 'GET', 200, '/api/v1/notifications', '58 ms', '1.7 KB'],
+  ['15:41:08.002', 'GET', 200, '/api/v1/cart', '0:05', '3.3 KB', `paused ${which === 'resp' ? 'sel' : ''}`, '192.168.1.31'],
+  ['15:41:08.410', 'POST', 200, '/api/v1/analytics/events', '55 ms', '0.2 KB'],
+  ['15:40:58.120', 'POST', 200, '/api/v1/orders', '1.9 s', '0.6 KB', 'edited'],
+  ['15:41:09.310', 'GET', 200, '/api/v1/home/feed?page=1', '198 ms', '41 KB'],
+];
+
+const ROWS_MAPPED = [
+  ['15:42:01.120', 'POST', 200, '/auth/v2/token/refresh', '310 ms', '1.2 KB', 'mapped'],
+  ['15:42:01.502', 'GET', 200, '/api/v1/profile', '61 ms', '2.9 KB', 'mapped rewritten sel', '192.168.1.42'],
+  ['15:42:02.233', 'GET', 200, '/api/v1/home/feed?page=1', '402 ms', '44 KB', 'mapped'],
+  ['15:42:03.010', 'GET', 200, '/api/v1/products/88213', '188 ms', '6.0 KB', 'mapped'],
+  ['15:42:03.871', 'POST', 200, '/api/v1/promo/validate', '79 ms', '0.4 KB', 'mock'],
+  ['15:42:04.420', 'GET', 200, '/api/v1/cart', '170 ms', '3.1 KB', 'mapped'],
+  ['15:42:05.002', 'GET', 200, '/api/v1/profile', '58 ms', '2.9 KB', 'mapped rewritten'],
+  ['15:42:05.640', 'POST', 200, '/api/v1/analytics/events', '66 ms', '0.2 KB', 'mapped'],
+  ['15:42:06.118', 'GET', 200, '/api/v1/notifications', '92 ms', '1.6 KB', 'mapped'],
+  ['15:42:07.330', 'POST', 201, '/api/v1/cart/items', '240 ms', '0.9 KB', 'mapped'],
+];
+
+const ROWS_PROFILE = [
+  ['15:41:01.880', 'POST', 200, '/auth/v2/token/refresh', '102 ms', '1.2 KB'],
+  ['15:41:02.231', 'GET', 200, '/api/v1/profile', '45 ms', '2.8 KB', 'sel', '192.168.1.42'],
+  ['15:41:02.977', 'GET', 200, '/api/v1/home/feed?page=1', '230 ms', '41 KB'],
+  ['15:41:04.120', 'GET', 200, '/api/v1/products/88213', '133 ms', '6.1 KB'],
+  ['15:41:04.871', 'POST', 200, '/api/v1/cart/items', '201 ms', '0.9 KB'],
+  ['15:41:05.610', 'GET', 200, '/api/v1/cart', '151 ms', '3.3 KB'],
+  ['15:41:06.344', 'POST', 200, '/api/v1/promo/validate', '81 ms', '0.4 KB', 'mock'],
+  ['15:41:06.990', 'POST', 500, '/api/v1/orders', '842 ms', '0.3 KB'],
+  ['15:41:09.120', 'GET', 200, '/api/v1/cart', '138 ms', '3.3 KB'],
+  ['15:41:09.881', 'GET', 200, '/api/v1/notifications', '61 ms', '1.7 KB'],
+  ['15:41:10.402', 'POST', 200, '/api/v1/analytics/events', '55 ms', '0.2 KB'],
+];
+
+const rowMenu = `<div class="ctx ring" style="left:420px;top:66px;width:330px">
+    <div class="r hi">Map local…<span class="hint">save the response as a mock</span></div>
+    <div class="r">Copy as mock</div>
+    <div class="r">New rule from this request</div>
+    <div class="sep"></div>
+    <div class="r">Replay</div>
+    <div class="r">Copy cURL</div></div>`;
+
+function traffic(rows, o = {}) {
+  const chip = o.chip ? `<span class="chip ip ring">${o.chip}</span>` : '';
+  const show = o.showEnc ? `<span class="toggle-label ring"><span class="cb on">✓</span>Show encrypted</span>` : '';
+  return `<section class="traffic ${o.wide ? 'wide' : ''}">
+    <div class="filterbar"><div class="search">Search URL, headers, bodies… or a filter like ~m POST</div>${chip}${show}</div>
+    <div style="position:relative">${fhead}${rows.map(frow).join('')}${o.plain ? '' : '<div class="devcol" style="position:absolute;left:104px;top:0;width:96px;bottom:0;pointer-events:none"></div>'}${o.ctx || ''}</div></section>`;
+}
+
+function detailError() {
+  return `<section class="detail">
+    <div class="detail-head"><div class="line1"><span class="m post">POST</span><span class="url">/api/v1/orders</span><span class="st s5">500</span></div>
+      <div class="meta"><span>Host <b>api.example.com</b></span><span class="ring" style="border-radius:4px;padding:0 2px">Device <b class="ip">192.168.1.42</b></span><span>842 ms</span><span>Request ID <b>req-0418</b></span></div>
+      <div class="actions"><span class="btn small">Copy cURL</span><span class="btn small">Copy as mock</span><span class="btn small">Replay</span><span class="btn small">Compare</span><span class="btn small">New rule</span><span class="btn small">Report…</span></div></div>
+    <div class="dtabs"><span class="dtab">Request</span><span class="dtab on">Response</span><span class="dtab">Headers</span><span class="dtab">Timing</span><span class="dtab">Logs</span></div>
+    <div class="code">{
+  <span class="k">"error"</span>: <span class="s">"ORDER_CREATE_FAILED"</span>,
+  <span class="k">"message"</span>: <span class="s">"deliverySlot is required"</span>,
+  <span class="k">"requestId"</span>: <span class="s">"req-0418"</span>
+}</div></section>`;
+}
+
+function detailEncrypted() {
+  return `<section class="detail">
+    <div class="detail-head"><div class="line1"><span class="m conn">CONNECT</span><span class="url">cdn.example.net:443</span><span class="tag enc">Encrypted</span></div>
+      <div class="meta"><span>Device <b class="ip">192.168.1.31</b></span><span>Opened <b>15:41:02.711</b></span><span>Open for <b>12.4 s</b></span></div></div>
+    <div class="infobox ring"><span class="t">Not decrypted</span>
+      <span>cdn.example.net is not one of the API hosts of preset <b>default</b>, so Wiretrace passes this connection through without reading it. Decrypt the host to see its requests and responses.</span>
+      <span class="btn primary small">Decrypt this host…</span></div>
+    <div class="hsec"><div class="sec-h">CONNECT request from the phone</div>
+      <div class="kvrow"><span class="hk">Host</span><span class="hv">cdn.example.net:443</span></div>
+      <div class="kvrow"><span class="hk">Proxy-Connection</span><span class="hv">keep-alive</span></div>
+      <div class="kvrow"><span class="hk">User-Agent</span><span class="hv">ExampleApp/4.12.0 CFNetwork/1568.200.51 Darwin/24.1.0</span></div></div>
+    <div class="hsec"><div class="sec-h">Answer</div>
+      <div class="kvrow"><span class="hk">Status</span><span class="hv">200 Connection established (sent by Wiretrace)</span></div>
+      <div class="kvrow"><span class="hk">Then</span><span class="hv">TLS straight to the server, not read</span></div></div>
+  </section>`;
+}
+
+const ctxMenu = `<div class="ctx ring" style="left:330px;top:100px">
+    <div class="r dis">Add to the API hosts of preset default</div>
+    <div class="r hi">Decrypt cdn.example.net…<span class="hint">and subdomains</span></div>
+    <div class="r">Decrypt example.net…<span class="hint">and subdomains</span></div>
+    <div class="sep"></div>
+    <div class="r">Copy host</div>
+    <div class="r">Show only cdn.example.net</div>
+    <div class="sep"></div>
+    <div class="r">Hide encrypted connections</div></div>`;
+
+function detailPausedReq() {
+  return `<section class="detail ring-in">
+    <div class="detail-head"><div class="line1"><span class="m post">POST</span><span class="url">/api/v1/orders</span><span class="tag paused">Paused</span></div>
+      <div class="meta"><span><b>Before sending</b> · 0:14</span><span>Device <b class="ip">192.168.1.42</b></span><span>Rule <b>Pause order creation</b></span></div></div>
+    <div class="dtabs"><span class="dtab on">Edit request</span><span class="dtab">Original</span><span class="dtab">Logs</span></div>
+    <div class="bp">
+      <div class="row"><span class="textin sel" style="width:96px">POST <span class="caret">▾</span></span><span class="textin" style="flex:1">/api/v1/orders</span></div>
+      <div><div class="lbl" style="margin-bottom:5px">Headers</div>
+        <div class="hdrs">
+          <div class="row fixed"><span class="textin">Host</span><span class="textin">api.example.com</span><span class="x"></span></div>
+          <div class="row"><span class="textin">authorization</span><span class="textin">Bearer eyJ…   (masked in reports)</span><span class="x">×</span></div>
+          <div class="row"><span class="textin">content-type</span><span class="textin">application/json</span><span class="x">×</span></div>
+          <div class="row"><span class="textin">x-request-id</span><span class="textin">req-0418</span><span class="x">×</span></div>
+          <span class="linkbtn">+ Add header</span>
+        </div></div>
+      <div class="lbl">Body · JSON</div>
+      <div class="bodyedit">{
+  "cartId": "cart-5521",
+  "promo": "TESTCODE",
+  "payment": "card",
+<span class="chg">  "deliverySlot": "2026-10-21T09:00",</span>
+  "address": { "id": "addr-17" },
+  "client": "android/4.12.0"
+}</div>
+      <div class="warnline">Apps usually give up after 30–60 s. This one has waited 14 s.</div>
+    </div>
+    <div class="bp-foot"><span class="btn primary">Continue</span><span class="btn danger">Abort</span><span class="linkbtn">Undo edits</span><span style="margin-left:auto" class="muted">Edited: body</span></div>
+  </section>`;
+}
+
+function detailPausedResp() {
+  return `<section class="detail ring-in">
+    <div class="detail-head"><div class="line1"><span class="m get">GET</span><span class="url">/api/v1/cart</span><span class="st s2">200</span><span class="tag paused">Paused</span></div>
+      <div class="meta"><span><b>Before the app gets the response</b> · 0:05</span><span>Device <b class="ip">192.168.1.31</b></span><span>Rule <b>Pause cart response</b></span></div></div>
+    <div class="dtabs"><span class="dtab">Request</span><span class="dtab on">Edit response</span><span class="dtab">Original</span><span class="dtab">Logs</span></div>
+    <div class="bp">
+      <div class="row"><span class="lbl" style="width:52px">Status</span><span class="textin" style="width:80px;border-color:var(--blue)">503</span><span class="muted" style="font-size:12px">was 200</span></div>
+      <div><div class="lbl" style="margin-bottom:5px">Headers</div>
+        <div class="hdrs">
+          <div class="row"><span class="textin">content-type</span><span class="textin">application/json</span><span class="x">×</span></div>
+          <div class="row"><span class="textin">cache-control</span><span class="textin">no-store</span><span class="x">×</span></div>
+          <div class="row fixed"><span class="textin">content-length</span><span class="textin">set by Wiretrace</span><span class="x"></span></div>
+          <span class="linkbtn">+ Add header</span>
+        </div></div>
+      <div class="lbl">Body · JSON</div>
+      <div class="bodyedit"><span class="chg">{
+  "error": "SERVICE_UNAVAILABLE",
+  "retryAfter": 30
+}</span></div>
+    </div>
+    <div class="bp-foot"><span class="btn primary">Send to app</span><span class="btn danger">Abort</span><span class="linkbtn">Undo edits</span><span style="margin-left:auto" class="muted">Edited: status, body</span></div>
+  </section>`;
+}
+
+function rulesView() {
+  const rule = (name, t, a, on, sel, isNew) => `<div class="rule ${sel ? 'sel' : ''} ${isNew ? 'ring-in' : ''}"><span class="rt">${t}</span><span class="toggle ${on ? 'on' : ''}"></span><span class="ra"><span class="rn">${name}</span> · ${a}</span></div>`;
+  return `<div class="rules-bar"><span class="btn small">← Traffic</span><b>Rules</b><span class="rules-file">rules/default.json</span><span style="margin-left:auto" class="btn small primary">New rule</span></div>
+    <div class="main-body rules">
+      <div class="rule-list">
+        <div class="hdr"><span class="muted">3 rules · the first that matches applies</span></div>
+        ${rule('Promo always valid', '<span class="m post">POST</span> /api/v1/promo/validate', 'mock 200 · always', true)}
+        ${rule('Token refresh fails', '<span class="m post">POST</span> /auth/v2/token/refresh', 'status 401 · every 3rd', true)}
+        ${rule('Pause order creation', '<span class="m post">POST</span> /api/v1/orders', '<span class="tag paused">Pause</span> request and response · always', true, true, true)}
+      </div>
+      <div class="editor">
+        <div class="field"><span class="field-l">Name</span><span class="textin" style="width:420px">Pause order creation</span></div>
+        <div class="sec-title">Match</div>
+        <div class="row"><div class="field"><span class="field-l">Method</span><span class="textin sel mono" style="width:100px">POST <span class="caret">▾</span></span></div>
+          <div class="field"><span class="field-l">Host</span><span class="textin sel" style="width:250px">api.example.com <span class="caret">▾</span></span></div>
+          <div class="field" style="flex:1"><span class="field-l">Path</span><span class="textin mono">/api/v1/orders</span></div></div>
+        <div class="field"><span class="field-l">Body contains (optional)</span><span class="textin" style="width:420px;color:var(--faint)">any body</span></div>
+        <div class="sec-title">Action</div>
+        <div class="row"><div class="field"><span class="field-l">Do</span><span class="textin sel ring" style="width:260px">Pause at a breakpoint <span class="caret">▾</span></span></div>
+          <div class="field"><span class="field-l">Pause</span><span class="seg ring"><span>The request</span><span>The response</span><span class="on">Both</span></span></div></div>
+        <div class="callout info ring" style="max-width:640px">The request waits in Traffic until you <b>Continue</b> or <b>Abort</b> it. Only while a Wiretrace window is open; at most 10 at once. Apps usually give up after 30–60 s.</div>
+        <div class="sec-title">Apply</div>
+        <div class="row"><span class="seg"><span class="on">Always</span><span>Once</span><span>Every Nth call</span></span></div>
+        <div class="muted" style="font-size:12px">Matched 2 times in this session.</div>
+        <div style="display:flex;gap:8px;margin-top:6px"><span class="btn primary">Save rule</span><span class="btn">Delete</span></div>
+      </div>
+    </div>`;
+}
+
+function rulesViewChanges(which) {
+  const rule = (name, t, a, kind, sel, isNew) => `<div class="rule ${sel ? 'sel' : ''} ${isNew ? 'ring-in' : ''}"><span class="rt">${t}</span><span class="toggle on"></span><span class="ra"><span class="kind ${kind === 'Changes' ? 'chg' : 'ans'}">${kind}</span><span class="rn">${name}</span> · ${a}</span></div>`;
+  const remote = which === 'remote';
+  const list = `
+    ${rule('Map to staging', '<span class="m conn">ANY</span> /api/*', 'Map remote → staging-api.example.com · always', 'Changes', remote, true)}
+    ${rule('Premium user', '<span class="m get">GET</span> /api/v1/profile', 'Rewrite, 4 changes · always', 'Changes', !remote, true)}
+    ${rule('Promo always valid', '<span class="m post">POST</span> /api/v1/promo/validate', 'mock 200 · always', 'Answers')}
+    ${rule('Token refresh fails', '<span class="m post">POST</span> /auth/v2/token/refresh', 'status 401 · every 3rd', 'Answers')}
+    ${rule('Pause order creation', '<span class="m post">POST</span> /api/v1/orders', 'pause request and response · always', 'Answers')}`;
+  const match = remote
+    ? ['Map to staging', 'ANY', '/api/*']
+    : ['Premium user', 'GET', '/api/v1/profile'];
+  const op = (on, kind, target, value) => `<span class="textin sel">${on} <span class="caret">▾</span></span><span class="textin sel">${kind} <span class="caret">▾</span></span><span class="textin mono">${target}</span><span class="textin mono" style="${value ? '' : 'background:#f5f5f7;color:var(--faint)'}">${value || '—'}</span><span class="x">×</span>`;
+  const action = remote ? `
+        <div class="row"><div class="field"><span class="field-l">Do</span><span class="textin sel ring" style="width:260px">Map remote <span class="caret">▾</span></span></div></div>
+        <div class="row ring" style="border-radius:8px;padding:4px;width:fit-content">
+          <div class="field"><span class="field-l">To</span><span class="seg"><span class="on">https</span><span>http</span></span></div>
+          <div class="field"><span class="field-l">Host</span><span class="textin mono" style="width:300px;border-color:var(--blue);box-shadow:0 0 0 3px rgba(10,102,216,.18)">staging-api.example.com</span></div>
+          <div class="field"><span class="field-l">Port</span><span class="textin mono" style="width:80px">443</span></div></div>
+        <div class="preview ring">https://api.example.com/api/v1/orders<br>→ <span class="to">https://staging-api.example.com</span>/api/v1/orders</div>
+        <div class="callout info" style="max-width:640px;margin:0">Not this Mac or addresses on your network: localhost, *.local, 10.x, 172.16–31.x, 192.168.x, 100.64–127.x. Path and query are kept.</div>
+        <div class="callout warn" style="max-width:640px;margin:0">The app's tokens and cookies go to this server too.</div>`
+    : `
+        <div class="row"><div class="field"><span class="field-l">Do</span><span class="textin sel ring" style="width:260px">Rewrite <span class="caret">▾</span></span></div></div>
+        <div class="ops ring" style="border-radius:8px;padding:6px">
+          <span class="h">On</span><span class="h">Change</span><span class="h">Header or JSON path</span><span class="h">Value</span><span></span>
+          ${op('Request', 'Set header', 'x-feature-flags', 'checkout-v2')}
+          ${op('Response', 'Set JSON field', 'data.user.isPremium', 'true')}
+          ${op('Response', 'Remove JSON field', 'data.user.trialEndsAt', '')}
+          ${op('Response', 'Remove header', 'cache-control', '')}
+        </div>
+        <span class="linkbtn">+ Add change</span>
+        <div class="callout info" style="max-width:640px;margin:0">JSON paths: <span class="mono">data.items[0].price</span>, <span class="mono">["key.with.dots"]</span>. Values are JSON: <span class="mono">true</span>, <span class="mono">12</span>, <span class="mono">"text"</span>, <span class="mono">null</span>. A JSON body is written back compactly.</div>`;
+  return `<div class="rules-bar"><span class="btn small">← Traffic</span><b>Rules</b><span class="rules-file">rules/default.json</span><span style="margin-left:auto" class="btn small primary">New rule</span></div>
+    <div class="main-body rules">
+      <div class="rule-list">
+        <div class="hdr ring-in"><span class="muted">5 rules · Map remote and Rewrite rules apply in order. Then the first other rule that matches answers.</span></div>
+        ${list}
+      </div>
+      <div class="editor">
+        <div class="field"><span class="field-l">Name</span><span class="textin" style="width:420px">${match[0]}</span></div>
+        <div class="sec-title">Match</div>
+        <div class="row"><div class="field"><span class="field-l">Method</span><span class="textin sel mono" style="width:100px">${match[1]} <span class="caret">▾</span></span></div>
+          <div class="field"><span class="field-l">Host</span><span class="textin sel" style="width:250px">api.example.com <span class="caret">▾</span></span></div>
+          <div class="field" style="flex:1"><span class="field-l">Path</span><span class="textin mono">${match[2]}</span></div></div>
+        <div class="sec-title">Action</div>
+        ${action}
+        <div class="sec-title">Apply</div>
+        <div class="row"><span class="seg"><span class="on">Always</span><span>Once</span><span>Every Nth call</span></span></div>
+        <div class="muted" style="font-size:12px">Matched ${remote ? 214 : 9} times in this session.</div>
+        <div style="display:flex;gap:8px;margin-top:2px"><span class="btn primary">Save rule</span><span class="btn">Delete</span></div>
+      </div>
+    </div>`;
+}
+
+function detailProfile(o = {}) {
+  const tags = o.mapped ? '<span class="tag mapped">Mapped</span><span class="tag rewritten">Rewritten</span>' : '';
+  const sent = o.mapped ? '<span class="ring" style="border-radius:4px;padding:0 2px">Sent to <b>https://staging-api.example.com</b></span>' : '';
+  const tabs = ['Request', 'Response', 'Headers', ...(o.mapped ? ['Changes'] : []), 'Timing', 'Logs']
+    .map((t) => `<span class="dtab ${t === (o.mapped ? 'Changes' : 'Response') ? 'on' : ''} ${t === 'Changes' ? 'ring-in' : ''}">${t}</span>`).join('');
+  const json = `<div class="code">{
+  <span class="k">"data"</span>: {
+    <span class="k">"user"</span>: {
+      <span class="k">"id"</span>: <span class="s">"u-1042"</span>,
+      <span class="k">"name"</span>: <span class="s">"Test User"</span>,
+      <span class="k">"isPremium"</span>: <span class="n">false</span>,
+      <span class="k">"trialEndsAt"</span>: <span class="s">"2026-11-01"</span>
+    }
+  }
+}</div>`;
+  const row = (ok, on, text, why) => `<div class="chg-row"><span class="${ok ? 'ok' : 'skip'}">${ok ? '✓' : '–'}</span><span class="on">${on}</span><span>${text}${why ? ` <span class="why">· skipped: ${why}</span>` : ''}</span></div>`;
+  const changes = `<div class="hsec">
+      <div class="sec-h">Map remote · rule Map to staging</div>
+      ${row(true, 'Request', 'api.example.com → <code>https://staging-api.example.com:443</code>')}
+      <div class="sec-h" style="margin-top:14px">Rewrite · rule Premium user · 3 of 4 applied</div>
+      ${row(true, 'Request', 'Set header <code>x-feature-flags</code> = <code>checkout-v2</code>')}
+      ${row(true, 'Response', 'Set JSON field <code>data.user.isPremium</code> = <code>true</code>')}
+      ${row(false, 'Response', 'Remove JSON field <code>data.user.trialEndsAt</code>', 'not found')}
+      ${row(true, 'Response', 'Remove header <code>cache-control</code>')}
+      <div class="sec-h" style="margin-top:14px">Comment</div>
+      <div class="kvrow" style="grid-template-columns:1fr"><span class="hv">map remote: api.example.com → staging-api.example.com · rewrite: Premium user (3 changes)</span></div>
+    </div>`;
+  return `<section class="detail">
+    <div class="detail-head"><div class="line1"><span class="m get">GET</span><span class="url">/api/v1/profile</span><span class="st s2">200</span>${tags}</div>
+      <div class="meta"><span>Host <b>api.example.com</b></span>${sent}<span>Device <b class="ip">192.168.1.42</b></span><span>${o.mapped ? '61' : '45'} ms</span></div>
+      <div class="actions"><span class="btn small">Copy cURL</span><span class="btn small">Copy as mock</span><span class="btn small ring">Map local…</span><span class="btn small">Replay</span><span class="btn small">New rule</span><span class="btn small">Report…</span></div></div>
+    <div class="dtabs">${tabs}</div>
+    ${o.mapped ? changes : json}</section>`;
+}
+
+function mapLocalDialog() {
+  return `<div class="dim"></div><div class="sheet ring" style="left:330px;top:40px;width:780px">
+    <h3>Map local: answer <span class="mono" style="font-size:14px">GET /api/v1/profile</span> from a file</h3>
+    <p class="lead">Saves this response into the mocks folder of preset <b>default</b>.</p>
+    <span class="field-l">File</span>
+    <div class="pathin"><span class="pre">mocks/default/</span><span class="textin mono">saved/GET_api_v1_profile.json</span></div>
+    <div class="hintline">Letters, digits, <span class="mono">. _ -</span> and <span class="mono">/</span> for folders; ends with .json.</div>
+    <div style="display:flex;gap:14px;margin-top:12px;align-items:flex-end">
+      <div><span class="field-l">Status</span><span class="textin mono" style="width:80px">200</span></div>
+      <div class="muted" style="font-size:12px;padding-bottom:6px">Content-Type: application/json</div></div>
+    <span class="field-l" style="margin-top:12px">Body</span>
+    <div class="bodyedit" style="height:200px;flex:none">{
+  "data": {
+    "user": {
+      "id": "u-1042",
+      "name": "Test User",
+<span class="chg">      "isPremium": true,</span>
+      "trialEndsAt": "2026-11-01"
+    }
+  }
+}</div>
+    <div class="check"><span class="cb on">✓</span><div><div style="font-weight:500">Answer with it now</div>
+      <div class="muted" style="font-size:12px">Adds the rule <b style="color:var(--text);font-weight:500">Map local GET /api/v1/profile</b> at the top of the rules: GET api.example.com /api/v1/profile · Mock 200 from this file · always.</div></div></div>
+    <div class="callout warn" style="margin:0">The file keeps the response as it is, tokens and personal data included. Edit them out before you share the mocks folder.</div>
+    <div class="sheet-foot"><span class="muted" style="font-size:12px">mocks/default/saved/ · new file</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn primary">Save and map</span></div></div>`;
+}
+
+function allowDialog() {
+  return `<div class="dim"></div><div class="sheet ring" style="left:420px;top:150px;width:600px">
+    <h3>Allow the device at <span class="ip" style="font-size:15px">192.168.1.63</span>?</h3>
+    <p class="lead">It can use the Wi-Fi proxy until this session ends, like <span class="ip">192.168.1.31</span>, <span class="ip">192.168.1.42</span> and <span class="ip">192.168.1.57</span>.</p>
+    <div class="callout warn">Any device on this network can ask. Check the address in the phone's Wi-Fi settings before you allow it.</div>
+    <div class="callout info">This session accepts 4 devices besides this Mac. This one is the last.</div>
+    <div class="sheet-foot"><span class="grow"></span><span class="btn">Cancel</span><span class="btn primary">Allow</span></div></div>`;
+}
+
+function removeDialog() {
+  return `<div class="dim"></div><div class="sheet ring" style="left:420px;top:150px;width:600px">
+    <h3>Remove <span class="ip" style="font-size:15px">192.168.1.57</span> from this session?</h3>
+    <p class="lead">The Wi-Fi proxy refuses it from now on: its next requests fail. The requests it already made stay in Traffic.</p>
+    <div class="callout info">It can ask again: it then shows in the banner, where you can allow it. Still accepted: <span class="ip">192.168.1.31</span>, <span class="ip">192.168.1.42</span>.</div>
+    <div class="sheet-foot"><span class="grow"></span><span class="btn">Cancel</span><span class="btn primary" style="background:var(--red);border-color:var(--red)">Remove</span></div></div>`;
+}
+
+function decryptDialog() {
+  return `<div class="dim"></div><div class="sheet ring" style="left:400px;top:130px;width:640px">
+    <h3>Decrypt cdn.example.net?</h3>
+    <p class="lead">Added to the API hosts of preset <b>default</b> and applied now. The session keeps running.</p>
+    <div class="radio on"><span class="o"></span><div><div class="l">cdn.example.net</div><div class="s2">and its subdomains</div></div></div>
+    <div class="radio"><span class="o"></span><div><div class="l">example.net</div><div class="s2">and every subdomain, cdn.example.net included</div></div></div>
+    <ul class="plain" style="margin-top:12px">
+      <li>New connections to this host are decrypted. Connections already open stay encrypted until the app opens new ones; reopening the app is the sure way.</li>
+      <li>The phone must trust Wiretrace's certificate. An app that pins its certificates fails these requests; the device's warning count shows it.</li>
+    </ul>
+    <div class="sheet-foot"><span class="muted" style="font-size:12px">presets/default.yaml · 3 → 4 API hosts</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn primary">Decrypt</span></div></div>`;
+}
+
+function setupSheet() {
+  const steps = ['Choose device', 'Connect to this Mac', 'Trust Wiretrace', 'Check the app', 'Device logs']
+    .map((s, i) => `<div class="step ${i === 0 ? 'done' : i === 1 ? 'cur' : 'todo'}"><span class="num">${i === 0 ? '✓' : i + 1}</span><span class="slbl">${s}</span></div>`).join('');
+  const cards = [['iPhone', 'a real iPhone', 1], ['Android', 'a real Android phone'], ['iOS Simulator', 'on this Mac'], ['Android emulator', 'on this Mac']]
+    .map((c) => `<div class="devcard ${c[2] ? 'on' : ''}"><span class="l">${c[0]}</span><span class="sub">${c[1]}</span></div>`).join('');
+  return `<div class="dim"></div><div class="sheet" style="left:280px;top:40px;width:880px;padding-bottom:22px">
+    <h3>Set up a device</h3>
+    <p class="lead">Steps for the device you test with. Each step ticks itself once Wiretrace sees it working.</p>
+    <div class="wizard"><div class="steps">${steps}</div>
+      <div class="wiz-main">
+        <h4>Connect the iPhone to this Mac</h4>
+        <p class="lead">A Wi-Fi proxy is a setting on the phone that sends its web traffic through this Mac. Both must be on the same Wi-Fi network.</p>
+        <div class="devcards">${cards}</div>
+        <div class="addr"><div class="seg"><span class="on">Wi-Fi proxy</span><span>WireGuard</span></div></div>
+        <div class="addr"><span class="kbd">${MAC}:8889</span><span class="btn small">Copy</span><span class="ring" style="border-radius:6px;padding:2px 6px;display:inline-flex;gap:8px;align-items:center"><span class="muted">Port 8889</span><span class="btn small">Change port…</span></span></div>
+        <ol class="instr">
+          <li>Settings → Wi-Fi → ⓘ next to the network → Configure Proxy → Manual.</li>
+          <li>Server ${MAC}, Port <b>8889</b>. Authentication off. Save.</li>
+        </ol>
+        <div class="waiting">✓ <div><b>Connected</b> · Wi-Fi proxy: accepting <span style="font-family:var(--mono)">192.168.1.31</span>, <span style="font-family:var(--mono)">192.168.1.42</span></div></div>
+        <div class="wiz-foot"><span class="btn">Back</span><span class="btn primary">Next</span></div>
+      </div></div></div>`;
+}
+
+function portDialog() {
+  return `<div class="dim"></div><div class="sheet ring" style="left:440px;top:110px;width:560px">
+    <h3>Wi-Fi proxy port</h3>
+    <p class="lead">The port phones use for the Wi-Fi proxy on this Mac. WireGuard is not affected.</p>
+    <span class="field-l">Port</span>
+    <span class="bigin">8890</span>
+    <div class="hintline">1024–65535. Not 8081 (this window) or a port another app uses.</div>
+    <div class="callout ok" style="margin-top:12px">Port 8890 is free.</div>
+    <div class="callout info">This session is saved and a new one starts on port 8890. Then set the Wi-Fi proxy on every phone to <b style="font-family:var(--mono)">${MAC}:8890</b>. Wiretrace keeps this port for the next sessions.</div>
+    <div class="sheet-foot"><span class="linkbtn">Back to 8889</span><span class="grow"></span><span class="btn">Cancel</span><span class="btn primary">Change port and restart</span></div></div>`;
+}
+
+function win(kind, dialog) {
+  let body;
+  if (kind === 'devices') {
+    body = `${titlebar()}${proxyBanner()}<div class="main-body">${sidebar({ devices: true })}${traffic(ROWS_42)}${detailError()}</div>`;
+  } else if (kind === 'devices-remove') {
+    body = `${titlebar()}<div class="main-body">${sidebar({ devices: true, hover: '192.168.1.57' })}${traffic(ROWS_42)}${detailError()}</div>`;
+  } else if (kind === 'encrypted') {
+    body = `${titlebar()}<div class="main-body">${sidebar({ devices: true, encrypted: true })}${traffic(ROWS_ENC, { showEnc: true, ctx: dialog ? '' : ctxMenu })}${detailEncrypted()}</div>`;
+  } else if (kind === 'rules') {
+    body = `${titlebar({ view: 'rules', rules: 3 })}${rulesView()}`;
+  } else if (kind === 'paused-req' || kind === 'paused-resp') {
+    const which = kind === 'paused-req' ? 'req' : 'resp';
+    body = `${titlebar({ paused: 2, rules: 3 })}<div class="main-body">${sidebar({ devices: true })}${traffic(ROWS_PAUSED(which))}${which === 'req' ? detailPausedReq() : detailPausedResp()}</div>`;
+  } else if (kind === 'rules-rewrite' || kind === 'rules-remote') {
+    body = `${titlebar({ view: 'rules', rules: 5 })}${rulesViewChanges(kind === 'rules-remote' ? 'remote' : 'rewrite')}`;
+  } else if (kind === 'mapped') {
+    body = `${titlebar({ rules: 5 })}<div class="main-body">${sidebar({ devices: true })}${traffic(ROWS_MAPPED, { wide: true, plain: true })}${detailProfile({ mapped: true })}</div>`;
+  } else if (kind === 'maplocal-menu') {
+    body = `${titlebar()}<div class="main-body">${sidebar({ devices: true })}${traffic(ROWS_PROFILE, { plain: true, ctx: dialog ? '' : rowMenu })}${detailProfile()}</div>`;
+  } else {
+    body = `${titlebar()}<div class="main-body">${sidebar({ devices: true })}${traffic(ROWS_42)}${detailError()}</div>`;
+  }
+  const dlg = dialog === 'allow' ? allowDialog() : dialog === 'remove' ? removeDialog() : dialog === 'decrypt' ? decryptDialog() : dialog === 'setup' ? setupSheet() : dialog === 'port' ? portDialog() : dialog === 'maplocal' ? mapLocalDialog() : '';
+  return `${chrome(kind === 'devices')}<div class="app">${body}${dlg}</div>`;
+}
+document.querySelectorAll('[data-win]').forEach((el) => { el.innerHTML = win(el.dataset.win, el.dataset.dialog); });
+
+const only = new URLSearchParams(location.search).get('only');
+if (only) {
+  document.body.classList.add('only');
+  document.querySelectorAll('.screen').forEach((s) => { if (s.id !== only) s.remove(); });
+}
+</script>
+</body>
+</html>

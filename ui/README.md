@@ -27,7 +27,7 @@ npx vite --port 5199 --strictPort --host 127.0.0.1
 # open http://127.0.0.1:5199/ ; Ctrl+C stops it
 ```
 
-Use a free port: 8888, 8081 and 51820 belong to mitmproxy.
+Use a free port: 8889, 8081 and 51820 belong to mitmproxy.
 
 | Variable | Effect |
 |---|---|

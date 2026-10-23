@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { applyMessages, mergeFlows, mergeLogs, mergeLogSets } from './merge';
-import { flow, line } from './testing';
+import { applyMessages, MAX_TUNNELS, mergeFlows, mergeLogs, mergeLogSets, mergeTunnels } from './merge';
+import { flow, line, tunnel } from './testing';
 
 describe('mergeFlows', () => {
   it('replaces by id and keeps the position', () => {
@@ -44,17 +44,26 @@ describe('applyMessages (initial load plus buffered socket messages)', () => {
     const base = {
       flows: [flow({ id: 'a', status: null }), flow({ id: 'b' })],
       logs: { device: [line({ seq: 1 }), line({ seq: 2 })], app: [] },
+      tunnels: [tunnel({ id: 'tunnel-1' })],
     };
     const result = applyMessages(base, [
       { type: 'flows', flows: [flow({ id: 'a', status: 200 }), flow({ id: 'c' })] },
       { type: 'logs', lines: [line({ seq: 2 }), line({ seq: 3 })] },
+      { type: 'tunnels', tunnels: [tunnel({ id: 'tunnel-1', closed_at: 1_700_000_005 }), tunnel({ id: 'tunnel-2' })] },
     ]);
     expect(result.flows.map((f) => f.id)).toEqual(['a', 'b', 'c']);
     expect(result.flows[0]?.status).toBe(200);
     expect(result.logs.device.map((l) => l.seq)).toEqual([1, 2, 3]);
+    expect(result.tunnels.map((t) => [t.id, t.closed_at])).toEqual([['tunnel-1', 1_700_000_005], ['tunnel-2', null]]);
+  });
+  it('keeps the newest 2,000 encrypted connections, like the server', () => {
+    const many = Array.from({ length: MAX_TUNNELS + 3 }, (_, i) => tunnel({ id: `tunnel-${i}` }));
+    const merged = mergeTunnels([], many);
+    expect(merged).toHaveLength(MAX_TUNNELS);
+    expect(merged[0]?.id).toBe('tunnel-3');
   });
   it('ignores state messages', () => {
-    const base = { flows: [], logs: { device: [], app: [] } };
+    const base = { flows: [], logs: { device: [], app: [] }, tunnels: [] };
     expect(applyMessages(base, [{ type: 'logs', lines: [] }]).flows).toEqual([]);
   });
 });

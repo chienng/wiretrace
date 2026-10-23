@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { initialStore, reducer, type Store } from './store';
-import { flow, line } from './logic/testing';
+import { flow, line, tunnel } from './logic/testing';
 import type { AppState } from './types';
 
 const appState = { default_filter: '~u /api', faults: { filter: '', status: 0, delay_ms: 0, drop: false }, faults_on: false } as AppState;
@@ -8,7 +8,13 @@ const appState = { default_filter: '~u /api', faults: { filter: '', status: 0, d
 function loaded(): Store {
   return reducer(initialStore, {
     type: 'loaded',
-    data: { state: appState, flows: [flow({ id: 'a', status: null }), flow({ id: 'b' })], device: [line({ seq: 1 })], app: [] },
+    data: {
+      state: appState,
+      flows: [flow({ id: 'a', status: null }), flow({ id: 'b' })],
+      device: [line({ seq: 1 })],
+      app: [],
+      tunnels: [tunnel({ id: 'tunnel-1' })],
+    },
     buffered: [
       { type: 'flows', flows: [flow({ id: 'a', status: 200 }), flow({ id: 'c' })] },
       { type: 'logs', lines: [line({ seq: 1 }), line({ seq: 2 })] },
@@ -24,7 +30,7 @@ describe('store', () => {
     expect(s.logs.device.map((l) => l.seq)).toEqual([1, 2]);
     expect(s.ui.search).toBe('~u /api');
     const typed = reducer(s, { type: 'ui', patch: { search: 'orders' } });
-    const reloaded = reducer(typed, { type: 'loaded', data: { state: appState, flows: [], device: [], app: [] }, buffered: [] });
+    const reloaded = reducer(typed, { type: 'loaded', data: { state: appState, flows: [], device: [], app: [], tunnels: [] }, buffered: [] });
     expect(reloaded.ui.search).toBe('orders');
   });
 
@@ -36,11 +42,11 @@ describe('store', () => {
 
   it('pause freezes the listed ids, clear hides them, openFlow brings one back', () => {
     let s = reducer(loaded(), { type: 'pause' });
-    expect([...(s.ui.frozen ?? [])]).toEqual(['a', 'b', 'c']);
+    expect([...(s.ui.frozen ?? [])]).toEqual(['a', 'b', 'c', 'tunnel-1']);
     s = reducer(s, { type: 'message', message: { type: 'flows', flows: [flow({ id: 'd' })] } });
     expect(s.ui.frozen?.has('d')).toBe(false);
     s = reducer(s, { type: 'clear' });
-    expect([...s.ui.hidden].sort()).toEqual(['a', 'b', 'c', 'd']);
+    expect([...s.ui.hidden].sort()).toEqual(['a', 'b', 'c', 'd', 'tunnel-1']);
     expect(s.ui.clearedSeq.device).toBe(2);
     s = reducer(s, { type: 'openFlow', id: 'b' });
     expect(s.ui.hidden.has('b')).toBe(false);
@@ -54,11 +60,20 @@ describe('store', () => {
     expect(s.appState?.default_filter).toBe('~u /api');
     const buffered = reducer(initialStore, {
       type: 'loaded',
-      data: { state: { ...appState, device_status: null }, flows: [], device: [], app: [] },
+      data: { state: { ...appState, device_status: null }, flows: [], device: [], app: [], tunnels: [] },
       buffered: [{ type: 'device', status }],
     });
     expect(buffered.appState?.device_status).toEqual(status);
     expect(reducer(initialStore, { type: 'message', message: { type: 'device', status } }).appState).toBeNull();
+  });
+
+  it('encrypted connections follow the socket by id, and Pause and Clear cover them', () => {
+    let s = reducer(loaded(), { type: 'message', message: { type: 'tunnels', tunnels: [tunnel({ id: 'tunnel-1', closed_at: 1_700_000_009 }), tunnel({ id: 'tunnel-2' })] } });
+    expect(s.tunnels.map((t) => [t.id, t.closed_at])).toEqual([['tunnel-1', 1_700_000_009], ['tunnel-2', null]]);
+    s = reducer(s, { type: 'pause' });
+    expect(s.ui.frozen?.has('tunnel-2')).toBe(true);
+    s = reducer(reducer(s, { type: 'resume' }), { type: 'clear' });
+    expect(s.ui.hidden.has('tunnel-1') && s.ui.hidden.has('a')).toBe(true);
   });
 
   it('pausing logs keeps the seq listed, clearing logs leaves the flows', () => {

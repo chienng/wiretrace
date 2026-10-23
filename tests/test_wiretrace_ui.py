@@ -10,6 +10,7 @@ import os
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -36,6 +37,7 @@ from addons import wiretrace_ui, qa_tools
 from cli import report, screenshot, session, start
 from cli import preset as presetfile
 from cli.preset import Preset
+from test_tunnels import bare_client, client_hello, connect_flow, decided
 
 ROOT = Path(__file__).resolve().parent.parent
 VENV_BIN = Path(sys.prefix) / "bin"
@@ -390,7 +392,8 @@ def test_summary_of_a_response():
         "id": flow.id, "ts": 946681200, "method": "POST", "scheme": "http", "host": HOST,
         "port": flow.request.port, "path": "/api/v1/home?page=2", "status": 503, "error": None,
         "duration_ms": 3000, "size": 40, "mime": "application/json", "request_id": "req-7",
-        "mock": False, "fault": None, "websocket": False, "replay_of": None}
+        "mock": False, "fault": None, "websocket": False, "replay_of": None, "client": "mac",
+        "paused": None, "paused_since": None, "edited": False, "rewritten": False, "mapped": False, "sent_to": None}
 
 
 def test_summary_says_which_request_a_replay_repeats():
@@ -890,7 +893,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
 
     async def body(ui, client, tctx):
         state = await client.json("/api/state")
-        assert state["version"] == "0.9.1"
+        assert state["version"] == "0.10.0"
         assert (state["preset"], state["target"], state["mode"]) == ("staging", "android", "wireguard")
         assert state["started_at"] == 1791943200.0
         assert state["session"] == "2026-10-14_090000_staging_android"
@@ -3691,3 +3694,1272 @@ def test_preset_edit_9_nothing_of_a_preset_reaches_a_log_line_or_the_terminal(tm
         assert "OSError" in caplog.text
 
     edit_scenario(body, tmp_path)
+
+
+# More devices on one port (spec 022, slice A).
+
+async def allow(client, address, **kwargs):
+    return await client.fetch("/api/proxy/allow", "POST", body={"client": address}, **kwargs)
+
+
+async def remove(client, address, **kwargs):
+    return await client.fetch("/api/proxy/remove", "POST", body={"client": address}, **kwargs)
+
+
+def accept(ui, guard, ip: str) -> None:
+    """A connection proxy_guard accepts, then the window's own hook."""
+    conn = tflow.tclient_conn()
+    conn.peername = (ip, 50002)
+    guard.client_connected(conn)
+    assert conn.error is None
+    ui.client_connected(conn)
+
+
+def flow_from(ip: str, wireguard: bool = False):
+    from mitmproxy.proxy import mode_specs
+
+    flow = make_flow()
+    flow.client_conn.peername = (ip, 50003)
+    if wireguard:
+        flow.client_conn.proxy_mode = mode_specs.ProxyMode.parse("wireguard@51820")
+    return flow
+
+
+def test_022_a_allow_accepts_a_waiting_device_in_the_same_session_and_pushes_the_state(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        socket_ = await client.socket()
+        response = await allow(client, PHONE_B)
+        assert response.code == 200 and json.loads(response.body) == {"accepted": [PHONE_A, PHONE_B]}
+        seen = await read_until(socket_, lambda m: m["type"] == "state"
+                                and [c["address"] for c in m["state"]["proxy_clients"]] == [PHONE_A, PHONE_B])
+        assert seen[-1]["state"]["proxy_waiting"] == []
+        socket_.close()
+        accept(ui, guard, PHONE_B)
+        assert not (folder / session.SWITCH).exists() and ui.switching is None
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_remove_refuses_the_device_from_now_on_and_it_can_ask_again(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        response = await remove(client, PHONE_A)
+        assert response.code == 200 and json.loads(response.body) == {"accepted": []}
+        refuse(ui, guard, PHONE_A)
+        assert [w["address"] for w in (await client.json("/api/state"))["proxy_waiting"]] == [PHONE_A]
+        assert (await allow(client, PHONE_A)).code == 200
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_two_allows_when_three_are_accepted_give_one_200_and_one_409(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        for ip in (PHONE_B, PHONE_C):
+            refuse(ui, guard, ip)
+            assert (await allow(client, ip)).code == 200
+        refuse(ui, guard, "192.0.2.74")
+        refuse(ui, guard, "192.0.2.75")
+        responses = await asyncio.gather(allow(client, "192.0.2.74"), allow(client, "192.0.2.75"))
+        assert sorted(r.code for r in responses) == [200, 409]
+        refused = next(r for r in responses if r.code == 409)
+        assert error_text(refused) == wiretrace_ui.guardlib.AT_MOST
+        assert len(guard.accepted()) == 4
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_the_checks_run_in_invariant_3s_order(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await allow(client, "not-an-ip")).code == 400
+        (folder / session.SWITCH).write_text("{}")
+        response = await allow(client, "not-an-ip")
+        assert response.code == 409 and error_text(response) == wiretrace_ui.ALREADY_SWITCHING
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        for call in (allow, remove):
+            response = await call(client, "not-an-ip")
+            assert response.code == 409 and error_text(response) == wiretrace_ui.DEVICES_OFF_WHILE_VIEWING
+        assert guard.accepted() == [PHONE_A]
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over", [{"pin": False}, {"mode": "wireguard"}, {"guard": False}])
+def test_022_a_allow_and_remove_need_pinning(tmp_path, over):
+    async def body(ui, client, tctx, folder, guard):
+        for call in (allow, remove):
+            response = await call(client, "not-an-ip")
+            assert response.code == 409 and error_text(response) == wiretrace_ui.NO_CLIENT_SWITCH
+
+    client_scenario(body, tmp_path, **over)
+
+
+@pytest.mark.parametrize("address, code", [("not-an-ip", 400), ("192.0.2.0/24", 400), ("127.0.0.1", 400),
+                                           ("::1", 400), ("169.254.1.1", 400), ("0.0.0.0", 400),
+                                           ("224.0.0.1", 400), (PHONE_C, 409), (PHONE_A, 409)])
+def test_022_a_allow_refusals(tmp_path, address, code):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await allow(client, address)
+        assert response.code == code
+        assert guard.accepted() == [PHONE_A]
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_remove_of_an_address_not_accepted_is_a_409(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        response = await remove(client, PHONE_B)
+        assert response.code == 409 and error_text(response) == wiretrace_ui.guardlib.NOT_ACCEPTED
+        assert (await remove(client, "127.0.0.1")).code == 400
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_an_ipv4_mapped_address_matches_its_ipv4_form(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert json.loads((await allow(client, f"::ffff:{PHONE_B}")).body) == {"accepted": [PHONE_A, PHONE_B]}
+        assert json.loads((await remove(client, f"::ffff:{PHONE_A}")).body) == {"accepted": [PHONE_B]}
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("sent", [{"client": PHONE_B, "x": 1}, {}, {"client": 3}, [PHONE_B], "x"])
+def test_022_a_a_body_that_is_not_exactly_client_is_a_400(tmp_path, sent):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        for path in ("/api/proxy/allow", "/api/proxy/remove"):
+            assert (await client.fetch(path, "POST", body=sent)).code == 400
+        assert guard.accepted() == [PHONE_A]
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_allow_and_remove_need_the_token_and_the_header(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        assert (await allow(client, PHONE_B, mutate=False)).code == 403
+        assert (await allow(client, PHONE_B, cookie="wrong")).code == 403
+        assert (await remove(client, PHONE_A, mutate=False)).code == 403
+        assert guard.accepted() == [PHONE_A]
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_the_state_lists_accepted_devices_in_order_with_their_counts(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        accept(ui, guard, PHONE_A)
+        refuse(ui, guard, PHONE_B)
+        await allow(client, PHONE_B)
+        accept(ui, guard, PHONE_B)
+        for ip in (PHONE_B, PHONE_B, PHONE_A):
+            ui.request(flow_from(ip))
+        ui.request(flow_from("127.0.0.1"))
+        ui.tls_failed_client(tls_data(HOST))
+        state = await client.json("/api/state")
+        clients = state["proxy_clients"]
+        assert [(c["address"], c["requests"]) for c in clients] == [(PHONE_A, 1), (PHONE_B, 2)]
+        assert all(isinstance(c["seen_at"], float) for c in clients)
+        assert state["proxy_max"] == 4
+        assert state["proxy_address"] == f"{state['mac_ip']}:{state['proxy_port']}"
+
+    client_scenario(body, tmp_path, mode="proxy")
+
+
+def test_022_a_a_devices_tls_failures_are_counted_on_it(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(qa_api_hosts=[HOST])
+        data = tls_data(HOST)
+        data.context.client = tflow.tclient_conn()
+        data.context.client.sni = HOST
+        data.context.client.peername = (PHONE_A, 50010)
+        ui.tls_failed_client(data)
+        clients = (await client.json("/api/state"))["proxy_clients"]
+        assert [(c["address"], c["tls_failures"]) for c in clients] == [(PHONE_A, 1)]
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over", [{"pin": False}, {"mode": "wireguard"}, {"guard": False}])
+def test_022_a_no_device_list_without_pinning_or_in_mode_wireguard(tmp_path, over):
+    async def body(ui, client, tctx, folder, guard):
+        state = await client.json("/api/state")
+        assert state["proxy_clients"] == []
+        if over.get("mode") == "wireguard":
+            assert state["proxy_address"] is None
+
+    client_scenario(body, tmp_path, **over)
+
+
+def test_022_a_no_device_list_while_a_previous_session_is_open(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        assert (await client.json("/api/state"))["proxy_clients"] == []
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_with_client_the_list_has_the_listed_addresses_that_connected(tmp_path):
+    from addons import proxy_guard
+
+    folder = write_session(tmp_path / "sessions" / "2026-10-14_090000_staging_android", mode="proxy")
+    addon = proxy_guard.ProxyGuard()
+
+    async def body(ui, client, tctx):
+        accept(ui, addon, PHONE_B)
+        accept(ui, addon, "127.0.0.1")
+        state = await client.json("/api/state")
+        assert [c["address"] for c in state["proxy_clients"]] == [PHONE_B]
+        assert (await allow(client, PHONE_C)).code == 409
+
+    scenario(body, folder=folder, extra=(addon,), qa_proxy_clients=["127.0.0.0/8", "::1", PHONE_B],
+             qa_proxy_pin=False)
+
+
+@pytest.mark.parametrize("ip, wireguard, expected", [
+    (PHONE_B, False, PHONE_B), (f"::ffff:{PHONE_B}", False, PHONE_B), ("127.0.0.1", False, "mac"),
+    ("::1", False, "mac"), ("10.0.0.1", True, "wireguard")])
+def test_022_a_a_summary_names_the_device(ip, wireguard, expected):
+    assert wiretrace_ui.summary(flow_from(ip, wireguard))["client"] == expected
+
+
+def test_022_a_a_summary_without_a_peer_has_no_device():
+    flow = make_flow()
+    flow.client_conn.peername = None
+    assert wiretrace_ui.summary(flow)["client"] is None
+
+
+def test_022_a_a_previous_sessions_summaries_name_the_device(tmp_path):
+    from mitmproxy import io
+
+    flow = flow_from(PHONE_B)
+    path = tmp_path / "flows.mitm"
+    with open(path, "wb") as f:
+        io.FlowWriter(f).add(flow)
+    flows, _ = wiretrace_ui.read_flows_file(path)
+    assert [wiretrace_ui.summary(f)["client"] for f in flows.values()] == [PHONE_B]
+
+
+def test_022_a_a_switch_after_an_allow_names_no_allowed_address(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        await allow(client, PHONE_B)
+        assert (await switch_device(client, "android")).code == 202
+        assert json.loads((folder / session.SWITCH).read_text()) == {"name": "staging", "target": "android"}
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_a_no_address_reaches_meta_status_the_terminal_or_a_report(tmp_path, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    async def body(ui, client, tctx, folder, guard):
+        refuse(ui, guard, PHONE_B)
+        refuse(ui, guard, PHONE_C)
+        await allow(client, PHONE_B)
+        await remove(client, PHONE_A)
+        ui.request(flow_from(PHONE_B))
+        ui.maybe_write_status(time.time())
+        status = (folder / session.STATUS).read_text()
+        meta = (folder / session.META).read_text()
+        (folder / session.FLOWS).write_bytes(b"")
+        (folder / session.APP_LOG).write_text('{"message": "app"}\n')
+        created = report.create(folder, ui.presets_dir)
+        with zipfile.ZipFile(created.zip) as archive:
+            members = b"".join(archive.read(name) for name in archive.namelist())
+        printed = capsys.readouterr()
+        for text in (status, meta, members.decode("utf-8", "replace"), printed.out, printed.err, caplog.text):
+            for address in (PHONE_A, PHONE_B, PHONE_C):
+                assert address not in text
+
+    client_scenario(body, tmp_path)
+
+
+# The Wi-Fi proxy port (spec 022, slice B).
+
+def unused_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("0.0.0.0", 0))
+        return probe.getsockname()[1]
+
+
+async def port_check(client, value):
+    return await client.fetch(f"/api/proxy/port-check?port={quote(str(value))}")
+
+
+async def change_port(client, body):
+    return await client.fetch("/api/proxy/port", "POST", body=body)
+
+
+def test_022_b_the_state_shows_the_listening_port_else_8889(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        state = await client.json("/api/state")
+        assert state["proxy_port"] == 8889
+        tctx.options.update(listen_port=9310)
+        state = await client.json("/api/state")
+        assert state["proxy_port"] == 9310
+        assert state["proxy_address"] in (None, f"{state['mac_ip']}:9310")
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_b_port_check_says_whether_a_valid_port_is_free(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9311)
+        free = unused_port()
+        response = await port_check(client, free)
+        assert response.code == 200 and json.loads(response.body) == {"port": free, "free": True}
+        with socket.socket() as holder:
+            holder.bind(("0.0.0.0", 0))
+            holder.listen()
+            taken = holder.getsockname()[1]
+            response = await port_check(client, taken)
+            assert response.code == 200 and json.loads(response.body) == {"port": taken, "free": False}
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("value, error", [
+    ("", "The port must be a whole number."), ("abc", "The port must be a whole number."),
+    ("9300.0", "The port must be a whole number."), ("-9300", "The port must be a whole number."),
+    ("123456", "The port must be a whole number."), ("80", "The port must be 1024–65535."),
+    ("65536", "The port must be 1024–65535."), ("8081", "Port 8081 is the Wiretrace window's port."),
+    ("51820", "Port 51820 is the WireGuard tunnel's port."), ("9312", wiretrace_ui.SAME_PORT),
+])
+def test_022_b_port_check_refuses_a_bad_port(tmp_path, value, error):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9312)
+        response = await port_check(client, value)
+        assert response.code == 400 and error_text(response) == error
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_b_a_port_change_writes_the_port_owner_only_then_shuts_down(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9313)
+        port = unused_port()
+        response = await change_port(client, {"port": port})
+        assert response.code == 202 and json.loads(response.body) == {"switching": "staging", "target": "ios"}
+        path = folder / session.SWITCH
+        assert json.loads(path.read_text()) == {"name": "staging", "target": "ios", "proxy_port": port}
+        assert (path.stat().st_mode & 0o777) == 0o600
+        tctx.master.shutdown.assert_called_once()
+        second = await change_port(client, {"port": unused_port()})
+        assert second.code == 409 and error_text(second) == wiretrace_ui.ALREADY_SWITCHING
+
+    client_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("payload, error", [
+    ({"port": "9400"}, "The port must be a whole number."), ({"port": True}, "The port must be a whole number."),
+    ({"port": None}, "The port must be a whole number."), ({"port": 9400.0}, "The port must be a whole number."),
+    ({"port": 1023}, "The port must be 1024–65535."), ({"port": 8081}, "Port 8081 is the Wiretrace window's port."),
+    ({"port": 51820}, "Port 51820 is the WireGuard tunnel's port."), ({"port": 9314}, wiretrace_ui.SAME_PORT),
+    ({"port": 9400, "x": 1}, "The body must be {port}"), ({}, "The body must be {port}"),
+    ([9400], "The body must be {port}"),
+])
+def test_022_b_a_bad_port_change_is_a_400_and_changes_nothing(tmp_path, payload, error):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9314)
+        response = await change_port(client, payload)
+        assert response.code == 400 and error_text(response) == error
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_b_port_change_refusals_come_in_order(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9315)
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        response = await change_port(client, {"port": 8081})
+        assert response.code == 409 and "previous session" in error_text(response)
+        ui.viewed = None
+        (folder / session.SWITCH).write_text("{}")
+        response = await change_port(client, {"port": 8081})
+        assert response.code == 409 and error_text(response) == wiretrace_ui.ALREADY_SWITCHING
+        (folder / session.SWITCH).unlink()
+        with socket.socket() as holder:
+            holder.bind(("0.0.0.0", 0))
+            holder.listen()
+            response = await change_port(client, {"port": holder.getsockname()[1]})
+        assert response.code == 409 and error_text(response) == wiretrace_ui.PORT_IN_USE
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_b_no_port_change_in_wireguard_mode(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        response = await change_port(client, {"port": 8081})
+        assert response.code == 409 and error_text(response) == wiretrace_ui.NO_PROXY_PORT
+        tctx.master.shutdown.assert_not_called()
+
+    client_scenario(body, tmp_path, mode="wireguard", guard=False)
+
+
+def test_022_b_a_port_taken_while_the_preset_is_read_is_a_409(tmp_path, monkeypatch):
+    async def body(ui, client, tctx, folder, guard):
+        tctx.options.update(listen_port=9316)
+        monkeypatch.setattr(wiretrace_ui, "port_free", lambda port: False)
+        response = await change_port(client, {"port": unused_port()})
+        assert response.code == 409 and error_text(response) == wiretrace_ui.PORT_IN_USE
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_b_port_endpoints_need_the_token_and_the_header(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        assert (await client.fetch("/api/proxy/port-check?port=9400", cookie=False)).code == 403
+        assert (await client.fetch("/api/proxy/port", "POST", body={"port": 9400}, cookie=False)).code == 403
+        assert (await client.fetch("/api/proxy/port", "POST", body={"port": 9400}, mutate=False)).code == 403
+        assert not (folder / session.SWITCH).exists()
+
+    client_scenario(body, tmp_path)
+
+
+# Encrypted hosts, and decrypting one from the window (spec 022, slice C).
+
+SECRET_TUNNEL = "tracker.secret-cdn.example.org"
+
+
+def pass_through(ui, host: str, peer: str | None = None, headers=()):
+    """A connection mitmproxy decided not to decrypt, through the window's hooks in mitmproxy's order."""
+    conn = bare_client()
+    if peer:
+        conn.peername = (peer, 50002)
+        ui.http_connect(connect_flow(host, conn, headers))
+    ui.next_layer(decided(client_hello(host), client=conn, address=(host, 443)))
+    return conn
+
+
+async def decrypt(client, host, **kwargs):
+    return await client.fetch("/api/api-hosts", "POST", body={"host": host}, **kwargs)
+
+
+def decrypt_scenario(body, tmp_path, **meta):
+    async def wrapped(ui, client, tctx, folder):
+        if meta:
+            write_session(folder, **meta)
+        tctx.options.update(qa_api_hosts=["api.example.com"],
+                            allow_hosts=start.allow_hosts_args(presetfile.load_preset("staging", ui.presets_dir)))
+        await body(ui, client, tctx, folder)
+
+    switch_scenario(wrapped, tmp_path)
+
+
+def options_now(tctx) -> tuple[list, list]:
+    return list(tctx.options.qa_api_hosts), list(tctx.options.allow_hosts)
+
+
+def test_022_c_a_passed_through_connection_reaches_the_page_and_the_list(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        socket_ = await client.socket()
+        conn = pass_through(ui, "cdn.example.net", PHONE_A,
+                            ((b"Proxy-Authorization", b"Basic c2VjcmV0"), (b"User-Agent", b"App/1.0")))
+        message = (await read_until(socket_, lambda m: m["type"] == "tunnels"))[-1]
+        [row] = message["tunnels"]
+        assert (row["method"], row["host"], row["port"], row["tls"], row["client"], row["closed_at"]) == (
+            "CONNECT", "cdn.example.net", 443, True, PHONE_A, None)
+        assert ["Proxy-Authorization", "***"] in row["headers"]
+        assert "c2VjcmV0" not in json.dumps(message)
+        assert row["answer"] == "HTTP/1.1 200 Connection established"
+        assert (await client.json("/api/tunnels"))["tunnels"] == [row]
+        ui.client_disconnected(conn)
+        closed = (await read_until(socket_, lambda m: m["type"] == "tunnels"))[-1]["tunnels"]
+        assert [(r["id"], r["closed_at"] is not None) for r in closed] == [(row["id"], True)]
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        assert (await client.json("/api/tunnels"))["tunnels"] == []
+        socket_.close()
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_c_wiretraces_own_hosts_and_decrypted_connections_are_no_rows(tmp_path):
+    async def body(ui, client, tctx, folder, guard):
+        pass_through(ui, "mitm.it", PHONE_A)
+        ui.next_layer(decided(client_hello("api.example.com"), ignore=False))
+        assert (await client.json("/api/tunnels"))["tunnels"] == []
+
+    client_scenario(body, tmp_path)
+
+
+def test_022_c_a_connection_is_listed_although_mitmproxy_decides_its_layer_after_the_window(tmp_path):
+    """mitmproxy runs script hooks before its own NextLayer, so the window never sees a decided layer."""
+    from mitmproxy.addons.next_layer import NextLayer
+    from mitmproxy.proxy.layers import TCPLayer, modes
+
+    mitmproxys = NextLayer()
+
+    async def body(ui, client, tctx):
+        tctx.options.update(allow_hosts=[r"(^|\.)api\.example\.com(:\d+)?$"])
+        undecided = decided(client_hello("cdn.example.net"), address=("cdn.example.net", 443), layer=False)
+        undecided.context.layers = [modes.HttpProxy(undecided.context)]
+        ui.next_layer(undecided)
+        mitmproxys.next_layer(undecided)
+        assert isinstance(undecided.layer, TCPLayer) and undecided.layer.flow is None
+        [row] = (await client.json("/api/tunnels"))["tunnels"]
+        assert (row["method"], row["host"], row["port"], row["tls"]) == ("TLS", "cdn.example.net", 443, True)
+
+    scenario(body, extra=(mitmproxys,))
+
+
+def test_022_c_a_decrypt_writes_the_file_then_gives_mitmproxy_the_lists_built_from_it(tmp_path, monkeypatch):
+    async def body(ui, client, tctx, folder):
+        pass_through(ui, "cdn.example.net")
+        path = ui.presets_dir / "staging.yaml"
+        seen = []
+        options_class = type(tctx.options)
+        real_update = options_class.update
+
+        def spy(self, **kwargs):
+            seen.append((yaml_of(path.read_text())["api_hosts"], kwargs))
+            return real_update(self, **kwargs)
+
+        monkeypatch.setattr(options_class, "update", spy)
+        response = await decrypt(client, "Example.NET.")
+        assert response.code == 200 and json.loads(response.body) == {"host": "example.net", "applied": True}
+        saved = presetfile.load_preset("staging", ui.presets_dir)
+        assert list(saved.api_hosts) == ["api.example.com", "example.net"]
+        assert yaml_of(path.read_text())["app"] == {"android_package": "com.example.app"}
+        [(on_disk, applied)] = seen
+        assert on_disk == ["api.example.com", "example.net"]
+        assert applied == {"allow_hosts": start.allow_hosts_args(saved), "qa_api_hosts": ["api.example.com", "example.net"]}
+        assert options_now(tctx) == (["api.example.com", "example.net"], start.allow_hosts_args(saved))
+        assert (await client.json("/api/state"))["api_hosts"] == ["api.example.com", "example.net"]
+        again = await decrypt(client, "cdn.example.net")
+        assert again.code == 409 and error_text(again) == "cdn.example.net is already decrypted in this session."
+        assert not (folder / session.SWITCH).exists()
+        tctx.master.shutdown.assert_not_called()
+
+    decrypt_scenario(body, tmp_path)
+
+
+def test_022_c_decrypt_refusals_come_in_order_and_change_nothing(tmp_path):
+    async def body(ui, client, tctx, folder):
+        pass_through(ui, "cdn.example.co.uk")
+        pass_through(ui, "v2.api.example.com")
+        path = ui.presets_dir / "staging.yaml"
+        before_file, before_options = path.read_bytes(), options_now(tctx)
+
+        async def refused(host, code, text):
+            response = await decrypt(client, host)
+            assert (response.code, error_text(response)) == (code, text), host
+            assert path.read_bytes() == before_file and options_now(tctx) == before_options
+
+        ui.viewed = wiretrace_ui.Store("2026-10-13_090000_staging_ios", {}, {"device": [], "app": []})
+        await refused("not a host", 409, "Decrypting is off while a previous session is open")
+        ui.viewed = None
+        (folder / session.SWITCH).write_text("{}")
+        await refused("not a host", 409, wiretrace_ui.ALREADY_SWITCHING)
+        (folder / session.SWITCH).unlink()
+        await refused("not a host", 400, "Not a valid host name.")
+        await refused("https://cdn.example.co.uk", 400, "Not a valid host name.")
+        await refused("co.uk", 400, wiretrace_ui.NOT_OFFERED)
+        await refused("other.example.org", 400, wiretrace_ui.NOT_OFFERED)
+        await refused("v2.api.example.com", 409, "v2.api.example.com is already decrypted in this session.")
+        await refused("api.example.com", 409, "api.example.com is already decrypted in this session.")
+        path.write_text(path.read_text().replace("api.example.com", "api.example.com\n  - edited.example.com"))
+        before_file = path.read_bytes()
+        await refused("example.co.uk", 409, wiretrace_ui.FILE_CHANGED)
+        tctx.options.update(qa_api_hosts=[f"h{i}.example.com" for i in range(presetfile.MAX_ENTRIES)])
+        before_options = options_now(tctx)
+        await refused("example.co.uk", 409, f"The preset already has {presetfile.MAX_ENTRIES} API hosts.")
+
+    decrypt_scenario(body, tmp_path)
+
+
+def test_022_c_the_example_template_is_never_written(tmp_path):
+    async def body(ui, client, tctx, folder):
+        (ui.presets_dir / "example.yaml").write_text(EXAMPLE_PRESET)
+        pass_through(ui, "cdn.example.net")
+        response = await decrypt(client, "cdn.example.net")
+        assert response.code == 409 and "template" in error_text(response)
+        assert (ui.presets_dir / "example.yaml").read_text() == EXAMPLE_PRESET
+
+    decrypt_scenario(body, tmp_path, preset="example")
+
+
+def test_022_c_a_saved_host_the_session_cannot_apply_says_restart(tmp_path, monkeypatch, caplog):
+    async def body(ui, client, tctx, folder):
+        pass_through(ui, "cdn.example.net")
+
+        def fail(self, **kwargs):
+            raise ValueError("bad")
+
+        monkeypatch.setattr(type(tctx.options), "update", fail)
+        response = await decrypt(client, "cdn.example.net")
+        assert response.code == 200 and json.loads(response.body) == {
+            "host": "cdn.example.net", "applied": False, "message": "Saved. Restart the session to decrypt cdn.example.net."}
+        assert yaml_of((ui.presets_dir / "staging.yaml").read_text())["api_hosts"] == ["api.example.com",
+                                                                                       "cdn.example.net"]
+        assert "cdn.example.net" not in caplog.text
+
+    decrypt_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("sent", [{}, [], {"host": 1}, {"host": "cdn.example.net", "x": 1}, "not json"])
+def test_022_c_a_decrypt_body_that_is_not_exactly_host_is_a_400(tmp_path, sent):
+    async def body(ui, client, tctx, folder):
+        pass_through(ui, "cdn.example.net")
+        before = (ui.presets_dir / "staging.yaml").read_bytes()
+        response = await client.fetch("/api/api-hosts", "POST", body=sent)
+        assert response.code == 400 and error_text(response) == "The body must be {host}"
+        assert (ui.presets_dir / "staging.yaml").read_bytes() == before
+
+    decrypt_scenario(body, tmp_path)
+
+
+def test_022_c_tunnel_endpoints_need_the_token_and_the_header(tmp_path):
+    async def body(ui, client, tctx, folder):
+        pass_through(ui, "cdn.example.net")
+        before = (ui.presets_dir / "staging.yaml").read_bytes()
+        assert (await client.fetch("/api/tunnels", cookie=False)).code == 403
+        assert (await decrypt(client, "cdn.example.net", cookie=False)).code == 403
+        assert (await decrypt(client, "cdn.example.net", mutate=False)).code == 403
+        assert (ui.presets_dir / "staging.yaml").read_bytes() == before
+
+    decrypt_scenario(body, tmp_path)
+
+
+def test_022_c_no_tunnel_host_reaches_meta_status_the_terminal_or_a_report(tmp_path, capsys, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    async def body(ui, client, tctx, folder, guard):
+        conn = pass_through(ui, SECRET_TUNNEL, PHONE_A)
+        ui.client_disconnected(conn)
+        ui.request(flow_from(PHONE_A))
+        ui.maybe_write_status(time.time())
+        status = (folder / session.STATUS).read_text()
+        meta = (folder / session.META).read_text()
+        write_flows(folder / session.FLOWS, [make_flow()])
+        created = report.create(folder, ui.presets_dir)
+        with zipfile.ZipFile(created.zip) as archive:
+            assert any(name.endswith(session.HAR) for name in archive.namelist())
+            members = b"".join(archive.read(name) for name in archive.namelist())
+        printed = capsys.readouterr()
+        for text in (status, meta, members.decode("utf-8", "replace"), printed.out, printed.err, caplog.text):
+            assert SECRET_TUNNEL not in text
+
+    client_scenario(body, tmp_path)
+
+
+# Breakpoints (spec 022, slice D)
+
+PAUSE_ACTION = {"type": "pause", "status": 200, "body": "", "mock_file": "", "delay_ms": 0}
+
+
+async def until(predicate, timeout=3.0):
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        assert time.monotonic() < deadline, "never happened"
+        await asyncio.sleep(0.01)
+
+
+def breakpoint_scenario(body, tmp_path, pause_at="request", page=True, **options):
+    async def wrapped(ui, client, tctx):
+        assert (await put_rules(client, [rule(action={**PAUSE_ACTION, "pause_at": pause_at})])).code == 200
+        socket_ = await client.socket() if page else None
+        await until(lambda: bool(ui.hub.clients) == page)
+        try:
+            await body(ui, client, tctx)
+        finally:
+            if socket_ is not None:
+                socket_.close()
+
+    rules_scenario(wrapped, tmp_path, qa_breakpoints=True, **options)
+
+
+def order(body=b'{"qty": 1}', content_type="application/json"):
+    flow = make_flow("/api/v1/orders", "POST", status=None)
+    flow.request.headers["Content-Type"] = content_type
+    flow.request.content = body
+    return flow
+
+
+async def hold(flow, *hooks) -> asyncio.Task:
+    """The hooks as mitmproxy runs them, then its wait for an intercepted flow."""
+    async def run():
+        for hook in hooks:
+            if asyncio.iscoroutine(result := hook(flow)):
+                await result
+        await flow.wait_for_resume()
+
+    task = asyncio.create_task(run())
+    await until(lambda: flow.intercepted or task.done())
+    return task
+
+
+async def send(ui, tctx, flow) -> asyncio.Task:
+    return await hold(flow, tctx.master.addons.get("qatools").request, ui.request)
+
+
+async def answer(ui, tctx, flow) -> asyncio.Task:
+    flow.response = tflow.tresp()
+    flow.response.headers["Content-Type"] = "application/json"
+    flow.response.content = b'{"ok": true}'
+    return await hold(flow, tctx.master.addons.get("qatools").response, ui.response)
+
+
+async def act(client, flow_id, action="continue", edits=None, revision=None):
+    if revision is None:
+        revision = (await client.json(f"/api/flows/{flow_id}"))["breakpoint"]["revision"]
+    return await client.fetch(f"/api/flows/{flow_id}/breakpoint", "POST",
+                              body={"action": action, "edits": edits, "revision": revision})
+
+
+async def edits_of(client, flow_id, **over) -> dict:
+    """What the page sends: the held message as it is now, with `over` changed."""
+    shown = await client.json(f"/api/flows/{flow_id}")
+    if shown["breakpoint"]["phase"] == "request":
+        edits = {"method": shown["summary"]["method"], "path": shown["summary"]["path"],
+                 "headers": shown["request"]["headers"], "body": None}
+    else:
+        edits = {"status": shown["response"]["status"], "headers": shown["response"]["headers"], "body": None}
+    return {**edits, **over}
+
+
+def test_022_d_a_paused_request_is_listed_counted_and_continues_once(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        assert flow.intercepted and not task.done()
+        assert (await client.json("/api/state"))["paused_count"] == 1
+        listed = {f["id"]: f for f in (await client.json("/api/flows"))["flows"]}[flow.id]
+        assert listed["paused"] == "request" and listed["paused_since"] and listed["edited"] is False
+        shown = await client.json(f"/api/flows/{flow.id}")
+        held = shown["breakpoint"]
+        assert (held["phase"], held["body_not_editable"]) == ("request", None)
+        assert held["original"]["method"] == "POST" and held["original"]["body"]["text"] == '{"qty": 1}'
+        response = await act(client, flow.id)
+        assert response.code == 200 and json.loads(response.body) == {"id": flow.id, "action": "continue",
+                                                                        "edited": False}
+        await asyncio.wait_for(task, 1)
+        assert not flow.intercepted and flow.error is None
+        assert flow.comment == "rule: Orders fail; breakpoint: request"
+        assert (await client.json("/api/state"))["paused_count"] == 0
+        assert (await client.json(f"/api/flows/{flow.id}"))["breakpoint"] is None
+        again = await act(client, flow.id, revision=held["revision"])
+        assert again.code == 409 and error_text(again) == wiretrace_ui.NOT_PAUSED
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_abort_kills_the_flow_and_continue_all_lets_every_one_go(tmp_path):
+    async def body(ui, client, tctx):
+        aborted = order()
+        task = await send(ui, tctx, aborted)
+        assert (await act(client, aborted.id, "abort")).code == 200
+        await asyncio.wait_for(task, 1)
+        assert aborted.error and aborted.error.msg == "Connection killed." and not aborted.killable
+        flows = [order() for _ in range(3)]
+        tasks = [await send(ui, tctx, flow) for flow in flows]
+        response = await client.fetch("/api/breakpoints/continue-all", "POST")
+        assert response.code == 200 and json.loads(response.body) == {"continued": 3}
+        await asyncio.wait_for(asyncio.gather(*tasks), 1)
+        assert all(flow.error is None and not flow.intercepted for flow in flows)
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_the_eleventh_match_and_a_match_without_a_page_pass_with_their_comment(tmp_path):
+    async def body(ui, client, tctx):
+        tasks = [await send(ui, tctx, order()) for _ in range(wiretrace_ui.MAX_PAUSED)]
+        eleventh = order()
+        await asyncio.wait_for(await send(ui, tctx, eleventh), 1)
+        assert not eleventh.intercepted
+        assert eleventh.comment == "rule: Orders fail; breakpoint: not paused, 10 already paused"
+        assert (await client.json("/api/state"))["paused_count"] == 10
+        assert ui.release_all() == 10
+        await asyncio.wait_for(asyncio.gather(*tasks), 1)
+
+    breakpoint_scenario(body, tmp_path)
+
+    async def without_page(ui, client, tctx):
+        flow = order()
+        await asyncio.wait_for(await send(ui, tctx, flow), 1)
+        assert not flow.intercepted and flow.comment == "rule: Orders fail; breakpoint: not paused, no window"
+
+    breakpoint_scenario(without_page, tmp_path / "no-page", page=False)
+
+
+def test_022_d_a_stale_revision_is_a_409_and_the_flow_stays_paused(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        revision = (await client.json(f"/api/flows/{flow.id}"))["breakpoint"]["revision"]
+        edits = await edits_of(client, flow.id, method="PUT")
+        response = await act(client, flow.id, edits=edits, revision=revision + 1)
+        assert response.code == 409 and error_text(response) == wiretrace_ui.STALE_EDIT
+        assert flow.intercepted and flow.request.method == "POST" and not task.done()
+        ui.release_all()
+        await asyncio.wait_for(task, 1)
+
+    breakpoint_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over, message", [
+    ({"method": "post"}, "The method must be 1 to 16 capital letters."),
+    ({"method": "A" * 17}, "The method must be 1 to 16 capital letters."),
+    ({"path": "api/v1/orders"}, "The path must start with / and have no spaces or line breaks."),
+    ({"path": "/a b"}, "The path must start with / and have no spaces or line breaks."),
+    ({"headers": [["X-A", "one\r\nX-B: two"]]}, wiretrace_ui.BAD_HEADER),
+    ({"headers": [["X A", "one"]]}, wiretrace_ui.BAD_HEADER),
+    ({"headers": [["Host", "other.example.com"]]}, wiretrace_ui.FIXED_EDITED),
+    ({"headers": "Host: x"}, "Send at most 200 headers, each a name and a value."),
+    ({"body": 7}, "The body must be text."),
+    ({"status": 200}, "Send the method, path, headers and body."),
+])
+def test_022_d_each_invalid_request_edit_is_a_400_and_nothing_changes(tmp_path, over, message):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        before = flow.request.get_state()
+        edits = {**await edits_of(client, flow.id), **over}
+        response = await act(client, flow.id, edits=edits)
+        assert response.code == 400 and error_text(response) == message
+        assert flow.intercepted and flow.request.get_state() == before
+        ui.release_all()
+        await asyncio.wait_for(task, 1)
+
+    breakpoint_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("content, content_type, reason", [
+    (bytes(range(256)), "application/octet-stream", "binary"),
+    (b"a" * (wiretrace_ui.MAX_EDIT_BODY + 1), "text/plain", "over 1 MiB"),
+])
+def test_022_d_a_body_that_is_not_editable_says_why_and_refuses_an_edit(tmp_path, content, content_type, reason):
+    async def body(ui, client, tctx):
+        flow = order(content, content_type)
+        task = await send(ui, tctx, flow)
+        assert (await client.json(f"/api/flows/{flow.id}"))["breakpoint"]["body_not_editable"] == reason
+        response = await act(client, flow.id, edits=await edits_of(client, flow.id, body="text"))
+        assert response.code == 400 and error_text(response) == f"This body cannot be edited: {reason}."
+        # The rest of the request can still be edited.
+        assert (await act(client, flow.id, edits=await edits_of(client, flow.id, method="PUT"))).code == 200
+        await asyncio.wait_for(task, 1)
+        assert flow.request.method == "PUT" and flow.request.content == content
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_request_edits_apply_and_mark_the_comment(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        edits = await edits_of(client, flow.id, method="PUT", path="/api/v1/orders/7?retry=1",
+                               body='{"qty": 20}')
+        edits["headers"] = [*edits["headers"], ["X-Added", "yes"]]
+        response = await act(client, flow.id, edits=edits)
+        assert response.code == 200 and json.loads(response.body)["edited"] is True
+        await asyncio.wait_for(task, 1)
+        request = flow.request
+        assert (request.method, request.path, request.host) == ("PUT", "/api/v1/orders/7?retry=1", HOST)
+        assert request.headers["X-Added"] == "yes" and request.content == b'{"qty": 20}'
+        assert request.headers["Content-Length"] == "11"
+        assert flow.comment == "rule: Orders fail; breakpoint: request edited"
+        listed = {f["id"]: f for f in (await client.json("/api/flows"))["flows"]}[flow.id]
+        assert listed["edited"] is True and listed["paused"] is None
+
+        unchanged = order()
+        task = await send(ui, tctx, unchanged)
+        response = await act(client, unchanged.id, edits=await edits_of(client, unchanged.id))
+        assert json.loads(response.body)["edited"] is False
+        await asyncio.wait_for(task, 1)
+        assert unchanged.comment == "rule: Orders fail; breakpoint: request"
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_a_paused_response_takes_a_status_and_both_pauses_twice(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        await asyncio.wait_for(await send(ui, tctx, flow), 1)
+        assert not flow.intercepted
+        task = await answer(ui, tctx, flow)
+        assert flow.intercepted
+        shown = await client.json(f"/api/flows/{flow.id}")
+        assert shown["summary"]["paused"] == "response" and shown["breakpoint"]["original"]["status"] == 200
+        for status in (99, 600, True):
+            response = await act(client, flow.id, edits=await edits_of(client, flow.id, status=status))
+            assert response.code == 400 and error_text(response) == "The status must be a number from 100 to 599."
+        edits = await edits_of(client, flow.id, status=201, body='{"ok": false}')
+        assert (await act(client, flow.id, edits=edits)).code == 200
+        await asyncio.wait_for(task, 1)
+        assert (flow.response.status_code, flow.response.reason) == (201, "Created")
+        assert flow.response.content == b'{"ok": false}'
+        assert flow.comment == "rule: Orders fail; breakpoint: response edited"
+
+    breakpoint_scenario(body, tmp_path, pause_at="response")
+
+    async def both(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        assert (await act(client, flow.id)).code == 200
+        await asyncio.wait_for(task, 1)
+        task = await answer(ui, tctx, flow)
+        assert flow.intercepted and (await client.json(f"/api/flows/{flow.id}"))["breakpoint"]["phase"] == "response"
+        assert (await act(client, flow.id)).code == 200
+        await asyncio.wait_for(task, 1)
+        assert flow.comment == "rule: Orders fail; breakpoint: request; breakpoint: response"
+
+    breakpoint_scenario(both, tmp_path / "both", pause_at="both")
+
+
+def test_022_d_without_a_page_for_30_s_paused_flows_continue_unchanged(tmp_path, caplog):
+    async def body(ui, client, tctx):
+        socket_ = await client.socket()
+        await until(lambda: ui.hub.clients)
+        flow = order()
+        task = await send(ui, tctx, flow)
+        socket_.close()
+        await until(lambda: not ui.hub.clients)
+        now = time.monotonic()
+        ui.breakpoint_watchdog(now + wiretrace_ui.BREAKPOINT_WATCHDOG_S - 1)
+        assert flow.intercepted
+        ui.breakpoint_watchdog(now + wiretrace_ui.BREAKPOINT_WATCHDOG_S + 1)
+        await asyncio.wait_for(task, 1)
+        assert flow.error is None and flow.request.method == "POST" and not ui.breakpoints
+        assert "1 paused requests continue unchanged" in caplog.text
+
+    caplog.set_level(logging.INFO)
+    breakpoint_scenario(body, tmp_path, page=False)
+
+
+def test_022_d_the_app_leaving_a_paused_flow_makes_actions_409(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        revision = (await client.json(f"/api/flows/{flow.id}"))["breakpoint"]["revision"]
+        ui.client_disconnected(flow.client_conn)
+        await asyncio.wait_for(task, 1)
+        response = await act(client, flow.id, revision=revision)
+        assert response.code == 409 and error_text(response) == wiretrace_ui.NOT_PAUSED
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_stopping_and_switching_abort_every_paused_flow(tmp_path):
+    folder = write_session(tmp_path / "sessions" / "2026-10-14_090000_staging_android")
+
+    async def body(ui, client, tctx):
+        flows = [order(), order()]
+        tasks = [await send(ui, tctx, flow) for flow in flows]
+        assert ui.start_switch("other", "android")[0] == 202
+        await asyncio.wait_for(asyncio.gather(*tasks), 1)
+        assert all(flow.error and flow.error.msg == "Connection killed." for flow in flows)
+        assert ui.pause_refusal() == "no window"
+
+    breakpoint_scenario(body, tmp_path, folder=folder)
+
+    async def stopping(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        await ui.done()
+        await asyncio.wait_for(task, 1)
+        assert flow.error and flow.error.msg == "Connection killed."
+
+    breakpoint_scenario(stopping, tmp_path / "stopping")
+
+
+def test_022_d_the_edited_comment_is_saved_with_the_flow(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        await act(client, flow.id, edits=await edits_of(client, flow.id, method="PUT"))
+        await asyncio.wait_for(task, 1)
+        flow.response = tflow.tresp()
+        write_flows(tmp_path / session.FLOWS, [flow])
+        from mitmproxy import io as mitmio
+        with open(tmp_path / session.FLOWS, "rb") as f:
+            saved = list(mitmio.FlowReader(f).stream())
+        assert saved[0].comment == "rule: Orders fail; breakpoint: request edited"
+        assert not any(key.startswith("wiretrace") for key in saved[0].metadata)
+
+    breakpoint_scenario(body, tmp_path)
+
+
+def test_022_d_breakpoint_actions_need_the_token_and_the_header(tmp_path):
+    async def body(ui, client, tctx):
+        flow = order()
+        task = await send(ui, tctx, flow)
+        path = f"/api/flows/{flow.id}/breakpoint"
+        for kwargs in ({"cookie": False}, {"mutate": False}):
+            assert (await client.fetch(path, "POST", body={"action": "abort", "edits": None, "revision": 1},
+                                       **kwargs)).code == 403
+            assert (await client.fetch("/api/breakpoints/continue-all", "POST", **kwargs)).code == 403
+        assert flow.intercepted
+        for sent in ({"action": "skip", "edits": None, "revision": 1}, {"action": "continue", "revision": "1"},
+                     {"action": "continue", "revision": 1, "more": 1}, []):
+            response = await client.fetch(path, "POST", body=sent)
+            assert response.code == 400, sent
+        ui.release_all()
+        await asyncio.wait_for(task, 1)
+
+    breakpoint_scenario(body, tmp_path)
+
+
+# Rewrite rules in the window (spec 022, slice E)
+
+REWRITE_OPS = [
+    {"on": "request", "op": "set_header", "name": "Authorization", "value": "Bearer secret-token-1"},
+    {"on": "request", "op": "add_header", "name": "X-Feature", "value": "beta"},
+    {"on": "response", "op": "set_json", "path": "data.isPremium", "value": "true"},
+    {"on": "response", "op": "remove_json", "path": "data.missing"},
+]
+
+
+def test_022_e_a_rewritten_flow_is_tagged_and_its_changes_are_listed_masked(tmp_path, caplog):
+    caplog.set_level(logging.DEBUG)
+
+    async def body(ui, client, tctx):
+        action = {"type": "rewrite", "status": 200, "body": "", "mock_file": "", "delay_ms": 0, "ops": REWRITE_OPS}
+        assert (await put_rules(client, [rule(name="Premium", action=action)])).code == 200
+        qa = tctx.master.addons.get("qatools")
+        flow = order()
+        await qa.request(flow)
+        ui.request(flow)
+        flow.response = tflow.tresp()
+        flow.response.headers["Content-Type"] = "application/json"
+        flow.response.content = b'{"data": {"isPremium": false}}'
+        await qa.response(flow)
+        ui.response(flow)
+        listed = {f["id"]: f for f in (await client.json("/api/flows"))["flows"]}[flow.id]
+        assert listed["rewritten"] is True
+        shown = await client.json(f"/api/flows/{flow.id}")
+        assert shown["comment"] == "rewrite: Premium (4 changes)"
+        assert [(c["on"], c["op"], c["target"], c["value"], c["applied"], c["reason"]) for c in shown["changes"]] == [
+            ("request", "set_header", "Authorization", wiretrace_ui.MASKED_VALUE, True, ""),
+            ("request", "add_header", "X-Feature", "beta", True, ""),
+            ("response", "set_json", "data.isPremium", "true", True, ""),
+            ("response", "remove_json", "data.missing", None, False, "not found"),
+        ]
+        assert json.loads(shown["response"]["body"]["text"]) == {"data": {"isPremium": True}}
+        assert ["Authorization", "Bearer secret-token-1"] in shown["request"]["headers"]
+        assert "secret-token-1" not in caplog.text and "secret-token-1" not in flow.comment
+
+    rules_scenario(body, tmp_path)
+
+
+def test_022_e_changes_from_a_file_are_checked_before_they_are_shown():
+    flow = make_flow()
+    flow.metadata[wiretrace_ui.CHANGES_KEY] = [
+        "junk", {"rule": 7, "op": "set_header", "target": "cookie", "value": "a=b", "applied": "yes"},
+        {"rule": "R", "on": "request", "op": "add_header", "target": "x-api-key", "value": "k", "applied": True}]
+    got = wiretrace_ui.detail(flow, "")["changes"]
+    assert got == [
+        {"rule": "", "on": "", "op": "set_header", "target": "cookie", "reason": "", "value": wiretrace_ui.MASKED_VALUE,
+         "applied": False},
+        {"rule": "R", "on": "request", "op": "add_header", "target": "x-api-key", "reason": "",
+         "value": wiretrace_ui.MASKED_VALUE, "applied": True}]
+
+
+# Map local (spec 022, slice F)
+
+def map_local_scenario(body, tmp_path):
+    rules_scenario(body, tmp_path, qa_mocks_dir=str(tmp_path / "mocks" / "staging"), qa_wiretrace_dir=str(tmp_path))
+
+
+def listed(ui, flow):
+    ui.request(flow)
+    ui.response(flow)
+    return flow
+
+
+async def map_local(client, flow, revision=None, **over):
+    if revision is None:
+        revision = (await client.json("/api/rules"))["revision"]
+    sent = {"file": "saved/GET_api_v1_profile.json", "status": 200, "body": '{"isPremium": true}', "rule": True,
+            "replace": False, "revision": revision, **over}
+    return await client.fetch(f"/api/flows/{flow.id}/map-local", "POST", body=sent)
+
+
+def test_022_f_save_and_map_writes_the_file_and_puts_the_rule_first(tmp_path):
+    async def body(ui, client, tctx):
+        assert (await put_rules(client, [rule()])).code == 200
+        flow = listed(ui, make_flow(path="/api/v1/profile?x=1"))
+        response = await map_local(client, flow)
+        assert response.code == 200, response.body
+        got = json.loads(response.body)
+        file = tmp_path / "mocks" / "staging" / "saved" / "GET_api_v1_profile.json"
+        assert file.read_text() == '{"isPremium": true}'
+        assert stat.S_IMODE(file.stat().st_mode) == 0o600
+        assert stat.S_IMODE(file.parent.stat().st_mode) == 0o700
+        assert sorted(p.name for p in file.parent.iterdir()) == ["GET_api_v1_profile.json"]
+        rules = (await client.json("/api/rules"))["rules"]
+        assert [r["id"] for r in rules] == [got["rule_id"], "orders500"]
+        assert rules[0]["name"] == "Map local GET /api/v1/profile"
+        assert rules[0]["match"] == {"method": "GET", "host": HOST, "path": "/api/v1/profile", "body_contains": ""}
+        assert rules[0]["action"]["type"] == "mock" and rules[0]["action"]["mock_file"] == "saved/GET_api_v1_profile.json"
+        qa = tctx.master.addons.get("qatools")
+        nxt = tflow.tflow()
+        nxt.request.host, nxt.request.path = HOST, "/api/v1/profile"
+        await qa.request(nxt)
+        assert nxt.response is not None and nxt.response.content == b'{"isPremium": true}'
+        assert "mock: saved/GET_api_v1_profile.json" in nxt.comment
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_with_the_rule_off_only_the_file_is_written(tmp_path):
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        before = await client.json("/api/rules")
+        response = await map_local(client, flow, revision="ignored", rule=False, file="GET/api/v1/profile.json")
+        assert response.code == 200, response.body
+        assert json.loads(response.body) == {"file": "GET/api/v1/profile.json", "rule_id": None}
+        assert (tmp_path / "mocks" / "staging" / "GET" / "api" / "v1" / "profile.json").is_file()
+        assert (await client.json("/api/rules"))["rules"] == before["rules"]
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_an_existing_file_needs_replace(tmp_path):
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        assert (await map_local(client, flow, rule=False)).code == 200
+        again = await map_local(client, flow, rule=False, body="{}")
+        assert again.code == 409 and json.loads(again.body)["exists"] is True
+        file = tmp_path / "mocks" / "staging" / "saved" / "GET_api_v1_profile.json"
+        assert file.read_text() == '{"isPremium": true}'
+        assert (await map_local(client, flow, rule=False, body="{}", replace=True)).code == 200
+        assert file.read_text() == "{}"
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_a_stale_revision_is_a_409_and_writes_nothing(tmp_path):
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        response = await map_local(client, flow, revision="stale")
+        assert response.code == 409 and json.loads(response.body)["stale"] is True
+        assert not (tmp_path / "mocks").exists()
+        assert (await client.json("/api/rules"))["rules"] == []
+
+    map_local_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("name", ["../x.json", "saved/../../x.json", ".hidden.json", "saved/.x.json", "/abs.json",
+                                  "saved/x.txt", "saved//x.json", "a b.json", "x" * 81 + ".json", "saved\\x.json", ""])
+def test_022_f_refused_names(tmp_path, name):
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        response = await map_local(client, flow, file=name)
+        assert response.code == 400 and json.loads(response.body)["field"] == "file", response.body
+        assert (await client.json("/api/rules"))["rules"] == []
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_a_symlinked_folder_that_leads_out_is_refused(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-outside"
+    outside.mkdir()
+    (tmp_path / "mocks" / "staging").mkdir(parents=True)
+    (tmp_path / "mocks" / "staging" / "saved").symlink_to(outside)
+
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        response = await map_local(client, flow)
+        assert response.code == 400 and json.loads(response.body)["field"] == "file"
+        assert list(outside.iterdir()) == []
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_a_symlinked_file_is_not_replaced_through(tmp_path):
+    outside = tmp_path.parent / f"{tmp_path.name}-target.json"
+    outside.write_text("keep")
+    (tmp_path / "mocks" / "staging" / "saved").mkdir(parents=True)
+    (tmp_path / "mocks" / "staging" / "saved" / "GET_api_v1_profile.json").symlink_to(outside)
+
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        assert (await map_local(client, flow, rule=False)).code == 409
+        assert (await map_local(client, flow, rule=False, replace=True)).code == 400
+        assert outside.read_text() == "keep"
+
+    map_local_scenario(body, tmp_path)
+
+
+@pytest.mark.parametrize("over, code", [
+    ({"status": 99}, 400), ({"status": True}, 400), ({"body": "x" * ((1 << 20) + 1)}, 400),
+    ({"rule": "yes"}, 400), ({"extra": 1}, 400),
+])
+def test_022_f_refused_bodies(tmp_path, over, code):
+    async def body(ui, client, tctx):
+        flow = listed(ui, make_flow())
+        assert (await map_local(client, flow, **over)).code == code
+        assert not (tmp_path / "mocks").exists()
+
+    map_local_scenario(body, tmp_path)
+
+
+def test_022_f_a_request_without_a_response_or_off_the_api_hosts(tmp_path):
+    async def body(ui, client, tctx):
+        pending = make_flow(status=None)
+        ui.request(pending)
+        assert (await map_local(client, pending)).code == 409
+        other = listed(ui, make_flow(host="cdn.example.net"))
+        response = await map_local(client, other)
+        assert response.code == 400 and json.loads(response.body)["field"] == "rule"
+        assert (await map_local(client, other, rule=False)).code == 200
+        missing = make_flow()
+        assert (await map_local(client, missing)).code == 404
+        assert (await client.fetch(f"/api/flows/{other.id}/map-local", "POST", body={}, mutate=False)).code == 403
+
+    map_local_scenario(body, tmp_path)
+
+
+# Map remote in the window (spec 022, slice G)
+
+def test_022_g_a_mapped_flow_keeps_the_asked_host_and_says_where_it_went(tmp_path, monkeypatch):
+    async def lookup(host: str):
+        return [(0, 0, 0, "", ("203.0.113.10", 0))]
+
+    monkeypatch.setattr(qa_tools.guard, "_lookup", lookup)
+    monkeypatch.setattr(qa_tools.guard, "own_addresses", lambda: frozenset())
+
+    async def body(ui, client, tctx):
+        action = {"type": "map_remote", "status": 200, "body": "", "mock_file": "", "delay_ms": 0,
+                  "target": {"scheme": "https", "host": "staging-api.example.net", "port": 443}}
+        response = await put_rules(client, [rule(name="Staging", action=action)])
+        assert response.code == 200, response.body
+        assert json.loads(response.body)["rules"][0]["action"]["target"]["host"] == "staging-api.example.net"
+        qa = tctx.master.addons.get("qatools")
+        flow = order()
+        flow.request.scheme, flow.request.port = "https", 443
+        flow.request.headers["Host"] = HOST
+        await qa.request(flow)
+        ui.request(flow)
+        assert flow.request.host == "staging-api.example.net"
+        listed = {f["id"]: f for f in (await client.json("/api/flows"))["flows"]}[flow.id]
+        assert (listed["host"], listed["scheme"], listed["port"]) == (HOST, "https", 443)
+        assert (listed["mapped"], listed["sent_to"]) == (True, "https://staging-api.example.net")
+        shown = await client.json(f"/api/flows/{flow.id}")
+        assert shown["comment"] == f"map remote: {HOST} → staging-api.example.net"
+        assert shown["summary"]["sent_to"] == "https://staging-api.example.net"
+        assert shown["map_remote"] == {"rule": "Staging", "from": HOST, "to": "https://staging-api.example.net"}
+        hosts = await client.json("/api/state")
+        assert "staging-api.example.net" not in json.dumps(hosts.get("hosts", []))
+
+    rules_scenario(body, tmp_path)
+
+
+def test_022_g_a_map_target_on_this_macs_network_is_refused_on_save(tmp_path):
+    async def body(ui, client, tctx):
+        action = {"type": "map_remote", "status": 200, "body": "", "mock_file": "", "delay_ms": 0,
+                  "target": {"scheme": "http", "host": "192.168.1.20", "port": 80}}
+        response = await put_rules(client, [rule(action=action)])
+        assert response.code == 400
+        assert json.loads(response.body)["field"] == "action.target.host"
+
+    rules_scenario(body, tmp_path)

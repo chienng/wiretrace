@@ -22,8 +22,12 @@ def main(argv: list[str] | None = None) -> int:
     start_cmd.add_argument("--target", choices=start.TARGETS, default="device",
                            help="device under test (default: %(default)s)")
     start_cmd.add_argument("--mode", choices=start.MODES, default="both",
-                           help="both (Wi-Fi proxy on TCP 8888 and WireGuard on UDP 51820), proxy (Wi-Fi proxy "
-                                "only) or wireguard (WireGuard only); default: %(default)s")
+                           help=f"both (Wi-Fi proxy on TCP {start.PROXY_PORT} and WireGuard on UDP "
+                                f"{start.WIREGUARD_PORT}), proxy (Wi-Fi proxy only) or wireguard (WireGuard "
+                                "only); default: %(default)s")
+    start_cmd.add_argument("--port", type=int, metavar="N",
+                           help=f"Wi-Fi proxy port for this run only (default: the port chosen last in the "
+                                f"Wiretrace window, else {start.PROXY_PORT})")
     ui_choice = start_cmd.add_mutually_exclusive_group()
     ui_choice.add_argument("--ui", choices=(start.MITMWEB, start.WIRETRACE), default=start.MITMWEB,
                            help="window to open: mitmweb, or wiretrace (preview); default: %(default)s")
@@ -31,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
                            help="run mitmdump in this Terminal instead of mitmweb")
     start_cmd.add_argument("--client", action="append", default=[], metavar="ADDR",
                            help="IP address allowed to use the proxy, besides this Mac (repeatable). "
-                                "Without it, only the first other device that connects is accepted")
+                                "Without it, the first other device that connects is accepted; "
+                                "with --ui wiretrace, the window can allow more")
     start_cmd.add_argument("--no-menu-bar", action="store_true",
                            help="with --ui wiretrace, do not show the menu bar item")
     # Wiretrace.app's sessions: no link printed, the menu bar is the stop.
@@ -54,7 +59,8 @@ def main(argv: list[str] | None = None) -> int:
         return doctor.main()
     if args.command == "start":
         return start.run(args.preset, args.target, args.mode, ui=start.NO_UI if args.no_ui else args.ui,
-                         clients=tuple(args.client), no_menu_bar=args.no_menu_bar, from_app=args.from_app)
+                         proxy_port=args.port, clients=tuple(args.client), no_menu_bar=args.no_menu_bar,
+                         from_app=args.from_app)
     if args.command == "app":
         if args.app_command == "state":
             print("\n".join(app.state()))

@@ -1,8 +1,14 @@
 import { useState } from 'react';
+import { copyText } from '../clipboard';
 import { QUICK_FILTERS, type HostCount, type QuickFilter } from '../logic/filters';
+import { acceptedDevices, TLS_FAILING_TITLE } from '../logic/proxyDevices';
 import { addSaved, cleanName, loadSaved, removeSaved, renameSaved, storeSaved, type SavedFilter } from '../logic/savedFilters';
 import { useDispatch, useStore } from '../store';
 import { backToLive } from '../viewing';
+import { ChangePortDialog } from './ChangePortDialog';
+import { decryptChoices, decryptMenuLabel, decryptOff } from '../logic/hosts';
+import { ContextMenu, type MenuAt, type MenuItem } from './ContextMenu';
+import { RemoveDeviceDialog } from './RemoveDeviceDialog';
 import { SessionsList, usePreviousSessions } from './SessionsList';
 
 const HOST_COLORS = ['var(--blue)', 'var(--purple)', 'var(--green)', 'var(--orange)', 'var(--red)', 'var(--faint)'];
@@ -10,6 +16,11 @@ const HOST_COLORS = ['var(--blue)', 'var(--purple)', 'var(--green)', 'var(--oran
 interface Props {
   counts: Record<QuickFilter, number>;
   hosts: HostCount[];
+  /** Hosts of encrypted connections the preset does not decrypt now. */
+  encryptedHosts: HostCount[];
+  /** Listed requests per device, by the summary's `client`. */
+  clients: ReadonlyMap<string, number>;
+  onDecrypt: (host: string, choice: string) => void;
 }
 
 function storage(): Storage | null {
@@ -100,10 +111,104 @@ function NameInput({ value, onChange, onDone, onCancel }: { value: string; onCha
   );
 }
 
-export function Sidebar({ counts, hosts }: Props) {
+/** The address phones set as their Wi-Fi proxy, and the devices it accepts in this session (spec 022). */
+function ProxyDevices({ total, clients }: { total: number; clients: ReadonlyMap<string, number> }) {
+  const { ui, appState, view } = useStore();
+  const dispatch = useDispatch();
+  const [menu, setMenu] = useState<{ address: string; at: MenuAt } | null>(null);
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [changing, setChanging] = useState(false);
+  if (!appState || (appState.mode !== 'proxy' && appState.mode !== 'both')) return null;
+
+  const accepted = acceptedDevices(appState);
+  const removable = appState.proxy_pin && !view;
+  const pick = (client: string | null) => dispatch({ type: 'ui', patch: { client } });
+  const copy = async () => {
+    const ok = appState.proxy_address ? await copyText(appState.proxy_address) : false;
+    dispatch({ type: 'toast', text: ok ? 'Copied the proxy address' : 'Could not copy' });
+  };
+
+  return (
+    <>
+      <div className="side-h">Wi-Fi proxy</div>
+      <div className="proxyaddr">
+        <span className="a">{appState.proxy_address ?? 'No Wi-Fi address'}</span>
+        <button type="button" className="mini" disabled={!appState.proxy_address} onClick={() => void copy()}>
+          Copy
+        </button>
+        <button
+          type="button"
+          className="mini"
+          disabled={view !== null}
+          title={view ? 'Changing the port is off while a previous session is open' : 'Restart on another port'}
+          onClick={() => setChanging(true)}
+        >
+          Change…
+        </button>
+      </div>
+      {appState.proxy_clients.length > 0 && (
+        <>
+          <div className="side-h sub">Devices</div>
+          <button type="button" className={`side-i${ui.client === null ? ' active' : ''}`} onClick={() => pick(null)}>
+            <span className="h">All devices</span>
+            <span className="n">{total}</span>
+          </button>
+          {appState.proxy_clients.map((c) => (
+            <div
+              key={c.address}
+              className={`side-i dev${ui.client === c.address ? ' active' : ''}`}
+              onContextMenu={(e) => {
+                if (!removable) return;
+                e.preventDefault();
+                setMenu({ address: c.address, at: { x: e.clientX, y: e.clientY } });
+              }}
+            >
+              <button type="button" className="h ip linkish" onClick={() => pick(ui.client === c.address ? null : c.address)}>
+                {c.address}
+              </button>
+              <span className="cnt">
+                {c.tls_failures > 0 && (
+                  <span className="n warn" title={TLS_FAILING_TITLE}>
+                    ⚠ {c.tls_failures}
+                  </span>
+                )}
+                <span className="n">{clients.get(c.address) ?? 0}</span>
+              </span>
+              {removable && (
+                <button
+                  type="button"
+                  className="rm"
+                  title="Remove from this session…"
+                  aria-label={`Remove ${c.address} from this session`}
+                  onClick={() => setRemoving(c.address)}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+        </>
+      )}
+      {menu && (
+        <ContextMenu
+          at={menu.at}
+          label="Device"
+          items={[{ label: 'Remove from this session…', onSelect: () => setRemoving(menu.address) }]}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {removing && <RemoveDeviceDialog address={removing} accepted={accepted} onClose={() => setRemoving(null)} />}
+      {changing && <ChangePortDialog current={appState.proxy_port} macIp={appState.mac_ip} onClose={() => setChanging(false)} />}
+    </>
+  );
+}
+
+export function Sidebar({ counts, hosts, encryptedHosts, clients, onDecrypt }: Props) {
   const { ui, appState, view } = useStore();
   const dispatch = useDispatch();
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
+  const [hostMenu, setHostMenu] = useState<{ host: string; at: MenuAt } | null>(null);
+  const onEncryptedHost = ui.quick === 'encrypted' && encryptedHosts.some((h) => h.host === ui.host);
   const [open, setOpen] = useState(false);
   const previous = usePreviousSessions();
 
@@ -114,6 +219,7 @@ export function Sidebar({ counts, hosts }: Props) {
 
   return (
     <nav className="sidebar" aria-label="Filters">
+      <ProxyDevices total={counts.all} clients={clients} />
       <div className="side-h">Session</div>
       <button type="button" className={`side-i${view ? '' : ' active'}`} title={appState?.session ?? ''} onClick={() => view && void backToLive(dispatch)}>
         <span className="dot" style={{ background: view ? 'var(--faint)' : 'var(--green)' }} />
@@ -127,17 +233,37 @@ export function Sidebar({ counts, hosts }: Props) {
       {open && <SessionsList sessions={previous.sessions} error={previous.error} />}
 
       <div className="side-h">Quick filters</div>
-      {QUICK_FILTERS.map((q) => (
+      {QUICK_FILTERS.filter((q) => q.id !== 'encrypted' || !view).map((q) => (
         <button
           key={q.id}
           type="button"
-          className={`side-i${ui.quick === q.id ? ' active' : ''}`}
-          onClick={() => patch({ quick: q.id })}
+          className={`side-i${ui.quick === q.id && !onEncryptedHost ? ' active' : ''}`}
+          onClick={() => patch(onEncryptedHost ? { quick: q.id, host: null } : { quick: q.id })}
         >
           <span className="h">{q.label}</span>
           <span className={`n${q.id === 'errors' && counts.errors > 0 ? ' red' : ''}`}>{counts[q.id]}</span>
         </button>
       ))}
+      {!view &&
+        encryptedHosts.map((h) => {
+          const active = ui.quick === 'encrypted' && ui.host === h.host;
+          return (
+            <button
+              key={h.host}
+              type="button"
+              className={`side-i nested${active ? ' active' : ''}`}
+              title={h.host}
+              onClick={() => patch(active ? { host: null } : { quick: 'encrypted', host: h.host })}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setHostMenu({ host: h.host, at: { x: e.clientX, y: e.clientY } });
+              }}
+            >
+              <span className="h">{h.host}</span>
+              <span className="n">{h.count}</span>
+            </button>
+          );
+        })}
 
       <div className="side-h">Hosts</div>
       {hosts.length === 0 && <div className="side-i muted">No hosts yet</div>}
@@ -156,6 +282,17 @@ export function Sidebar({ counts, hosts }: Props) {
       ))}
 
       {appState && <SavedFilters key={appState.preset} preset={appState.preset} />}
+      {hostMenu && (
+        <ContextMenu
+          at={hostMenu.at}
+          label="Encrypted host"
+          items={decryptChoices(hostMenu.host).map((choice): MenuItem => {
+            const off = decryptOff(appState, choice, view?.name ?? null);
+            return { label: decryptMenuLabel(choice), onSelect: () => onDecrypt(hostMenu.host, choice), ...(off ? { disabledReason: off } : {}) };
+          })}
+          onClose={() => setHostMenu(null)}
+        />
+      )}
     </nav>
   );
 }

@@ -4,7 +4,7 @@ A Tornado application on mitmproxy's own asyncio loop, so every hook and every r
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
 Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md,
-018-switch-device.md, 021-switch-to-another-phone.md.
+018-switch-device.md, 021-switch-to-another-phone.md, 022-more-devices-port-encrypted-hosts-breakpoints.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import codecs
 import hmac
+import ipaddress
 import json
 import logging
 import os
@@ -29,12 +30,14 @@ import webbrowser
 from collections import deque
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 import tornado.web
 import tornado.websocket
 from mitmproxy import ctx, exceptions, flowfilter, http
 from mitmproxy.addons.termlog import TermLogHandler
+from mitmproxy.net.http import status_codes
+from mitmproxy.proxy import mode_specs
 from tornado import httpserver, netutil
 from tornado.escape import json_encode
 
@@ -43,8 +46,13 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from addons import proxy_guard as guardlib  # noqa: E402
+from addons import rewrite as rewritelib  # noqa: E402
+from addons.client_stats import ClientStats  # noqa: E402
+from addons.tunnels import Tunnels as TunnelList  # noqa: E402
 from cli import __version__, report, report_text, screenshot, session  # noqa: E402
 from cli import bodies  # noqa: E402
+from cli import doctor as doctorlib  # noqa: E402
 from cli import preset as presetfile  # noqa: E402
 from cli.preset import PRESETS_DIR, Preset, PresetError, list_presets, load_preset  # noqa: E402
 from cli.start import (  # noqa: E402
@@ -53,6 +61,7 @@ from cli.start import (  # noqa: E402
     TARGET_LABELS,
     TARGETS,
     TARGETS_SHOWN,
+    allow_hosts_args,
     collector_command,
     pinnable_client,
     target_problem,
@@ -68,6 +77,39 @@ NO_CLIENT_SWITCH = "This session does not pin a device on the Wi-Fi proxy"
 CONNECTS_FROM_MAC = "The iOS Simulator and the Android emulator connect from this Mac: they are always accepted."
 NOT_AN_ADDRESS = "Not a device address."
 NOT_WAITING = "That device is no longer waiting: ask it to connect again."
+DEVICES_OFF_WHILE_VIEWING = "Allowing and removing devices is off while a previous session is open"
+# Spec 022, slice B.
+NO_PROXY_PORT = "This session has no Wi-Fi proxy"
+SAME_PORT = "That is the port this session already uses."
+PORT_IN_USE = "That port is in use by another program."
+MAX_PORT_DIGITS = 5
+# Spec 022, slice C.
+NOT_OFFERED = "Wiretrace offers a host it passed through, or that host's parent domain, only."
+FILE_CHANGED = "The preset file changed since this session started: restart the session to use it."
+# Spec 022, slice D: breakpoints.
+MAX_PAUSED = 10
+BREAKPOINT_WATCHDOG_S = 30.0
+MAX_EDIT_BODY = 1 << 20
+MAX_EDIT_HEADERS = 200
+MAX_EDIT_PATH = 8192
+FIXED_HEADERS = ("host", "content-length", "transfer-encoding")
+PAUSED_KEY = "wiretrace_paused"
+NOT_PAUSED = "This request is no longer paused."
+STALE_EDIT = "Another tab changed this request first: reload it."
+FIXED_EDITED = "Host, Content-Length and Transfer-Encoding cannot be edited."
+BAD_HEADER = "A header needs a name of letters, digits and - _ . ! # $ % & ' * + ^ ` | ~, and no line break."
+EDIT_METHOD = re.compile(r"[A-Z]{1,16}")
+HEADER_NAME = re.compile(r"[A-Za-z0-9!#$%&'*+.^_`|~-]{1,256}")
+# Spec 022, slice E: what addons/qa_tools.py records of the Rewrite rules it applied.
+CHANGES_KEY = "wiretrace_changes"
+MASKED_VALUE = "•••• (masked)"
+# Spec 022, slice F: a response saved as a mock file, and the Mock rule for it (qa_tools limits).
+MAP_LOCAL_KEYS = {"file", "status", "body", "rule", "replace", "revision"}
+MAX_MOCK_BODY = 1 << 20
+MAX_RULE_NAME = 80
+MAX_RULE_PATH = 512
+# Spec 022, slice G: where addons/qa_tools.py sent a request a Map remote rule matched.
+MAPPED_KEY = "wiretrace_mapped"
 # A refusal from an address already listed sends the state at most this often.
 WAITING_PUSH_S = 5.0
 # mitmproxy's block_global / block_private warning, which names the client in its text.
@@ -154,6 +196,26 @@ def is_api_host(host: str, api_hosts: list[str] | tuple[str, ...]) -> bool:
     """The same match as addons/qa_tools.py: the host or a subdomain of it."""
     host = host.lower().rstrip(".")
     return any(host == h or host.endswith("." + h) for h in api_hosts)
+
+
+def map_local_rule(flow: http.HTTPFlow, label: str, status: int, api_hosts: tuple[str, ...],
+                   taken: set[str]) -> dict | None:
+    """The Mock rule "Map local GET /path" for a request (spec 022, slice F); None when it is not to an API host."""
+    mapped = mapped_of(flow)
+    host = (mapped["from"] if mapped else flow.request.pretty_host).lower().rstrip(".")
+    api_host = next((h for h in api_hosts if host == h or host.endswith("." + h)), None)
+    if api_host is None:
+        return None
+    method = flow.request.method.upper()
+    path = (flow.request.path.split("?", 1)[0] or "/")[:MAX_RULE_PATH]
+    rule_id = secrets.token_hex(5)
+    while rule_id in taken:
+        rule_id = secrets.token_hex(5)
+    return {"id": rule_id, "name": clean(f"Map local {method} {path}")[:MAX_RULE_NAME], "enabled": True,
+            "match": {"method": method if EDIT_METHOD.fullmatch(method) else "ANY", "host": api_host,
+                      "path": clean(path), "body_contains": ""},
+            "action": {"type": "mock", "status": status, "body": "", "mock_file": label, "delay_ms": 0},
+            "apply": {"mode": "always", "n": 0}}
 
 
 def mime_of(message: http.Message) -> str | None:
@@ -254,10 +316,15 @@ def redact_terminal() -> None:
             handler.setFormatter(TerminalFormatter(handler.formatter))
 
 
-def write_switch_file(path: Path, name: str, target: str, client: str | None = None) -> None:
-    """`{"name", "target"}`, plus `client` for a client switch, 0600 from the start, replaced whole
-    (spec 018, invariant 1)."""
-    payload = {"name": name, "target": target} if client is None else {"name": name, "target": target, "client": client}
+def write_switch_file(path: Path, name: str, target: str, client: str | None = None,
+                      proxy_port: int | None = None) -> None:
+    """`{"name", "target"}`, plus `client` for a client switch or `proxy_port` for a port change, 0600
+    from the start, replaced whole (spec 018, invariant 1)."""
+    payload: dict = {"name": name, "target": target}
+    if client is not None:
+        payload["client"] = client
+    elif proxy_port is not None:
+        payload["proxy_port"] = proxy_port
     tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -269,6 +336,16 @@ def write_switch_file(path: Path, name: str, target: str, client: str | None = N
             tmp.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+def parse_port(raw: str) -> int | None:
+    """A query's port as an integer; None (not a whole number) for anything else."""
+    return int(raw) if raw.isascii() and raw.isdigit() and len(raw) <= MAX_PORT_DIGITS else None
+
+
+def port_free(port: int) -> bool:
+    """The launcher's busy check for the Wi-Fi proxy: TCP on 0.0.0.0 (and ::), each socket closed at once."""
+    return doctorlib.check_port("tcp", "0.0.0.0", port, "proxy").status != doctorlib.FAIL
 
 
 def preset_entry(name: str, presets_dir: Path, target: str) -> dict:
@@ -299,7 +376,39 @@ def device_entry(target: str, preset: Preset | None, mode: str, collector_for: A
             "device_logs": logs}
 
 
-def summary(flow: http.HTTPFlow) -> dict:
+def regular_client(client: Any) -> bool:
+    """A Wi-Fi proxy client; one without `proxy_mode` counts as one, as in addons/proxy_guard.py."""
+    mode = getattr(client, "proxy_mode", None)
+    return mode is None or isinstance(mode, mode_specs.RegularMode)
+
+
+def peer_address(client: Any) -> str | None:
+    peer = getattr(client, "peername", None)
+    if not peer or not isinstance(peer[0], str):
+        return None
+    return guardlib.normalize(peer[0])
+
+
+def client_of(flow: http.HTTPFlow) -> str | None:
+    """The Device column: the client's address, "mac" for loopback, "wireguard" for a tunnel client."""
+    return client_label(getattr(flow, "client_conn", None))
+
+
+def client_label(client: Any) -> str | None:
+    if client is None:
+        return None
+    if isinstance(getattr(client, "proxy_mode", None), mode_specs.WireGuardMode):
+        return "wireguard"
+    address = peer_address(client)
+    try:
+        parsed = ipaddress.ip_address(address or "")
+    except ValueError:
+        return None
+    return "mac" if parsed.is_loopback else str(parsed)
+
+
+def summary(flow: http.HTTPFlow, paused: tuple[str, float] | None = None) -> dict:
+    """`paused` is the live session's (phase, since) for a flow held at a breakpoint."""
     request, response = flow.request, flow.response
     parts = comment_parts(flow.comment)
     request_ids = part_value(parts, "request-id:")
@@ -308,13 +417,14 @@ def summary(flow: http.HTTPFlow) -> dict:
     start = request.timestamp_start
     end = response.timestamp_end if response else (flow.error.timestamp if flow.error else None)
     size = len(response.raw_content) if response is not None and response.raw_content is not None else None
+    mapped = mapped_of(flow)
     return {
         "id": flow.id,
         "ts": start,
         "method": clean(request.method),
-        "scheme": request.scheme,
-        "host": clean(request.pretty_host),
-        "port": request.port,
+        "scheme": mapped["from_scheme"] if mapped else request.scheme,
+        "host": clean(mapped["from"] if mapped else request.pretty_host),
+        "port": mapped["from_port"] if mapped else request.port,
         "path": clean(request.path),
         "status": response.status_code if response else None,
         "error": clean(flow.error.msg) if flow.error else None,
@@ -326,7 +436,23 @@ def summary(flow: http.HTTPFlow) -> dict:
         "fault": clean(", ".join(faults)) if faults else None,
         "websocket": flow.websocket is not None,
         "replay_of": clean(replays[0]) if replays else None,
+        "client": client_of(flow),
+        "paused": paused[0] if paused else None,
+        "paused_since": paused[1] if paused else None,
+        "edited": any(part.startswith("breakpoint:") and part.endswith(" edited") for part in parts),
+        "rewritten": any(part.startswith("rewrite:") for part in parts),
+        "mapped": mapped is not None,
+        "sent_to": clean(mapped["to"]) if mapped else None,
     }
+
+
+def mapped_of(flow: http.HTTPFlow) -> dict | None:
+    """Where a Map remote rule sent the request, when the record is whole (spec 022, slice G)."""
+    mapped = flow.metadata.get(MAPPED_KEY)
+    if not isinstance(mapped, dict) or not all(isinstance(mapped.get(k), str) for k in ("from", "to")) \
+            or mapped.get("from_scheme") not in ("http", "https") or not isinstance(mapped.get("from_port"), int):
+        return None
+    return mapped
 
 
 def looks_binary(data: bytes, mime: str | None) -> bool:
@@ -380,10 +506,10 @@ def mock_path(mocks_dir: str, method: str, raw_path: str) -> str:
     return f"{prefix}{method}{path}.json"
 
 
-def detail(flow: http.HTTPFlow, mocks_dir: str) -> dict:
+def detail(flow: http.HTTPFlow, mocks_dir: str, paused: tuple[str, float] | None = None) -> dict:
     request, response = flow.request, flow.response
     return {
-        "summary": summary(flow),
+        "summary": summary(flow, paused),
         "request": {"http_version": clean(request.http_version), "headers": header_list(request.headers),
                     "body": body_info(request)},
         "response": None if response is None else {
@@ -395,7 +521,141 @@ def detail(flow: http.HTTPFlow, mocks_dir: str) -> dict:
                    "response_end": response.timestamp_end if response else None},
         "comment": clean(flow.comment or ""),
         "mock_path": clean(mock_path(mocks_dir, request.method, request.path)),
+        "changes": change_list(flow.metadata.get(CHANGES_KEY)),
+        "map_remote": map_remote_of(flow),
     }
+
+
+def map_remote_of(flow: http.HTTPFlow) -> dict | None:
+    """The Map remote step for the Changes tab (spec 022, slice G)."""
+    mapped = mapped_of(flow)
+    if mapped is None:
+        return None
+    rule = mapped.get("rule")
+    return {"rule": clean(rule) if isinstance(rule, str) else "", "from": clean(mapped["from"]),
+            "to": clean(mapped["to"])}
+
+
+def change_list(raw: object) -> list[dict]:
+    """What the Rewrite rules did to a flow (spec 022, slice E); secret header values masked."""
+    if not isinstance(raw, list):
+        return []
+    out = []
+    for entry in raw[:200]:
+        if not isinstance(entry, dict):
+            continue
+        texts = {key: entry.get(key) if isinstance(entry.get(key), str) else "" for key in ("rule", "on", "op", "target", "reason")}
+        value = entry.get("value")
+        if isinstance(value, str) and texts["op"].endswith("_header") and texts["target"].lower() in rewritelib.MASKED_HEADERS:
+            value = MASKED_VALUE
+        out.append({**{key: clean(text) for key, text in texts.items()},
+                    "value": clean(value) if isinstance(value, str) else None,
+                    "applied": entry.get("applied") is True})
+    return out
+
+
+class Breakpoint(NamedTuple):
+    """A flow held at a breakpoint. `original` is the message as it was when it paused."""
+    flow: http.HTTPFlow
+    phase: str
+    since: float
+    revision: int
+    original: http.Message
+
+
+def held_message(flow: http.HTTPFlow, phase: str) -> http.Message:
+    return flow.request if phase == "request" else flow.response
+
+
+def body_not_editable(message: http.Message) -> str | None:
+    """Why the body cannot be edited as text, or None."""
+    data, size, truncated = bodies.bounded_content(message, MAX_EDIT_BODY, MAX_COUNT_BYTES)
+    if truncated or size > MAX_EDIT_BODY:
+        return "over 1 MiB"
+    if looks_binary(data, mime_of(message)):
+        return "binary"
+    try:
+        message.get_text(strict=True)
+    except ValueError:
+        return "binary"
+    return None
+
+
+def breakpoint_view(held: Breakpoint) -> dict:
+    original = held.original
+    shown: dict[str, Any] = {"headers": header_list(original.headers), "body": body_info(original)}
+    if isinstance(original, http.Request):
+        shown |= {"method": clean(original.method), "path": clean(original.path)}
+    else:
+        shown |= {"status": original.status_code}
+    return {"phase": held.phase, "since": held.since, "revision": held.revision,
+            "body_not_editable": body_not_editable(held_message(held.flow, held.phase)), "original": shown}
+
+
+def fixed_headers(pairs: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    return sorted((name.lower(), value) for name, value in pairs if name.lower() in FIXED_HEADERS)
+
+
+def edit_problem(held: Breakpoint, edits: object) -> str | None:
+    """Why the edits cannot be applied, or None. They name every part: a missing part is not 'unchanged'."""
+    message = held_message(held.flow, held.phase)
+    first = ("method", "path") if held.phase == "request" else ("status",)
+    if not isinstance(edits, dict) or set(edits) != {*first, "headers", "body"}:
+        return "Send the " + ", ".join(first) + ", headers and body."
+    if held.phase == "request":
+        if not isinstance(edits["method"], str) or not EDIT_METHOD.fullmatch(edits["method"]):
+            return "The method must be 1 to 16 capital letters."
+        path = edits["path"]
+        if not isinstance(path, str) or not path.startswith("/") or len(path) > MAX_EDIT_PATH \
+                or any(c.isspace() or ord(c) < 0x20 or ord(c) == 0x7F for c in path):
+            return "The path must start with / and have no spaces or line breaks."
+    else:
+        status = edits["status"]
+        if not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599:
+            return "The status must be a number from 100 to 599."
+    headers = edits["headers"]
+    if not isinstance(headers, list) or len(headers) > MAX_EDIT_HEADERS:
+        return f"Send at most {MAX_EDIT_HEADERS} headers, each a name and a value."
+    for pair in headers:
+        if not isinstance(pair, list) or len(pair) != 2 or not all(isinstance(p, str) for p in pair):
+            return f"Send at most {MAX_EDIT_HEADERS} headers, each a name and a value."
+        name, value = pair
+        if not HEADER_NAME.fullmatch(name) or any(c in value for c in "\r\n\0"):
+            return BAD_HEADER
+    if fixed_headers([tuple(pair) for pair in headers]) != fixed_headers(list(message.headers.items(multi=True))):
+        return FIXED_EDITED
+    body = edits["body"]
+    if body is not None:
+        if not isinstance(body, str):
+            return "The body must be text."
+        reason = body_not_editable(message)
+        if reason is not None:
+            return f"This body cannot be edited: {reason}."
+        if len(body.encode("utf-8", "surrogatepass")) > MAX_EDIT_BODY:
+            return "The body must be at most 1 MiB."
+    return None
+
+
+def apply_edits(held: Breakpoint, edits: dict) -> bool:
+    """Applies edits that passed `edit_problem`; True when the message changed."""
+    message = held_message(held.flow, held.phase)
+
+    def state() -> tuple:
+        first = (message.method, message.path) if isinstance(message, http.Request) else (message.status_code,)
+        return first, message.headers.fields, message.raw_content
+
+    before = state()
+    message.headers = http.Headers([(name.encode("utf-8", "surrogateescape"), value.encode("utf-8", "surrogateescape"))
+                                    for name, value in edits["headers"]])
+    if isinstance(message, http.Request):
+        message.method = edits["method"]
+        message.path = edits["path"]
+    elif edits["status"] != message.status_code:
+        message.status_code = edits["status"]
+        message.reason = status_codes.RESPONSES.get(edits["status"], "")
+    if edits["body"] is not None and edits["body"] != message.get_text(strict=False):
+        message.text = edits["body"]
+    return state() != before
 
 
 def optional_str(value: object) -> str | None:
@@ -690,6 +950,9 @@ class Hub:
         self._lines: list[dict] = []
         self._device: dict | None = None
         self._state_changed = False
+        self._tunnels: dict[str, dict] = {}
+        # Flows held at a breakpoint: (phase, since). Never in a flow, so never in flows.mitm.
+        self.paused: dict[str, tuple[str, float]] = {}
 
     def track(self, flow: http.HTTPFlow) -> None:
         if not isinstance(flow, http.HTTPFlow) or is_receiver(flow):
@@ -713,18 +976,26 @@ class Hub:
     def device_changed(self, status: dict) -> None:
         self._device = status
 
+    def tunnel_changed(self, row: dict) -> None:
+        # A page that connects later loads the rows with GET /api/tunnels.
+        if self.clients:
+            self._tunnels[row["id"]] = row
+
     def flush(self, state: Any) -> None:
         """Send the batch to every connected page. `state` builds the state message when it changed."""
         dirty, self._dirty = list(self._dirty), {}
         lines, self._lines = self._lines, []
         device, self._device = self._device, None
         changed, self._state_changed = self._state_changed, False
+        tunnels, self._tunnels = list(self._tunnels.values()), {}
         if not self.clients:
             return
         messages = []
-        flows = [summary(self.flows[i]) for i in dirty if i in self.flows]
+        flows = [summary(self.flows[i], self.paused.get(i)) for i in dirty if i in self.flows]
         for i in range(0, len(flows), CHUNK):
             messages.append({"type": "flows", "flows": flows[i:i + CHUNK]})
+        for i in range(0, len(tunnels), CHUNK):
+            messages.append({"type": "tunnels", "tunnels": tunnels[i:i + CHUNK]})
         for i in range(0, len(lines), CHUNK):
             messages.append({"type": "logs", "lines": lines[i:i + CHUNK]})
         if device is not None:
@@ -828,7 +1099,27 @@ class Flows(Guarded):
     def get(self) -> None:
         store = self.store()
         if store is not None:
-            self.write({"flows": [summary(f) for f in store.flows.values()]})
+            paused = self.addon.hub.paused if store.flows is self.addon.hub.flows else {}
+            self.write({"flows": [summary(f, paused.get(f.id)) for f in store.flows.values()]})
+
+
+class Tunnels(Guarded):
+    """The live session's encrypted connections (spec 022, slice C); a previous session has none."""
+
+    def get(self) -> None:
+        self.write({"tunnels": [] if self.addon.viewed is not None else self.addon.tunnels.payload()})
+
+
+class ApiHosts(Guarded):
+    """Decrypt a passed-through host in the running session (spec 022, slice C)."""
+
+    async def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or set(body) != {"host"} or not isinstance(body["host"], str):
+            return self.fail(400, "The body must be {host}")
+        status, payload = await self.addon.decrypt_host(body["host"])
+        self.set_status(status)
+        self.finish(payload)
 
 
 class FlowDetail(Guarded):
@@ -839,7 +1130,11 @@ class FlowDetail(Guarded):
         flow = store.flows.get(flow_id)
         if flow is None:
             return self.fail(404, "Unknown request: it was never listed or has been dropped from memory.")
-        self.write(detail(flow, display_dir(self.addon.mocks_dir())))
+        live = store.flows is self.addon.hub.flows
+        held = self.addon.breakpoints.get(flow_id) if live else None
+        shown = detail(flow, display_dir(self.addon.mocks_dir()), self.addon.hub.paused.get(flow_id) if live else None)
+        shown["breakpoint"] = breakpoint_view(held) if held is not None else None
+        self.write(shown)
 
 
 class Filter(Guarded):
@@ -1031,6 +1326,40 @@ class DeviceSwitch(SwitchRequest):
         await self.answer_switch(status, payload)
 
 
+class ProxyDevice(Guarded):
+    """Allow a refused device, or remove an accepted one, in this session (spec 022, slice A)."""
+
+    def initialize(self, addon: WiretraceUI, action: str) -> None:
+        super().initialize(addon)
+        self.action = action
+
+    def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or set(body) != {"client"} or not isinstance(body["client"], str):
+            return self.fail(400, "The body must be {client}")
+        status, payload = self.addon.change_device(self.action, body["client"])
+        self.set_status(status)
+        self.finish(payload)
+
+
+class ProxyPortCheck(Guarded):
+    async def get(self) -> None:
+        status, payload = await self.addon.port_check(self.get_query_argument("port", ""))
+        self.set_status(status)
+        self.finish(payload)
+
+
+class ProxyPort(SwitchRequest):
+    """Restart on another Wi-Fi proxy port (spec 022, slice B)."""
+
+    async def post(self) -> None:
+        body = self.small_json()
+        if not isinstance(body, dict) or set(body) != {"port"}:
+            return self.fail(400, "The body must be {port}")
+        status, payload = await self.addon.change_port(body["port"])
+        await self.answer_switch(status, payload)
+
+
 @tornado.web.stream_request_body
 class LargeBody(Guarded):
     """A JSON body up to MAX_RULES_REQUEST_BYTES; the limit is raised only once `Guarded.prepare` passed."""
@@ -1053,6 +1382,32 @@ class LargeBody(Guarded):
             return json.loads(b"".join(self._chunks) or b"null")
         except ValueError:
             return NOT_JSON
+
+
+class BreakpointAction(LargeBody):
+    """Continue or abort a paused flow, with its edits (spec 022, slice D)."""
+
+    def post(self, flow_id: str) -> None:
+        status, payload = self.addon.breakpoint_action(flow_id, self.json_body())
+        self.set_status(status)
+        self.finish(payload)
+
+
+class MapLocal(LargeBody):
+    """Save a response as a mock file, and the rule that answers with it (spec 022, slice F)."""
+
+    def post(self, flow_id: str) -> None:
+        body = self.json_body()
+        if body is NOT_JSON:
+            return self.fail(400, "The body is not JSON")
+        status, payload = self.addon.map_local(flow_id, body)
+        self.set_status(status)
+        self.finish(payload)
+
+
+class ContinueAll(Guarded):
+    def post(self) -> None:
+        self.write({"continued": self.addon.release_all()})
 
 
 class RulesApi(LargeBody):
@@ -1299,6 +1654,13 @@ class WiretraceUI:
         # Setup: when a device last connected, and failed TLS handshakes with API hosts. Nothing about the peer.
         self.device_seen_at: float | None = None
         self.tls_failures = 0
+        # The sidebar's device list: per accepted address, in memory only (spec 022, slice A).
+        self.client_stats = ClientStats()
+        self.tunnels = TunnelList()
+        # Flows held at a breakpoint, a revision per pause, and when a window was last connected (monotonic).
+        self.breakpoints: dict[str, Breakpoint] = {}
+        self._breakpoint_revision = 0
+        self._window_seen_at = time.monotonic()
         # The Wi-Fi proxy's refused addresses the page was last sent, and when (monotonic seconds).
         self._waiting_sent: frozenset[str] = frozenset()
         self._waiting_sent_at = 0.0
@@ -1379,6 +1741,7 @@ class WiretraceUI:
 
     async def done(self) -> None:
         self._closed = True
+        self.release_all(abort=True)
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
@@ -1397,7 +1760,12 @@ class WiretraceUI:
             [
                 (r"/api/state", State, handler_args),
                 (r"/api/flows", Flows, handler_args),
+                (r"/api/tunnels", Tunnels, handler_args),
+                (r"/api/api-hosts", ApiHosts, handler_args),
                 (r"/api/flows/([^/]+)/replay", Replay, handler_args),
+                (r"/api/flows/([^/]+)/breakpoint", BreakpointAction, handler_args),
+                (r"/api/flows/([^/]+)/map-local", MapLocal, handler_args),
+                (r"/api/breakpoints/continue-all", ContinueAll, handler_args),
                 (r"/api/flows/([^/]+)", FlowDetail, handler_args),
                 (r"/api/filter", Filter, handler_args),
                 (r"/api/search", Search, handler_args),
@@ -1410,6 +1778,10 @@ class WiretraceUI:
                 (r"/api/preset", PresetSwitch, handler_args),
                 (r"/api/devices", Devices, handler_args),
                 (r"/api/device", DeviceSwitch, handler_args),
+                (r"/api/proxy/allow", ProxyDevice, {**handler_args, "action": "allow"}),
+                (r"/api/proxy/remove", ProxyDevice, {**handler_args, "action": "remove"}),
+                (r"/api/proxy/port-check", ProxyPortCheck, handler_args),
+                (r"/api/proxy/port", ProxyPort, handler_args),
                 (r"/api/rules", RulesApi, handler_args),
                 (r"/api/rules/test", RuleTest, handler_args),
                 (r"/api/rules/([a-z0-9]{6,32})/rearm", RuleRearm, handler_args),
@@ -1439,9 +1811,33 @@ class WiretraceUI:
             # The capture must go on whatever the window does.
             logger.error("Wiretrace UI: could not list a request (%s)", type(e).__name__)
 
-    request = response = error = websocket_start = websocket_end = track
+    response = websocket_start = websocket_end = track
 
-    # Hooks: connections, for Setup
+    def request(self, flow: http.HTTPFlow) -> None:
+        self.track(flow)
+        if getattr(flow, "is_replay", None) == "request":
+            return
+        try:
+            address = self.device_address(flow.client_conn)
+            if address:
+                self.client_stats.request(address)
+        except Exception as e:
+            logger.error("Wiretrace UI: could not count a request (%s)", type(e).__name__)
+
+    # Hooks: connections, for Setup and the device list
+
+    def device_address(self, client: Any) -> str | None:
+        """The Wi-Fi proxy device a connection comes from, when the device list shows it: accepted with
+        pinning, listed with `--client`. None for this Mac, a WireGuard client or a refused one."""
+        if client is None or not regular_client(client):
+            return None
+        guard = self.proxyguard()
+        address = guardlib.pinnable(peer_address(client) or "")
+        if guard is None or address is None:
+            return None
+        if self.pin_option():
+            return address if address in guard.accepted() else None
+        return address if guard.listed(address) else None
 
     def client_connected(self, client) -> None:
         # proxy_guard runs first and sets `error` on a client it refuses: that is not the device.
@@ -1451,8 +1847,15 @@ class WiretraceUI:
             except Exception as e:
                 logger.error("Wiretrace UI: could not read the refused devices (%s)", type(e).__name__)
             return
+        now = time.time()
         first = self.device_seen_at is None
-        self.device_seen_at = time.time()
+        self.device_seen_at = now
+        try:
+            address = self.device_address(client)
+            if address and self.client_stats.seen(address, now):
+                first = True
+        except Exception as e:
+            logger.error("Wiretrace UI: could not note a device (%s)", type(e).__name__)
         if first:
             self.hub.state_changed()
 
@@ -1475,7 +1878,129 @@ class WiretraceUI:
         hosts = list(live.api_hosts) if live is not None else []
         if sni and is_api_host(sni, hosts):
             self.tls_failures += 1
+            address = self.device_address(data.context.client)
+            if address:
+                self.client_stats.tls_failure(address)
             self.hub.state_changed()
+
+    # Hooks: connections passed through without decrypting (spec 022, slice C)
+
+    def http_connect(self, flow: http.HTTPFlow) -> None:
+        try:
+            self.tunnels.connect(flow)
+        except Exception as e:
+            logger.error("Wiretrace UI: could not note a CONNECT (%s)", type(e).__name__)
+
+    def next_layer(self, nextlayer) -> None:
+        try:
+            # Script hooks run before mitmproxy's own NextLayer, which keeps a layer already set:
+            # deciding with it here is the same decision, and the only way to see a passthrough.
+            if nextlayer.layer is None and (decider := ctx.master.addons.get("nextlayer")) is not None:
+                decider.next_layer(nextlayer)
+            row = self.tunnels.layer(nextlayer, client_label(nextlayer.context.client), time.time())
+        except Exception as e:
+            logger.error("Wiretrace UI: could not list an encrypted connection (%s)", type(e).__name__)
+            return
+        if row is not None:
+            self.hub.tunnel_changed(row.payload())
+
+    def client_disconnected(self, client) -> None:
+        self._tunnel_closed(getattr(client, "id", None))
+        # A flow paused on this connection would otherwise wait for a page action that cannot help.
+        for flow_id, held in list(self.breakpoints.items()):
+            if held.flow.client_conn.id == getattr(client, "id", None):
+                self.release(flow_id)
+
+    def server_disconnected(self, data) -> None:
+        self._tunnel_closed(getattr(getattr(data, "client", None), "id", None))
+
+    def _tunnel_closed(self, client_id: str | None) -> None:
+        if client_id is None:
+            return
+        row = self.tunnels.closed(client_id, time.time())
+        if row is not None:
+            self.hub.tunnel_changed(row.payload())
+
+    # Breakpoints (spec 022, slice D). qa_tools intercepts a flow a pause rule matched and
+    # registers it here; only this window releases it.
+
+    def pause_refusal(self) -> str | None:
+        """Why a pause rule must let a flow through instead, or None."""
+        if self._closed or self.switching is not None or not self.hub.clients:
+            return "no window"
+        if len(self.breakpoints) >= MAX_PAUSED:
+            return f"{MAX_PAUSED} already paused"
+        return None
+
+    def paused(self, flow: http.HTTPFlow, phase: str, original: http.Message | None = None) -> None:
+        self._breakpoint_revision += 1
+        held = Breakpoint(flow, phase, time.time(), self._breakpoint_revision,
+                          original if original is not None else held_message(flow, phase).copy())
+        self.breakpoints[flow.id] = held
+        self.hub.paused[flow.id] = (phase, held.since)
+        self.track(flow)
+        self.hub.state_changed()
+
+    def release(self, flow_id: str, abort: bool = False) -> bool:
+        """Lets a paused flow go on, or ends it. Resume and kill happen in one step: kill alone
+        would leave mitmproxy waiting on the flow."""
+        held = self.breakpoints.pop(flow_id, None)
+        self.hub.paused.pop(flow_id, None)
+        if held is None:
+            return False
+        held.flow.resume()
+        if abort and held.flow.killable:
+            held.flow.kill()
+        self.track(held.flow)
+        self.hub.state_changed()
+        return True
+
+    def release_all(self, abort: bool = False) -> int:
+        return sum(self.release(flow_id, abort) for flow_id in list(self.breakpoints))
+
+    def error(self, flow: http.HTTPFlow) -> None:
+        # The app or the server went away while the flow was paused.
+        self.release(flow.id)
+        self.track(flow)
+
+    def breakpoint_action(self, flow_id: str, body: object) -> tuple[int, dict]:
+        if not isinstance(body, dict) or set(body) - {"action", "edits", "revision"} \
+                or body.get("action") not in ("continue", "abort"):
+            return 400, {"error": "Send action continue or abort, the revision, and the edits or null."}
+        revision = body.get("revision")
+        if not isinstance(revision, int) or isinstance(revision, bool):
+            return 400, {"error": "Send action continue or abort, the revision, and the edits or null."}
+        held = self.breakpoints.get(flow_id)
+        if held is None or not held.flow.live:
+            return 409, {"error": NOT_PAUSED}
+        if revision != held.revision:
+            return 409, {"error": STALE_EDIT}
+        if body["action"] == "abort":
+            self.release(flow_id, abort=True)
+            return 200, {"id": flow_id, "action": "abort", "edited": False}
+        edits = body.get("edits")
+        edited = False
+        if edits is not None:
+            problem = edit_problem(held, edits)
+            if problem is not None:
+                return 400, {"error": problem}
+            edited = apply_edits(held, edits)
+            if edited:
+                tag = f"breakpoint: {held.phase}"
+                held.flow.comment = "; ".join(f"{part} edited" if part == tag else part
+                                              for part in comment_parts(held.flow.comment))
+        self.release(flow_id)
+        return 200, {"id": flow_id, "action": "continue", "edited": edited}
+
+    def breakpoint_watchdog(self, now: float) -> None:
+        """With no window for BREAKPOINT_WATCHDOG_S, paused flows go on unchanged."""
+        if self.hub.clients or not self.breakpoints:
+            self._window_seen_at = now
+            return
+        if now - self._window_seen_at >= BREAKPOINT_WATCHDOG_S:
+            count = self.release_all()
+            logger.info("Wiretrace UI: no window for %d s: %d paused requests continue unchanged",
+                        BREAKPOINT_WATCHDOG_S, count)
 
     # Background loops
 
@@ -1500,6 +2025,10 @@ class WiretraceUI:
                 self.maybe_write_status()
             except Exception as e:
                 logger.error("Wiretrace UI: could not write status (%s)", type(e).__name__)
+            try:
+                self.breakpoint_watchdog(time.monotonic())
+            except Exception as e:
+                logger.error("Wiretrace UI: could not continue paused requests (%s)", type(e).__name__)
             try:
                 self.flush_rules()
                 self.hub.flush(self.state)
@@ -1552,9 +2081,13 @@ class WiretraceUI:
         pinning = self.pin_option() and mode != "wireguard"
         guard = self.proxyguard() if pinning else None
         pinned = getattr(guard, "pinned", None)
+        mac_ip = local_ip.get_local_ip() if mode != "wireguard" else None
+        proxy_port = self.current_proxy_port()
         return {
             "version": __version__,
             "preset": str(meta.get("preset") or ""),
+            # The hosts decrypted now: the preset's, plus any the window added (spec 022, slice C).
+            "api_hosts": self.live_api_hosts(),
             "target": str(meta.get("target") or ""),
             "mode": mode,
             "started_at": started if started is not None else self.started_at,
@@ -1562,19 +2095,24 @@ class WiretraceUI:
             "device_logs": device_logs if isinstance(device_logs, str) and device_logs else None,
             "device_logs_off": device_logs_off if isinstance(device_logs_off, str) and device_logs_off else None,
             "default_filter": ctx.options.qa_ui_default_filter,
-            "proxy_port": ctx.options.listen_port if "listen_port" in ctx.options else 8888,
+            "proxy_port": proxy_port,
             # proxy_guard adds the option, and only in a mode with the Wi-Fi proxy.
             "proxy_pin": bool(ctx.options.qa_proxy_pin) if "qa_proxy_pin" in ctx.options else False,
             # Spec 021: addresses only here and on the socket, both behind the token (invariant 5).
             "proxy_device": pinned if isinstance(pinned, str) else None,
             "proxy_waiting": self.waiting_list() if pinning and self.viewed is None else [],
+            "proxy_clients": self.proxy_clients(mode),
+            "proxy_max": guardlib.MAX_ACCEPTED,
+            "proxy_address": f"{mac_ip}:{proxy_port}" if mac_ip else None,
             "from_app": bool(ctx.options.qa_ui_from_app),
             "wireguard_conf": self.wireguard_conf() if mode != "proxy" else None,
-            "mac_ip": local_ip.get_local_ip() if mode != "wireguard" else None,
+            "mac_ip": mac_ip,
             "faults": faults,
             "faults_on": self.faults_on(faults),
             "mocks_dir": display_dir(self.mocks_dir()),
             "flow_count": len(self.hub.flows),
+            "paused_count": len(self.breakpoints),
+            "paused_max": MAX_PAUSED,
             "rules_on": sum(1 for r in live.rules.rules if r.enabled) if live is not None else 0,
             "device_seen_at": self.device_seen_at,
             "tls_failures": self.tls_failures,
@@ -1784,16 +2322,18 @@ class WiretraceUI:
             return 204, {}
         return self.start_switch(name, self.current_target())
 
-    def start_switch(self, name: str, target: str, client: str | None = None) -> tuple[int, dict]:
+    def start_switch(self, name: str, target: str, client: str | None = None,
+                     proxy_port: int | None = None) -> tuple[int, dict]:
         """Write `.switch.json`; no await between the in-flight check and the write (spec 018, invariant 6)."""
         if self.switch_in_flight():
             return 409, {"error": ALREADY_SWITCHING}
         try:
-            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name, target, client)
+            write_switch_file(Path(ctx.options.qa_ui_session_dir) / session.SWITCH, name, target, client, proxy_port)
         except OSError as e:
             logger.error("Wiretrace UI: could not write the switch request (%s)", type(e).__name__)
             return 500, {"error": "Could not switch: the session folder cannot be written"}
         self.switching = name
+        self.release_all(abort=True)
         return 202, {"switching": name, "target": target}
 
     # Switching the device (spec 018): one device per session, the same preset and mode.
@@ -1883,6 +2423,189 @@ class WiretraceUI:
         if address not in {entry["address"] for entry in self.waiting_list()}:
             return 409, {"error": NOT_WAITING}
         return None
+
+    # More devices on one port (spec 022, slice A): allowed and removed in this session, no new one.
+
+    def proxy_clients(self, mode: str) -> list[dict]:
+        """The sidebar's devices: accepted ones in order with pinning, the `--client` ones that connected
+        without. Empty in mode wireguard and while a previous session is shown."""
+        guard = self.proxyguard()
+        if self.viewed is not None or mode == "wireguard" or "qa_proxy_pin" not in ctx.options or guard is None:
+            return []
+        if self.pin_option():
+            return self.client_stats.payload(guard.accepted())
+        return self.client_stats.payload([a for a in self.client_stats.addresses() if guard.listed(a)])
+
+    def device_refusal(self, action: str, client: str) -> tuple[int, dict] | None:
+        """Invariant 3, in its order. Nothing here awaits, so the guard acts on what was checked."""
+        if self.viewed is not None:
+            return 409, {"error": DEVICES_OFF_WHILE_VIEWING}
+        folder = ctx.options.qa_ui_session_dir
+        if self.switching is not None or (folder and os.path.lexists(Path(folder) / session.SWITCH)):
+            return 409, {"error": ALREADY_SWITCHING}
+        guard = self.proxyguard()
+        if not self.pin_option() or self.current_mode() == "wireguard" or guard is None:
+            return 409, {"error": NO_CLIENT_SWITCH}
+        try:
+            ipaddress.ip_address(guardlib.normalize(client))
+        except ValueError:
+            return 400, {"error": NOT_AN_ADDRESS}
+        address = guardlib.pinnable(client)
+        if address is None:
+            return 400, {"error": guardlib.NOT_PINNABLE}
+        accepted = guard.accepted()
+        if action == "allow":
+            if address not in {entry["address"] for entry in self.waiting_list()}:
+                return 409, {"error": NOT_WAITING}
+            if len(accepted) >= guardlib.MAX_ACCEPTED:
+                return 409, {"error": guardlib.AT_MOST}
+        elif address not in accepted:
+            return 409, {"error": guardlib.NOT_ACCEPTED}
+        return None
+
+    def change_device(self, action: str, client: str) -> tuple[int, dict]:
+        refusal = self.device_refusal(action, client)
+        if refusal:
+            return refusal
+        guard = self.proxyguard()
+        change = guard.allow if action == "allow" else guard.remove
+        reason = change(guardlib.pinnable(client))
+        if reason:
+            return 409, {"error": reason}
+        self.hub.state_changed()
+        self.hub.flush(self.state)
+        return 200, {"accepted": guard.accepted()}
+
+    # Changing the Wi-Fi proxy port (spec 022, slice B): a new session on the new port.
+
+    @staticmethod
+    def current_proxy_port() -> int:
+        port = ctx.options.listen_port if "listen_port" in ctx.options else None
+        return port if isinstance(port, int) and not isinstance(port, bool) and port else doctorlib.PROXY_PORT
+
+    def port_state_refusal(self) -> tuple[int, dict] | None:
+        """The 409s that come before the port is looked at."""
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
+        if self.switch_in_flight():
+            return 409, {"error": ALREADY_SWITCHING}
+        if self.current_mode() == "wireguard":
+            return 409, {"error": NO_PROXY_PORT}
+        return None
+
+    def port_value_refusal(self, port: object) -> tuple[int, dict] | None:
+        problem = doctorlib.port_problem(port, ctx.options.qa_ui_port)
+        if problem:
+            return 400, {"error": problem}
+        if port == self.current_proxy_port():
+            return 400, {"error": SAME_PORT}
+        return None
+
+    async def port_check(self, raw: str) -> tuple[int, dict]:
+        """Whether the dialog's port could be the next one: its value, then a bind test."""
+        port = parse_port(raw)
+        refusal = self.port_value_refusal(port)
+        if refusal:
+            return refusal
+        return 200, {"port": port, "free": await asyncio.to_thread(port_free, port)}
+
+    async def change_port(self, port: object) -> tuple[int, dict]:
+        """Check, read the preset and test the port, check again, then write `.switch.json` with the port."""
+        refusal = self.port_state_refusal() or self.port_value_refusal(port)
+        if refusal:
+            return refusal
+        name = str(self.meta().get("preset") or "")
+        try:
+            await asyncio.to_thread(load_preset, name, self.presets_dir)
+        except PresetError as e:
+            return 400, {"error": str(e)}
+        except OSError:
+            return 400, {"error": "Could not read the preset file in use"}
+        free = await asyncio.to_thread(port_free, port)
+        # Other requests ran while the preset was read and the port tested.
+        refusal = self.port_state_refusal() or self.port_value_refusal(port)
+        if refusal:
+            return refusal
+        if not free:
+            return 409, {"error": PORT_IN_USE}
+        return self.start_switch(name, self.current_target(), proxy_port=port)
+
+    # Decrypting a passed-through host in the running session (spec 022, slice C).
+
+    @staticmethod
+    def live_api_hosts() -> list[str]:
+        return list(ctx.options.qa_api_hosts) if "qa_api_hosts" in ctx.options else []
+
+    def decrypt_state_refusal(self) -> tuple[int, dict] | None:
+        if self.viewed is not None:
+            return 409, {"error": "Decrypting is off while a previous session is open"}
+        refusal = self.switch_refusal()
+        if refusal:
+            return refusal
+        if self.switch_in_flight():
+            return 409, {"error": ALREADY_SWITCHING}
+        if self.in_use(presetfile.TEMPLATE):
+            return 409, {"error": "example is a template and cannot be saved: use New preset"}
+        return None
+
+    def decrypt_refusal(self, host: str) -> tuple[int, dict] | None:
+        """In this order: the session's state, the host, then the API hosts in effect. Nothing awaits."""
+        refusal = self.decrypt_state_refusal()
+        if refusal:
+            return refusal
+        if presetfile.host_problem(host):
+            return 400, {"error": "Not a valid host name."}
+        offered = {choice for seen in self.tunnels.hosts() for choice in presetfile.decrypt_choices(seen)}
+        if host not in offered:
+            return 400, {"error": NOT_OFFERED}
+        live = self.live_api_hosts()
+        if presetfile.covers(live, host):
+            return 409, {"error": f"{host} is already decrypted in this session."}
+        if len(live) >= presetfile.MAX_ENTRIES:
+            return 409, {"error": f"The preset already has {presetfile.MAX_ENTRIES} API hosts."}
+        return None
+
+    async def decrypt_host(self, raw: str) -> tuple[int, dict]:
+        """Append the host to the preset in use, then give mitmproxy the lists built from the file
+        (invariants 3 and 4): never a host removed, never another preset."""
+        host = raw.strip().lower().rstrip(".")
+        refusal = self.decrypt_refusal(host)
+        if refusal:
+            return refusal
+        name = str(self.meta().get("preset") or "")
+
+        def append(live: list[str]) -> tuple[int, dict]:
+            path = self.presets_dir / f"{name}.yaml"
+            if not presetfile.is_listed(self.presets_dir, name):
+                return 409, {"error": FILE_CHANGED}
+            current = presetfile.read_preset_file(path)
+            # Another edit since this session loaded the file would go live with this one.
+            if current.error or current.fields["api_hosts"] != live:
+                return 409, {"error": FILE_CHANGED}
+            text = self.checked_text(path, {**current.fields, "api_hosts": [*live, host]}, current.data)
+            if presetfile.file_revision(path.read_bytes()) != current.revision:
+                return 409, {"error": FILE_CHANGED}
+            presetfile.replace_file(path, text)
+            return 200, {}
+
+        async with self.preset_lock:
+            # Other requests ran while this one waited for the lock.
+            refusal = self.decrypt_refusal(host)
+            if refusal:
+                return refusal
+            live = self.live_api_hosts()
+            status, payload = await self.write_preset(lambda: append(live))
+            if status != 200:
+                return status, payload
+            try:
+                preset = await asyncio.to_thread(load_preset, name, self.presets_dir)
+                ctx.options.update(allow_hosts=allow_hosts_args(preset), qa_api_hosts=list(preset.api_hosts))
+            except Exception as e:
+                logger.error("Wiretrace UI: could not apply the new API host (%s)", type(e).__name__)
+                return 200, {"host": host, "applied": False, "message": f"Saved. Restart the session to decrypt {host}."}
+            self.hub.state_changed()
+            return 200, {"host": host, "applied": True}
 
     async def switch_client(self, target: object, client: object) -> tuple[int, dict]:
         """Check, read the preset in use, check again, then write `.switch.json` with the client."""
@@ -2056,6 +2779,76 @@ class WiretraceUI:
             return 500, {"error": error}
         self.hub.state_changed()
         return 200, self.rules_payload()
+
+    def map_local(self, flow_id: str, body: object) -> tuple[int, dict]:
+        """Save a response as a mock file, then optionally add a Mock rule for it at the top (spec 022, slice F).
+
+        One synchronous step, so neither the rules nor the file can change between the checks and the writes.
+        """
+        if not isinstance(body, dict) or set(body) != MAP_LOCAL_KEYS or not isinstance(body["file"], str) \
+                or not isinstance(body["body"], str) or not isinstance(body["rule"], bool) \
+                or not isinstance(body["replace"], bool) or not isinstance(body["revision"], str):
+            return 400, {"error": "Send file, status, body, rule, replace and revision."}
+        flow = self.hub.flows.get(flow_id)
+        if not isinstance(flow, http.HTTPFlow):
+            return 404, {"error": "Unknown request: it was never listed or has been dropped from memory."}
+        if flow.response is None:
+            return 409, {"error": "This request has no response yet."}
+        live = self.qatools()
+        if live is None:
+            return 503, {"error": NO_QA}
+        status = body["status"]
+        if not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599:
+            return 400, {"error": "The status must be a number from 100 to 599.", "field": "status"}
+        try:
+            content = body["body"].encode("utf-8")
+        except UnicodeEncodeError:
+            return 400, {"error": "The body must be text.", "field": "body"}
+        if len(content) > MAX_MOCK_BODY:
+            return 400, {"error": "The body must be at most 1 MiB.", "field": "body"}
+        rule = None
+        if body["rule"]:
+            if not live.rules_file:
+                return 409, {"error": "No rules file: start Wiretrace with ./wiretrace start"}
+            if body["revision"] != live.rules.revision:
+                return 409, {"error": "The rules changed since this dialog opened. Close it and try again.",
+                             "stale": True}
+            rule = map_local_rule(flow, body["file"], status, live.api_hosts,
+                                  {r.id for r in live.rules.rules})
+            if rule is None:
+                return 400, {"error": "Rules apply only to the preset's API hosts: turn off Answer with it now "
+                                      "to save the file only.", "field": "rule"}
+        problem = live.mock_name_problem(body["file"])
+        if problem:
+            return 400, {"error": problem, "field": "file"}
+        folder = live.mock_dir_for_write(body["file"])
+        if folder is None:
+            return 400, {"error": "The file would leave the preset's mocks folder.", "field": "file"}
+        path = folder / body["file"].rsplit("/", 1)[-1]
+        if os.path.lexists(path) and not body["replace"]:
+            return 409, {"error": "A file with this name exists.", "exists": True}
+        if path.is_symlink() or (path.exists() and not path.is_file()):
+            return 400, {"error": "The file would leave the preset's mocks folder.", "field": "file"}
+        tmp = folder / f".{path.name}.{secrets.token_hex(4)}.tmp"
+        try:
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(fd, "wb") as f:
+                f.write(content)
+            os.replace(tmp, path)
+        except OSError:
+            return 500, {"error": "Could not write the mock file."}
+        finally:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+        if rule is None:
+            return 200, {"file": body["file"], "rule_id": None}
+        code, saved = self.save_rules(body["revision"], [rule, *(r.data for r in live.rules.rules)])
+        if code != 200:
+            return code, {"error": f"File saved; the rule was not added: {saved.get('error', 'unknown error')}",
+                          "file": body["file"], "saved": True}
+        return 200, {"file": body["file"], "rule_id": rule["id"]}
 
     def flush_rules(self) -> None:
         """Tell the pages when counters, the rules or the file error changed; also picks up hand edits."""

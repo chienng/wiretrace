@@ -1,0 +1,8 @@
+{
+  "tunnels": [
+    {"id": "tunnel-1", "ts": 1791900001.0, "closed_at": 1791900031.0, "client": "192.0.2.31", "host": "cdn.example.net", "port": 443, "tls": true, "method": "CONNECT", "headers": [["Host", "cdn.example.net:443"]], "answer": "HTTP/1.1 200 Connection established"},
+    {"id": "tunnel-2", "ts": 1791900002.5, "closed_at": null, "client": "192.0.2.31", "host": "analytics.example.org", "port": 443, "tls": true, "method": "CONNECT", "headers": [["Host", "analytics.example.org:443"]], "answer": "HTTP/1.1 200 Connection established"},
+    {"id": "tunnel-3", "ts": 1791900004.0, "closed_at": 1791900006.0, "client": "192.0.2.31", "host": "cdn.example.net", "port": 443, "tls": true, "method": "CONNECT", "headers": [["Host", "cdn.example.net:443"]], "answer": "HTTP/1.1 200 Connection established"},
+    {"id": "tunnel-4", "ts": 1791900006.5, "closed_at": 1791900007.0, "client": "192.0.2.31", "host": "login.auth.example.com", "port": 443, "tls": true, "method": "CONNECT", "headers": [["Host", "login.auth.example.com:443"]], "answer": "HTTP/1.1 200 Connection established"}
+  ]
+}

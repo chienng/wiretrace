@@ -1,11 +1,12 @@
 import { api, ForbiddenError, socketUrl } from './api';
-import type { AppState, FlowSummary, LogLine, Phase, ServerMessage } from './types';
+import type { AppState, FlowSummary, LogLine, Phase, ServerMessage, TunnelRow } from './types';
 
 export interface InitialData {
   state: AppState;
   flows: FlowSummary[];
   device: LogLine[];
   app: LogLine[];
+  tunnels: TunnelRow[];
 }
 
 export interface ConnectionHandlers {
@@ -105,14 +106,15 @@ export class Connection {
 
   private async load(gen: number, takeBuffer: () => ServerMessage[]): Promise<void> {
     try {
-      const [state, flows, device, app] = await Promise.all([
+      const [state, flows, device, app, tunnels] = await Promise.all([
         api.state(),
         api.flows(),
         api.logs('device'),
         api.logs('app'),
+        api.tunnels(),
       ]);
       if (gen !== this.generation) return;
-      this.handlers.onLoaded({ state, flows, device, app }, takeBuffer());
+      this.handlers.onLoaded({ state, flows, device, app, tunnels }, takeBuffer());
       this.attempt = 0;
       this.handlers.onPhase('live');
     } catch (e) {

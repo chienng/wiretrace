@@ -5,13 +5,31 @@ import {
   clockTime,
   DEFAULT_ERROR_BODY,
   EMPTY_STATS,
+  hasValue,
+  isHeaderOp,
+  JSON_PATH_NOTE,
   LIMITS,
+  MAP_HTTP_WARNING,
+  MAP_REMOTE_NOTE,
+  MAP_SCHEMES,
+  MAP_TOKENS_WARNING,
+  mapPreview,
   METHODS,
+  newOp,
+  opOfKind,
+  PAUSE_AT,
+  PAUSE_NOTE,
+  REWRITE_KINDS,
+  REWRITE_LIMITS,
+  REWRITE_NOTE,
+  REWRITE_SIDES,
   STATUS_TEXT,
+  switchAction,
+  switchScheme,
   validateRule,
   type FieldErrors,
 } from '../logic/rules';
-import type { FlowSummary, Rule, RuleAction, RuleStats, RuleTestResult } from '../types';
+import type { FlowSummary, MapTarget, RewriteKind, RewriteOp, RewriteSide, Rule, RuleAction, RuleStats, RuleTestResult } from '../types';
 
 export interface SaveProblem {
   field: string | null;
@@ -75,6 +93,136 @@ export function Toggle({ on, label, onChange, disabled }: { on: boolean; label: 
         onChange(!on);
       }}
     />
+  );
+}
+
+function OpsEditor({ ops, errors, onChange }: { ops: RewriteOp[]; errors: FieldErrors; onChange: (ops: RewriteOp[]) => void }) {
+  const put = (i: number, op: RewriteOp) => onChange(ops.map((o, j) => (j === i ? op : o)));
+  return (
+    <div className="field">
+      <label>Changes</label>
+      <div className="ops" role="table" aria-label="Changes">
+        <div className="ops-row ops-head" role="row">
+          <span role="columnheader">On</span>
+          <span role="columnheader">Change</span>
+          <span role="columnheader">Header or JSON path</span>
+          <span role="columnheader">Value</span>
+          <span />
+        </div>
+        {ops.map((op, i) => {
+          const header = isHeaderOp(op.op);
+          const targetError = errors[`action.ops.${i}.${header ? 'name' : 'path'}`];
+          const valueError = errors[`action.ops.${i}.value`];
+          const rowError = errors[`action.ops.${i}`] ?? errors[`action.ops.${i}.on`] ?? errors[`action.ops.${i}.op`];
+          return (
+            <div key={i} className="ops-item" role="row">
+              <div className="ops-row">
+                <select className="selectin" aria-label={`Change ${i + 1} on`} value={op.on} onChange={(e) => put(i, { ...op, on: e.target.value as RewriteSide })}>
+                  {REWRITE_SIDES.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                <select className="selectin" aria-label={`Change ${i + 1} type`} value={op.op} onChange={(e) => put(i, opOfKind(op, e.target.value as RewriteKind))}>
+                  {REWRITE_KINDS.map((k) => (
+                    <option key={k.id} value={k.id}>
+                      {k.label}
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className={`textin mono${targetError ? ' bad' : ''}`}
+                  aria-label={`Change ${i + 1} ${header ? 'header' : 'JSON path'}`}
+                  spellCheck={false}
+                  maxLength={header ? 256 : REWRITE_LIMITS.pathChars}
+                  placeholder={header ? 'x-feature-flags' : 'data.user.isPremium'}
+                  value={(header ? op.name : op.path) ?? ''}
+                  onChange={(e) => put(i, header ? { ...op, name: e.target.value } : { ...op, path: e.target.value })}
+                />
+                {hasValue(op.op) ? (
+                  <input
+                    className={`textin mono${valueError ? ' bad' : ''}`}
+                    aria-label={`Change ${i + 1} value`}
+                    spellCheck={false}
+                    placeholder={header ? 'checkout-v2' : 'true'}
+                    value={op.value ?? ''}
+                    onChange={(e) => put(i, { ...op, value: e.target.value })}
+                  />
+                ) : (
+                  <span className="textin mono ops-none">—</span>
+                )}
+                <button type="button" className="iconbtn" aria-label={`Remove change ${i + 1}`} title="Remove this change" disabled={ops.length === 1} onClick={() => onChange(ops.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </div>
+              {(rowError || targetError || valueError) && (
+                <div className="field-error" role="alert">
+                  {rowError ?? targetError ?? valueError}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {errors['action.ops'] && (
+        <div className="field-error" role="alert">
+          {errors['action.ops']}
+        </div>
+      )}
+      <button type="button" className="linkbtn gap-top" disabled={ops.length >= REWRITE_LIMITS.ops} onClick={() => onChange([...ops, newOp()])}>
+        + Add change
+      </button>
+      <div className="note-block">{JSON_PATH_NOTE}</div>
+      <div className="note-block">{REWRITE_NOTE}</div>
+    </div>
+  );
+}
+
+function TargetEditor({ rule, apiHosts, errors, onChange }: { rule: Rule; apiHosts: string[]; errors: FieldErrors; onChange: (target: MapTarget) => void }) {
+  const target = rule.action.target ?? { scheme: 'https', host: '', port: 443 };
+  const preview = mapPreview(rule, apiHosts);
+  return (
+    <div className="field">
+      <div className="row">
+        <Field label="To" error={errors['action.target.scheme']} className="fixed">
+          <div className="seg" role="radiogroup" aria-label="Scheme">
+            {MAP_SCHEMES.map((s) => (
+              <button key={s.id} type="button" role="radio" aria-checked={target.scheme === s.id} className={target.scheme === s.id ? 'on' : ''} onClick={() => onChange(switchScheme(target, s.id))}>
+                {s.label}
+              </button>
+            ))}
+          </div>
+        </Field>
+        <Field label="Host" error={errors['action.target.host']} className="grow" htmlFor="r-target-host">
+          <input
+            id="r-target-host"
+            className="textin mono"
+            maxLength={253}
+            value={target.host}
+            placeholder="staging-api.example.com"
+            spellCheck={false}
+            autoCapitalize="off"
+            onChange={(e) => onChange({ ...target, host: e.target.value })}
+          />
+        </Field>
+        <Field label="Port" error={errors['action.target.port']} className="w-port" htmlFor="r-target-port">
+          <input id="r-target-port" className="textin mono" inputMode="numeric" value={num(target.port)} onChange={(e) => onChange({ ...target, port: toNum(e.target.value) })} />
+        </Field>
+      </div>
+      {preview && (
+        <div className="map-preview mono" aria-label="Preview">
+          {preview.from}
+          <br />→ <span className="to">{preview.to}</span>
+          {preview.path}
+        </div>
+      )}
+      <div className="callout info gap-top">{MAP_REMOTE_NOTE}</div>
+      <div className="callout warn">
+        {MAP_TOKENS_WARNING}
+        {target.scheme === 'http' && ` ${MAP_HTTP_WARNING}`}
+      </div>
+    </div>
   );
 }
 
@@ -245,7 +393,7 @@ export function RuleEditor(props: Props) {
               role="radio"
               aria-checked={a.type === x.id}
               className={a.type === x.id ? 'on' : ''}
-              onClick={() => action({ type: x.id, status: statusFor(x.id, a) })}
+              onClick={() => set({ ...rule, action: switchAction(a, x.id, statusFor(x.id, a)) })}
             >
               {x.label}
             </button>
@@ -255,7 +403,19 @@ export function RuleEditor(props: Props) {
 
       <div className="row">
         {(a.type === 'mock' || a.type === 'status') && statusInput}
-        {delayInput(a.type === 'delay' ? 'Delay' : 'Extra delay')}
+        {a.type === 'pause' ? (
+          <Field label="Pause" error={errors['action.pause_at']} className="fixed">
+            <div className="seg" role="radiogroup" aria-label="Pause">
+              {PAUSE_AT.map((p) => (
+                <button key={p.id} type="button" role="radio" aria-checked={a.pause_at === p.id} className={a.pause_at === p.id ? 'on' : ''} onClick={() => action({ pause_at: p.id })}>
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </Field>
+        ) : (
+          a.type !== 'rewrite' && a.type !== 'map_remote' && delayInput(a.type === 'delay' ? 'Delay' : 'Extra delay')
+        )}
         <Field label="Apply" error={errors['apply.n']} className="grow">
           <div className="row center">
             <div className="seg" role="radiogroup" aria-label="Apply">
@@ -302,6 +462,14 @@ export function RuleEditor(props: Props) {
       )}
       {a.type === 'delay' && <div className="note-block">The request waits, then goes to the server; the app gets the real response.</div>}
       {a.type === 'drop' && <div className="note-block">The connection is closed without a response, as on a network loss.</div>}
+      {a.type === 'pause' && <div className="note-block">{PAUSE_NOTE}</div>}
+      {a.type === 'rewrite' && <OpsEditor ops={a.ops ?? []} errors={errors} onChange={(ops) => action({ ops })} />}
+      {a.type === 'map_remote' && <TargetEditor rule={rule} apiHosts={apiHosts} errors={errors} onChange={(target) => action({ target })} />}
+      {(a.type === 'pause' || a.type === 'rewrite' || a.type === 'map_remote') && errors['action.delay_ms'] && (
+        <div className="field-error" role="alert">
+          {errors['action.delay_ms']}
+        </div>
+      )}
 
       {!isNew && (
         <div className="stat">

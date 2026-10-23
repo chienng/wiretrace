@@ -1,8 +1,8 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.9.1**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.10.0**, on Intel and Apple silicon Macs.
 
-What 0.9.1 gives you: a one-command install (`./install`) that needs no admin rights, a setup
+What 0.10.0 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
@@ -12,8 +12,16 @@ make requests fail or slow, a log timeline with the device's status, earlier ses
 filters, search in headers and bodies, replay and compare. New in 0.9.0: the **Wiretrace
 app** that setup puts in `~/Applications`, a `default` preset to start with, and editing or
 creating presets from the window. New in 0.9.1: one session accepts the phone's Wi-Fi proxy
-(now on port 8888) and the WireGuard tunnel at the same time; the setup wizard shows the Wi-Fi
-proxy first.
+and the WireGuard tunnel at the same time; the setup wizard shows the Wi-Fi proxy first.
+New in 0.10.0: up to 4 devices on the Wi-Fi proxy, which now listens on port **8889** (change
+it from the window); the hosts the app reaches without decryption, listed as *Encrypted*;
+breakpoints; and rules that rewrite requests and responses, save a response as a mock (*Map
+local*) or send requests to another server (*Map remote*).
+
+**Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
+Wi-Fi proxy to `<Mac IP>:8889`, or change the port back to 8888 in the window (sidebar,
+*Wi-Fi proxy* box → **Change…**). A rules file saved with a Rewrite, Map remote or pause rule
+cannot be loaded by 0.9.1.
 
 Using 0.8.0 or 0.7.2? Those versions have no `./install` and no Wiretrace app; follow the
 guide that came with them: [0.8.0](https://github.com/chienng/wiretrace/blob/v0.8.0/docs/user-guide.md),
@@ -34,11 +42,11 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  [wiretrace-0.9.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz.sha256)
+  [wiretrace-0.10.0-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz.sha256)
   (the faster one), or
-  [wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg.sha256).
+  [wiretrace-0.10.0-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg.sha256).
   Both contain the same files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -48,8 +56,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.9.1-macos.dmg.sha256
-shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.10.0-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.10.0-macos.tar.gz.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -64,11 +72,11 @@ access that folder, and cleaning up Downloads would delete it. If Downloads alre
 `wiretrace`. In Terminal, the same in one step:
 
 ```bash
-tar -xzf ~/Downloads/wiretrace-0.9.1-macos.tar.gz -C ~
+tar -xzf ~/Downloads/wiretrace-0.10.0-macos.tar.gz -C ~
 ```
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.9.1**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.10.0**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -160,7 +168,7 @@ continue.
 |---|---|
 | `FAIL Python` / `mitmproxy` / `Python packages` | Run `scripts/setup-mac.sh` again. |
 | `FAIL Port … in use` | Another proxy (or an old Wiretrace window) is running. Quit it. |
-| `FAIL macOS firewall: blocks all incoming connections` | Ask IT for an allow rule for UDP 51820 and TCP 8888. |
+| `FAIL macOS firewall: blocks all incoming connections` | Ask IT for an allow rule for UDP 51820 and TCP 8889. |
 | `WARN macOS firewall: on; macOS will ask …` | Normal. Click **Allow** when macOS asks the first time you start mitmproxy. |
 | `WARN adb: not found` | Only matters for Android. Run the setup without `--skip-android`. |
 | `WARN Android devices: … unauthorized` | Unlock the phone and accept **Allow USB debugging**. |
@@ -249,7 +257,7 @@ cd ~/wiretrace
 ./wiretrace start --preset default --target android --ui wiretrace
 ```
 
-Wiretrace listens for the phone's Wi-Fi proxy (TCP 8888) and for the WireGuard tunnel
+Wiretrace listens for the phone's Wi-Fi proxy (TCP 8889) and for the WireGuard tunnel
 (UDP 51820) at the same time, so the phone can connect either way without a restart.
 `--mode proxy` or `--mode wireguard` starts one of the two only.
 
@@ -273,7 +281,7 @@ Simulator always uses the proxy and has no switch.
 **Wi-Fi proxy** (try this first):
 
 1. Connect the phone to the same Wi-Fi network as the Mac.
-2. Set the network's proxy to **Manual**, server `<Mac IP>`, port **8888**. The wizard shows
+2. Set the network's proxy to **Manual**, server `<Mac IP>`, port **8889**. The wizard shows
    the address with a copy button, and where the setting is on your phone.
 3. *Waiting for the device…* turns to *Connected* as soon as the phone sends a request.
 
@@ -409,36 +417,40 @@ saved, for example `sessions/2026-10-13_143005_staging_android/`.
   below). `--no-menu-bar` leaves the item out; the banner says `Menu bar: off (--no-menu-bar)`.
   With `--ui mitmweb` or `--no-ui` there is no menu bar, and `--no-menu-bar` changes nothing.
 - `--mode` is `both` (the default), `proxy` or `wireguard`. `both` runs a Wi-Fi proxy on
-  TCP 8888 and the WireGuard tunnel on UDP 51820 in one session: set the phone's Wi-Fi proxy to
-  `<Mac IP>:8888`, or turn its tunnel on, and both are saved in the same session folder and
+  TCP 8889 and the WireGuard tunnel on UDP 51820 in one session: set the phone's Wi-Fi proxy to
+  `<Mac IP>:8889`, or turn its tunnel on, and both are saved in the same session folder and
   HAR. `--mode proxy` runs the Wi-Fi proxy only, `--mode wireguard` the tunnel only; the setup
   wizard then shows only that way, and the command to restart in the other mode where you need
   it. Apps that ignore the system proxy (Flutter, some React Native libraries) are not
   captured through the proxy; use WireGuard for them.
 - **Who may use the Wi-Fi proxy** (`both` and `proxy`): the Mac itself is always accepted (the
   iOS Simulator and the Android emulator connect that way). The first other device that
-  connects is the only other device accepted until you stop Wiretrace. A later device gets no
-  page, and the Terminal prints one line telling you to restart or to pass `--client`; with
-  `--ui wiretrace`, the window offers to switch to it. To allow
+  connects is accepted until you stop Wiretrace. A later device gets no page, and the Terminal
+  prints one line telling you to allow it in the window, restart, or pass `--client`; with
+  `--ui wiretrace`, the window lets you allow it too (up to 4 devices besides the Mac) or
+  switch to it (see *More devices on the Wi-Fi proxy*). To allow
   a known phone instead of pinning the first one, repeat `--client` with its IP address:
   `./wiretrace start --preset staging --ui wiretrace --client 192.168.1.20`. A phone cannot
   open the Mac's own addresses (for example `http://127.0.0.1:8081/`) through this proxy.
   A phone on the WireGuard tunnel is never pinned or refused: the tunnel's key is its
   permission.
 - **iOS Simulator:** it uses the Mac's own network, so WireGuard does not apply. Start with
-  `--target ios-sim --ui wiretrace`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8888`
+  `--target ios-sim --ui wiretrace`, set the Mac's HTTP and HTTPS proxy to `127.0.0.1:8889`
   (this usually needs admin rights; see
   [`install-without-admin.md`](install-without-admin.md#ios-simulator-without-admin)), and
   install the certificate in the booted Simulator once:
   `xcrun simctl keychain booted add-root-cert ~/.mitmproxy/mitmproxy-ca-cert.pem`.
   Ignore the "set the Wi-Fi proxy" reminder Wiretrace prints; it is meant for phones.
 - **A browser or Burp Suite on this Mac:** start with `--ui wiretrace`, point the
-  browser's proxy (or Burp's upstream proxy) at `127.0.0.1:8888`, and make it trust
+  browser's proxy (or Burp's upstream proxy) at `127.0.0.1:8889`, and make it trust
   `~/.mitmproxy/mitmproxy-ca-cert.pem`. Only the preset's `api_hosts` are decrypted.
 - The preset's `default_filter` is the starting filter: in mitmweb's search box, or what
   is printed with `--no-ui`. It never limits what is saved. Common filters:
   `~c 500` (status 500), `~m POST`, `~u /api/v1/orders`, `~bs "SOME_TEXT"` (response body).
   More in [`PLAN.md` Appendix B](../PLAN.md#appendix-b--mitmweb-filter-expressions-for-qa).
+- `--port N` runs the Wi-Fi proxy on port N for this run only (1024–65535, not 8081 or
+  51820). The window can change the port for good (see *Changing the Wi-Fi proxy port*).
+  Charles keeps its own port 8888, so both can run at the same time.
 - If a port is in use, Wiretrace says which one and does not start. Usually another
   Wiretrace or mitmproxy window is still open: quit it.
 
@@ -619,6 +631,8 @@ mocks/staging/GET/index.json             answers GET /
 ```
 
 - Copy `mocks/example/` to `mocks/staging/` to start from a sample.
+- In the Wiretrace window, *Map local…* on a request writes such a file from its response for
+  you (see *Rules* under *The Wiretrace window (preview)*).
 - The answer is always status `200` with the file's content as JSON. A query string
   (`?page=2`) is ignored. Use a fault (next section) for error statuses.
 - Edit, add, or delete a file while Wiretrace runs: the next request uses the change. You do
@@ -737,21 +751,65 @@ The Setup wizard offers the same switch: when the card you pick is not the sessi
 *Use <device> for this session* opens the same dialog, and the new tab goes on with *Connect
 to this Mac*.
 
-**Switching phones on the Wi-Fi proxy.** When the proxy refuses a phone because another one
-is accepted, a banner under the title bar says so within a second: *Another device wants to
-use the Wi-Fi proxy: 192.168.2.72, since 19:21. Only 192.168.2.71 is accepted in this
-session.* *Setup → Connect to this Mac* and the device label's tooltip name the accepted
-phone too (*Wi-Fi proxy: accepting 192.168.2.71*). Leave the proxy set on every phone you
-use. To move to the refused phone, click **Switch to it…**, choose what it is (iPhone, Android
-phone or Another device; two iPhones are fine), and click *Save and switch*: this session is
-saved, and a new one starts with the same preset, mode and ports that accepts only that phone
-from its first request. The phone you left now shows in the new session's banner, so switching
-back is the same click. **Ignore** hides the banner for that phone until the session ends,
-reloads included; another phone shows it again, and with several waiting phones it shows the
-latest one and *+N more*. Nothing is remembered after Wiretrace stops. There is no banner with
-`--mode wireguard` (the tunnel has no pin: turn it off on one phone and on on the other), with
-`--client`, or while a previous session is open. With `--ui mitmweb` or `--no-ui`, stop
-Wiretrace, take the proxy off the first phone, and start again, or start with `--client`.
+**More devices on the Wi-Fi proxy.** When the proxy refuses a device because it is not
+accepted yet, an amber banner under the title bar says so within a second, for example
+*Another device wants to use the Wi-Fi proxy: 192.168.2.72, since 19:21*, followed by the
+devices accepted in this session. The browser tab's title starts with the number of waiting
+devices, for example *(1) Wiretrace*. Check the address in the phone's Wi-Fi settings first:
+any device on the same network can ask.
+
+- **Allow…** asks you to confirm, then accepts that device in the same session within a
+  second: the other phones, the session folder and the device logs are untouched. A session
+  accepts at most 4 devices besides this Mac; with 4, *Allow…* is off and says so.
+- **Switch to it…** saves this session and starts a new one that accepts only that device:
+  choose what it is (iPhone, Android phone or Another device) and click *Save and switch*. The
+  dialog names the devices the new session refuses. The same happens on any switch or
+  restart: the next session starts with only its first device accepted.
+- **Ignore** hides the banner for that device until the session ends, reloads included;
+  another device shows it again, and with several waiting it shows the latest one and *+N
+  more*.
+
+The sidebar lists the accepted devices under *Devices*, by address, with their request
+counts; click one to see only its requests (click it again, or *All devices*, to see them
+all). *⚠ N* next to a device means its connections to the API hosts failed: it does not trust
+the Wiretrace certificate yet (Part 2, Step 3). To remove a device, point at it and click
+**×**, or right-click it → *Remove from this session…*: its next requests fail, its requests
+so far stay in Traffic, and it can ask again from the banner. With no device left, the next
+one to connect is not accepted on its own; allow it from the banner. *Setup → Connect to this
+Mac* and the device label's tooltip list every accepted device (*Wi-Fi proxy: accepting
+192.168.2.71, 192.168.2.72*). Nothing is remembered after Wiretrace stops, and no device
+address is written to the session folder's `meta.json`, the HAR or a bug report.
+
+There is no banner with `--mode wireguard` (the tunnel's key is its permission), with
+`--client` (only the listed addresses are accepted), or while a previous session is open.
+With `--ui mitmweb` or `--no-ui`, stop Wiretrace, take the proxy off the first phone, and start
+again, or start with `--client`.
+
+**Changing the Wi-Fi proxy port.** The sidebar's *Wi-Fi proxy* box shows this Mac's address
+and port, for example `192.168.1.20:8889`, with **Copy** and **Change…**; *Setup → Connect to
+this Mac* has **Change port…**. Type a port from 1024 to 65535 (not 8081, this window's, or a
+port another app uses); the dialog says whether it is free. *Change port and restart* saves
+this session and starts a new one on that port with the same preset, device and mode. Then set
+the Wi-Fi proxy on every phone to the new port. Wiretrace and the Wiretrace app keep that port
+for the next sessions; `./wiretrace start --port N` overrides it for one run. Not available with
+`--mode wireguard`.
+
+**Encrypted connections.** The window also lists, as grey rows tagged *Encrypted*, the
+connections Wiretrace lets through without reading them because their host is not one of the
+preset's API hosts: a third-party image server, an analytics SDK, a host you forgot in the
+preset. A row shows the device, the host and port, when the connection opened and how long it
+stayed open; there are no requests or sizes, because nothing was decrypted. *Encrypted* in the
+sidebar's quick filters counts them, and lists under it each host still passed through, with its
+connections: click one to show only that host, again to show them all; right-click it to decrypt
+it or its parent domain. A host you decrypt leaves
+that list; its requests are listed under *Hosts*. *Show encrypted* in the filter bar hides the
+rows. Select a row
+and click **Decrypt this host…**, or right-click it → *Decrypt <host>…* (or its parent domain),
+to add the host to the preset in use: new connections to it and its subdomains are decrypted
+in the same session within a second, and rules apply to them. Connections already open stay
+encrypted until the app opens new ones; an app that pins its certificates then fails those
+requests. Encrypted rows are kept in the window only (the newest 2,000), never in the session
+folder, the HAR or a bug report. The `example` preset cannot be changed this way.
 
 **Editing and creating presets.** In the same menu, *Edit presets…* opens the *Presets* sheet
 with the preset in use selected, and *New preset…* opens it on a blank form. The form has the
@@ -774,7 +832,7 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 **What each area does.**
 
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
-  (for example *v0.9.1*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  (for example *v0.10.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests; meanwhile the title bar shows *List paused*
@@ -785,9 +843,11 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   · USB*), green while its logs stream in, or *Device logs off* with the reason when you point
   at it. Then come the buttons *Rules* (with the number of rules that are on), *Setup* and
   *Report bug*.
-- **Sidebar.** *Current session* and *Previous sessions* (see *Earlier sessions* below). Quick
-  filters with live counts: *All*, *Errors* (status 400 or higher, or no answer), *Slow* (over
-  one second), *Mocked*, *Faulted* and *WebSocket*. The preset's hosts with their counts.
+- **Sidebar.** With the Wi-Fi proxy on, the *Wi-Fi proxy* box and *Devices* first (see *More
+  devices on the Wi-Fi proxy* above). *Current session* and *Previous sessions* (see *Earlier
+  sessions* below). Quick filters with live counts: *All*, *Errors* (status 400 or higher, or
+  no answer), *Slow* (over one second), *Mocked*, *Faulted*, *WebSocket* and *Encrypted*. The
+  preset's hosts with their counts.
   *Saved filters*: type a search, click *+ Save current search* and give it a name; click the
   name to use it again, or *Rename* and *Delete* next to it. Saved filters belong to the
   preset and are kept by your browser, not in a file: another browser, a private window or
@@ -799,15 +859,22 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   it is not valid, the window shows the message. The preset's `default_filter` is typed in for
   you at the start. It never limits what is saved. The active filters (host, quick filter, the
   search or the preset's filter) show as chips above the list; click a chip to remove it.
-- **Traffic list.** One row per request to the preset's hosts, as it happens: time, method,
-  status (coloured by class, errors in red), path, duration and size. A row can carry the
-  badges *MOCK*, *FAULT*, *SLOW* and *REPLAY*. The log receiver `qa-logs.internal` is not
-  listed. The window keeps the newest 10,000 requests; older ones are only in `flows.mitm`.
+- **Traffic list.** One row per request to the preset's hosts, as it happens: time, device
+  (with the Wi-Fi proxy on: the phone's address, *This Mac* for a simulator or emulator,
+  *WireGuard* for the tunnel), method, status (coloured by class, errors in red), path,
+  duration and size. A row can carry the badges *MOCK*, *FAULT*, *SLOW*, *REPLAY*, *PAUSED*,
+  *EDITED*, *REWRITTEN* and *MAPPED* (see *Rules*). Right-click a row for *Map local…*, *Copy as
+  mock*, *New rule from this request*, *Replay* and *Copy cURL*. The log receiver
+  `qa-logs.internal` is not listed. The window keeps the newest 10,000 requests; older ones
+  are only in `flows.mitm`.
 - **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
   that carry this request's ID, with their number). *Copy cURL* copies the request as a `curl`
   command. *Copy as mock* copies the response body and shows the file to create under
-  `mocks/<preset>/` (see *Mock a response*). Wiretrace does not write that file for you.
+  `mocks/<preset>/` (see *Mock a response*). *Map local…* writes that file for you (see *Map
+  local* under *Rules*). A request changed by a Rewrite or Map remote rule has a *Changes* tab
+  listing each change, applied or skipped and why; a mapped request's header says *Sent to*
+  and the server it went to, while *Host* stays the one the app asked for.
   *Replay* sends the request to the backend again; it appears as a new row with the *REPLAY*
   badge and a link back to the original. Any method other than GET, HEAD and OPTIONS asks you
   to confirm first, because the backend does the action again (another order, another
@@ -845,17 +912,65 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   method (or *ANY*), one of the preset's API hosts (or any of them), a path where `*` stands
   for any text (`/api/*`; the query is ignored unless the path has a `?`), and optionally text
   the request body contains. It then answers with a mock (a file from `mocks/<preset>/` or a
-  body you type in), answers with a status code, adds a delay, or drops the connection; a mock,
-  status or drop can also wait first. *Apply* is *Always*, *Once* (until it has applied; then
-  *Re-arm*) or *Every Nth* matching request. Rules are checked top to bottom: every rule that
-  is on and matches counts the request, and the first one that applies decides. The switch on
+  body you type in), answers with a status code, adds a delay, drops the connection or pauses
+  at a breakpoint; a mock, status or drop can also wait first. Two more actions change the
+  request instead of answering it: *Rewrite* and *Map remote*. *Apply* is *Always*, *Once*
+  (until it has applied; then *Re-arm*) or *Every Nth* matching request. Rules are checked top
+  to bottom, and every rule that is on and matches counts the request. Rewrite and Map remote
+  rules (labelled *Changes* in the list) all apply, in order; then the first other rule
+  (labelled *Answers*) that applies decides. When Wiretrace answers the request itself (a mock,
+  a status, a drop, a fault or a mock file), nothing goes to the server, so the change rules
+  are not applied. The switch on
   each row turns a rule on or off. *Test* checks the rule against the request selected in
   Traffic without counting it. Each rule shows how often it matched and applied, and when it
   last matched; the counters start again at zero when Wiretrace restarts or the rule changes.
   *Import…* and *Export…* read and write a rules file. Saving checks every field and keeps the
   previous rules if something is not valid; if the file changed in the meantime, the window
   loads it again instead of overwriting it. A flow changed by a rule carries the comment
-  `rule: <name>` and the *FAULT* or *MOCK* badge.
+  `rule: <name>` and the *FAULT* or *MOCK* badge. A rules file saved with a pause, Rewrite or
+  Map remote rule cannot be loaded by Wiretrace 0.9.1.
+  - *Pause at a breakpoint* (*The request*, *The response* or *Both*): the request waits in
+    Traffic, orange with *PAUSED* and how long it has waited; the title bar shows *⏸ N paused*
+    and *Continue all*. Select it to edit the method, path, headers and body (or, for a
+    response, the status, headers and body); *Original* shows it as it arrived and *Undo
+    edits* restores it. *Continue* (*Send to app* for a response) sends it with your edits,
+    *Abort* gives the app a network error. Apps usually give up after 30–60 seconds, and the
+    window says so after 20. At most 10 requests wait at once; a binary body or one over
+    1 MiB cannot be edited. Pausing needs a Wiretrace window open: without one (or with
+    mitmweb or `--no-ui`) the request goes on, with the comment `breakpoint: not paused, no
+    window`, and paused requests go on by themselves 30 seconds after the last window closed.
+    Stopping or switching the session aborts them. A paused request keeps `breakpoint:
+    request` (or `response`) in its comment, and *EDITED* when you changed it.
+  - *Rewrite*: 1 to 20 changes, each on the *Request* or the *Response*: *Set header*, *Add
+    header*, *Remove header*, *Set JSON field* and *Remove JSON field*. A JSON path is
+    `data.user.isPremium`, `items[0].price`, or `["key.with.dots"]`; the value is JSON
+    (`true`, `12`, `"text"`, `null`). Host, Content-Length and connection headers cannot be
+    changed. A JSON change applies only to a JSON body up to 1 MiB, and the body is written
+    back compactly (`1.50` becomes `1.5`); a missing field or a body that is not JSON skips that
+    change. The request shows *REWRITTEN*, its comment `rewrite: <rule> (N changes)`, and the
+    *Changes* tab lists each change, with the values of `Authorization`, `Cookie` and similar
+    headers masked. The Request and Response tabs show what was really sent and received.
+  - *Map remote*: sends matching requests to another server, for example the app's
+    production API host to `https://staging-api.example.com`. Choose *https* or *http*, the
+    host and the port; the path and query are kept, and the preview shows the result. The
+    target cannot be this Mac or an address on your network: `localhost`, `*.local`, 10.x,
+    172.16–31.x, 192.168.x, 100.64–127.x and similar are refused on save, and a name that
+    resolves to one of them is refused when the request is made (the app gets status 502 and
+    the comment says `map remote: refused, local address`). The app's tokens and cookies go to
+    that server too, and with *http* anyone on the network path can read them. Only the first
+    matching Map remote applies; Rewrite changes then apply to the mapped request. The row shows
+    *MAPPED*; Traffic, the host list and filters keep the host the app asked for, the detail
+    adds *Sent to*, and the comment says `map remote: <host> → <target>`. WebSocket
+    connections are not mapped.
+  - *Map local*: in Traffic, select a request with a response and click *Map local…* (or
+    right-click its row). The dialog proposes `mocks/<preset>/saved/<METHOD>_<path>.json`, the
+    response's status and its body, which you can edit. *Save and map* writes the file and,
+    with *Answer with it now* on, adds a mock rule for that method, host and path at the top of
+    the rules, so the next matching request is answered from the file (*MOCK*). With it off,
+    only the file is written; a name under `<METHOD>/…` then answers on its own (see *Mock a
+    response*). An existing file is replaced only after you confirm. The file keeps the
+    response as it was, tokens and personal data included: edit them out before you share the
+    mocks folder.
 - **Report bug.** A form shaped like a YouTrack or Jira issue, for the request selected in
   Traffic, or the most recent failed request when none is selected, or the whole session when
   nothing failed. It works on the session shown: the one running now (the requests saved so

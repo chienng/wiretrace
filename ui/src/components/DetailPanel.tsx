@@ -1,24 +1,89 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '../api';
 import { copyText } from '../clipboard';
+import { draftOf, phaseText, waited } from '../logic/breakpoint';
 import { buildCurl, mockFilePath } from '../logic/curl';
 import { flowUrl } from '../logic/filters';
 import { formatDuration, formatTime, methodClass, methodLabel, statusClass } from '../logic/format';
+import { decryptOff, hostPort, notDecryptedText, openFor, tunnelTag } from '../logic/hosts';
 import { matchesRequest } from '../logic/logs';
+import { newRuleOff, replayOff, SAFE_METHODS } from '../logic/flowMenu';
+import { mapLocalOff } from '../logic/mapLocal';
+import { deviceText } from '../logic/proxyDevices';
+import { changeGroups, changeGroupTitle, changeParts, sideText } from '../logic/rules';
 import { useData, useDispatch, useStore } from '../store';
-import type { FlowDetail, FlowSummary, Headers } from '../types';
+import type { FlowDetail, FlowSummary, Headers, TunnelRow } from '../types';
+import { useNow } from '../hooks';
 import { BodyView } from './BodyView';
+import { BreakpointEditor, BreakpointOriginal } from './BreakpointEditor';
 import { LogRow, LOG_ROW_HEIGHT } from './LogRow';
 import { VirtualList } from './VirtualList';
 
-type Tab = 'request' | 'response' | 'headers' | 'timing' | 'logs';
+type Tab = 'edit' | 'original' | 'request' | 'response' | 'headers' | 'changes' | 'timing' | 'logs';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'request', label: 'Request' },
   { id: 'response', label: 'Response' },
   { id: 'headers', label: 'Headers' },
+  { id: 'changes', label: 'Changes' },
   { id: 'timing', label: 'Timing' },
   { id: 'logs', label: 'Logs' },
 ];
+
+function Changes({ detail }: { detail: FlowDetail }) {
+  return (
+    <div className="scroll">
+      <div className="hsec">
+        {detail.changes.length === 0 && !detail.map_remote && <div className="note">No change recorded for this request.</div>}
+        {detail.map_remote && (
+          <div className="chg-group">
+            <div className="sec-h">Map remote{detail.map_remote.rule && ` · rule ${detail.map_remote.rule}`}</div>
+            <div className="chg-row">
+              <span className="ok" aria-label="Applied">
+                ✓
+              </span>
+              <span className="on">{sideText('request')}</span>
+              <span>
+                {detail.map_remote.from} → <code>{detail.map_remote.to}</code>
+              </span>
+            </div>
+          </div>
+        )}
+        {changeGroups(detail.changes).map((g, i) => (
+          <div key={i} className="chg-group">
+            <div className="sec-h">{changeGroupTitle(g)}</div>
+            {g.entries.map((c, j) => {
+              const { label, target, value } = changeParts(c);
+              return (
+                <div key={j} className="chg-row">
+                  <span className={c.applied ? 'ok' : 'skip'} aria-label={c.applied ? 'Applied' : 'Skipped'}>
+                    {c.applied ? '✓' : '–'}
+                  </span>
+                  <span className="on">{sideText(c.on)}</span>
+                  <span>
+                    {label} <code>{target}</code>
+                    {value !== null && (
+                      <>
+                        {' '}
+                        = <code>{value}</code>
+                      </>
+                    )}
+                    {!c.applied && c.reason && <span className="why"> · skipped: {c.reason}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        ))}
+        {detail.comment && (
+          <>
+            <div className="sec-h chg-comment">Comment</div>
+            <div className="hv">{detail.comment}</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
 
 type Loaded = { id: string; detail: FlowDetail } | { id: string; error: string };
 
@@ -96,10 +161,71 @@ function FlowLogs({ requestId }: { requestId: string | null }) {
   );
 }
 
-/** Methods that repeat no side effect on the backend: replayed without asking (spec 008 decision 5). */
-const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+/** A connection passed through without decrypting: what is known about it, and how to decrypt its host. */
+export function TunnelDetail({ tunnel, onDecrypt }: { tunnel: TunnelRow; onDecrypt: (host: string) => void }) {
+  const { appState } = useStore();
+  const { viewing } = useData();
+  const off = decryptOff(appState, tunnel.host, viewing);
+  return (
+    <div className="detail">
+      <div className="detail-head">
+        <div className="line1">
+          <span className="m conn">{tunnel.method}</span>
+          <span className="url" title={hostPort(tunnel)}>
+            {hostPort(tunnel)}
+          </span>
+          <span className="tag enc">{tunnelTag(tunnel)}</span>
+        </div>
+        <div className="meta">
+          {tunnel.client && (
+            <span>
+              Device <b className={tunnel.client === 'mac' || tunnel.client === 'wireguard' ? undefined : 'mono'}>{deviceText(tunnel.client)}</b>
+            </span>
+          )}
+          <span>
+            Opened <b>{formatTime(tunnel.ts)}</b>
+          </span>
+          <span>
+            {tunnel.closed_at === null ? 'Still open' : <>Open for <b>{openFor(tunnel)}</b></>}
+          </span>
+        </div>
+      </div>
+      <div className="detail-body">
+        <div className="scroll">
+          <div className="infobox">
+            <span className="t">Not decrypted</span>
+            <span>{notDecryptedText(tunnel.host, appState?.preset ?? '')}</span>
+            <button type="button" className="btn primary small" disabled={off !== null} title={off ?? undefined} onClick={() => onDecrypt(tunnel.host)}>
+              Decrypt this host…
+            </button>
+          </div>
+          {tunnel.headers && <HeaderTable title="CONNECT request from the phone" headers={tunnel.headers} />}
+          {tunnel.answer && (
+            <div className="hsec">
+              <div className="sec-h">Answer</div>
+              <div className="kvtable">
+                <div className="kvrow">
+                  <span className="hk">Status</span>
+                  <span className="hv">{tunnel.answer.replace(/^HTTP\/1\.1 /, '')} (sent by Wiretrace)</span>
+                </div>
+                <div className="kvrow">
+                  <span className="hk">Then</span>
+                  <span className="hv">{tunnel.tls ? 'TLS straight to the server, not read' : 'Bytes straight to the server, not read'}</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
+export function Waited({ since }: { since: number | null }) {
+  return <b className="mono">{waited(since, useNow(1000))}</b>;
+}
+
+export function DetailPanel({ flow, onMapLocal }: { flow: FlowSummary | null; onMapLocal: (flow: FlowSummary) => void }) {
   const dispatch = useDispatch();
   const { appState } = useStore();
   const { logs, viewing } = useData();
@@ -108,15 +234,27 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
   const [mockNote, setMockNote] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [replaying, setReplaying] = useState(false);
+  const [refetch, setRefetch] = useState(0);
 
   const id = flow?.id ?? null;
-  // Refetch when the flow gains a response, an error or a size.
-  const version = flow ? `${flow.status}|${flow.error}|${flow.size}|${flow.duration_ms}` : '';
+  const paused = flow?.paused ?? null;
+  // Refetch when the flow gains a response, an error or a size, or pauses or goes on.
+  const version = flow ? `${flow.status}|${flow.error}|${flow.size}|${flow.duration_ms}|${paused}|${refetch}` : '';
 
   useEffect(() => {
     setMockNote(null);
     setConfirming(false);
   }, [id]);
+
+  useEffect(() => {
+    if (paused) setTab('edit');
+    else setTab((t) => (t === 'edit' || t === 'original' ? 'response' : t));
+  }, [id, paused]);
+
+  const changed = (flow?.rewritten ?? false) || (flow?.mapped ?? false);
+  useEffect(() => {
+    if (!changed) setTab((t) => (t === 'changes' ? 'response' : t));
+  }, [id, changed]);
 
   useEffect(() => {
     if (id === null) {
@@ -148,6 +286,12 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
 
   const detail = loaded && 'detail' in loaded && loaded.id === flow.id ? loaded.detail : null;
   const error = loaded && 'error' in loaded && loaded.id === flow.id ? loaded.error : null;
+  const held = flow.paused ? (detail?.breakpoint ?? null) : null;
+  const draft = held && detail ? draftOf(detail) : null;
+  const shown = changed ? TABS : TABS.filter((t) => t.id !== 'changes');
+  const tabs: { id: Tab; label: string }[] = held
+    ? [{ id: 'edit', label: held.phase === 'request' ? 'Edit request' : 'Edit response' }, { id: 'original', label: 'Original' }, ...shown]
+    : shown;
 
   const copyCurl = async () => {
     if (!detail) return;
@@ -181,13 +325,8 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
     }
   };
   const askReplay = () => (SAFE_METHODS.has(flow.method.toUpperCase()) ? void replay() : setConfirming(true));
-  const replayOff = viewing
-    ? 'Replay is off while a previous session is open'
-    : flow.websocket
-      ? 'WebSocket connections cannot be replayed'
-      : flow.status === null && flow.error === null
-        ? 'This request is still in progress'
-        : null;
+  const replayOffText = replayOff(flow, viewing);
+  const mapOff = mapLocalOff(flow, viewing);
 
   const sc = statusClass(flow.status);
 
@@ -202,17 +341,36 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           {flow.status !== null && <span className={`st ${sc}`}>{flow.status}</span>}
           {flow.status === null && flow.error !== null && <span className="st s5">ERR</span>}
           {flow.replay_of && <span className="tag replay">Replay</span>}
+          {flow.paused && <span className="tag paused">Paused</span>}
+          {!flow.paused && flow.edited && <span className="tag edited">Edited</span>}
+          {flow.mapped && <span className="tag mapped">Mapped</span>}
+          {flow.rewritten && <span className="tag rewritten">Rewritten</span>}
         </div>
         <div className="meta">
+          {flow.paused && (
+            <span>
+              {phaseText(flow.paused)} · <Waited since={flow.paused_since} />
+            </span>
+          )}
           <span>
             Host <b>{flow.host}</b>
           </span>
+          {flow.mapped && flow.sent_to && (
+            <span className="sent-to">
+              Sent to <b>{flow.sent_to}</b>
+            </span>
+          )}
           <span>
             Duration <b>{formatDuration(flow.duration_ms)}</b>
           </span>
           <span>
             Request ID <b className="mono">{flow.request_id ?? '—'}</b>
           </span>
+          {flow.client && (
+            <span>
+              Device <b className={flow.client === 'mac' || flow.client === 'wireguard' ? undefined : 'mono'}>{deviceText(flow.client)}</b>
+            </span>
+          )}
           {flow.replay_of && (
             <span>
               Replay of{' '}
@@ -230,7 +388,10 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
           <button type="button" className="btn small" onClick={copyMock} disabled={!detail}>
             Copy as mock
           </button>
-          <button type="button" className="btn small" onClick={askReplay} disabled={replayOff !== null || replaying} title={replayOff ?? 'Send this request again'}>
+          <button type="button" className="btn small" onClick={() => onMapLocal(flow)} disabled={mapOff !== null} title={mapOff ?? 'Save the response as a mock file and answer with it'}>
+            Map local…
+          </button>
+          <button type="button" className="btn small" onClick={askReplay} disabled={replayOffText !== null || replaying} title={replayOffText ?? 'Send this request again'}>
             {replaying ? 'Replaying…' : 'Replay'}
           </button>
           <button type="button" className="btn small" onClick={() => dispatch({ type: 'ui', patch: { dialog: 'compare' } })}>
@@ -241,7 +402,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
             className="btn small"
             onClick={() => dispatch({ type: 'newRuleFrom', flow })}
             disabled={!!viewing}
-            title={viewing ? 'Rules are off while a previous session is open' : 'A rule for this method, host and path'}
+            title={newRuleOff(viewing) ?? 'A rule for this method, host and path'}
           >
             New rule
           </button>
@@ -270,7 +431,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
         )}
       </div>
       <div className="tabs">
-        {TABS.map((t) => (
+        {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
@@ -285,6 +446,11 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
       <div className="detail-body">
         {error && <div className="note warn">{error}</div>}
         {!error && !detail && tab !== 'logs' && <div className="note">Loading…</div>}
+        {detail && tab === 'edit' && held && draft && (
+          <BreakpointEditor key={`${flow.id}:${held.revision}`} flowId={flow.id} held={held} initial={draft} onGone={() => setRefetch((n) => n + 1)} />
+        )}
+        {detail && tab === 'edit' && !held && <div className="note">Loading…</div>}
+        {detail && tab === 'original' && held && <BreakpointOriginal held={held} />}
         {detail && tab === 'request' && (
           <>
             <div className="codehead">
@@ -311,6 +477,7 @@ export function DetailPanel({ flow }: { flow: FlowSummary | null }) {
             {detail.response && <HeaderTable title="Response headers" headers={detail.response.headers} />}
           </div>
         )}
+        {detail && tab === 'changes' && changed && <Changes detail={detail} />}
         {detail && tab === 'timing' && <Timing detail={detail} />}
         {tab === 'logs' && <FlowLogs requestId={requestId} />}
       </div>
