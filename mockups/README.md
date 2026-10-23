@@ -104,3 +104,89 @@ Opened from **Preset** in the title bar (*Edit presets…*, *New preset…*). Bu
 | Choose another preset | Same restart, using that file. |
 
 The name of an existing preset stays fixed. The form edits hosts, the Android package, the iOS process, the request-ID header, the starting filter, and extra names to hide.
+
+## 10. More devices, port 8889, encrypted hosts, breakpoints, rewrite, map local, map remote
+
+Design for [spec 022](../docs/specs/022-more-devices-port-encrypted-hosts-breakpoints.md). Source: [`proxy-and-breakpoints-mockup.html`](proxy-and-breakpoints-mockup.html), styled from `ui/src/styles.css`; purple dashed outlines mark what is new. Designed at 1440 px. Each screen renders on its own:
+
+```bash
+C="/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+r() { "$C" --headless=new --user-data-dir=/tmp/wt-chrome --hide-scrollbars --force-device-scale-factor=2 \
+  --window-size=$2 --screenshot=mockups/screens/$3.png "file://$PWD/mockups/proxy-and-breakpoints-mockup.html?only=$1"; }
+r s10a 1480,1000 10a-devices-on-one-port; r s10b 1480,1000 10b-allow-device; r s10c 1480,1000 10c-remove-device
+r s10d 1480,1000 10d-encrypted-hosts; r s10e 1480,1000 10e-decrypt-host; r s10f 1480,800 10f-setup-port
+r s10g 1480,800 10g-change-port; r s10h 1480,1000 10h-breakpoint-rule; r s10i 1480,1000 10i-paused-request
+r s10j 1480,1000 10j-paused-response; r s10k 1480,1000 10k-rewrite-rule; r s10l 1480,1000 10l-map-remote-rule
+r s10m 1480,1000 10m-mapped-and-rewritten; r s10n 1480,1000 10n-map-local-menu; r s10o 1480,1000 10o-map-local-dialog
+```
+
+### 10a. Several phones on one port
+
+![Several phones on one port](screens/10a-devices-on-one-port.png)
+
+| Area | What it does |
+|---|---|
+| Sidebar, Wi-Fi proxy | Always visible: the address phones set as their proxy (`192.168.1.20:8889`), **Copy**, **Change…** (the port). |
+| Sidebar, Devices | Each accepted phone by IP address, with its request count; ⚠ counts failed TLS handshakes (it does not trust the certificate yet). Clicking one filters Traffic. |
+| Device column | Next to Time: which phone sent each request; "This Mac" for the simulator or emulator. |
+| Banner | Spec 021's banner gains **Allow…**: the device joins this session without a restart. **Switch to it…** still starts over with only that device. It is now solid amber with a phone icon, pulses 3 times when a new device asks (no pulse with Reduce motion), and the tab title shows the waiting count, "(1) Wiretrace". |
+
+### 10b. Allow a device
+
+![Allow a device](screens/10b-allow-device.png)
+
+The tester checks the address on the phone first. At most 4 devices besides this Mac; at the limit, **Allow…** is disabled.
+
+### 10c. Remove a device
+
+![Remove a device](screens/10c-remove-device.png)
+
+**×** on a device row (or right-click). The proxy refuses it from then on; its requests already listed stay. It can ask again through the banner. With no device left, every device has to be allowed.
+
+### 10d. Encrypted connections
+
+![Encrypted connections](screens/10d-encrypted-hosts.png)
+
+Hosts outside the preset's API hosts show as grey **Encrypted** rows (host, port, when it opened, how long), in memory for the live session only. Right-click or **Decrypt this host…** adds the host or its parent domain to the API hosts. **Show encrypted** and the **Encrypted** quick filter hide or isolate them.
+
+### 10e. Decrypt a host
+
+![Decrypt a host](screens/10e-decrypt-host.png)
+
+Written to the preset and applied without a restart; open connections stay encrypted until the app reconnects.
+
+### 10f–10g. Port 8889, and changing it
+
+![Setup with the port](screens/10f-setup-port.png)
+
+![Change the port](screens/10g-change-port.png)
+
+8889 by default, so Charles (8888) can run on the same Mac. Changing the port saves this session and starts a new one on the new port; Wiretrace keeps it for the next sessions.
+
+### 10h–10j. Breakpoints
+
+![Breakpoint rule](screens/10h-breakpoint-rule.png)
+
+![Paused request](screens/10i-paused-request.png)
+
+![Paused response](screens/10j-paused-response.png)
+
+A rule with the action **Pause** stops a request before it is sent, its response before the app gets it, or both. The paused request is edited in the detail panel, then **Continue** or **Abort**; the title bar counts paused requests and has **Continue all**. Only while a window is open, at most 10 at once.
+
+### 10k–10m. Rewrite and Map remote
+
+![Rewrite rule](screens/10k-rewrite-rule.png)
+
+![Map remote rule](screens/10l-map-remote-rule.png)
+
+![Mapped and rewritten requests](screens/10m-mapped-and-rewritten.png)
+
+Two new actions that **change** a request instead of answering it. **Rewrite** sets, adds or removes headers and sets or removes JSON fields, on the request or the response. **Map remote** sends matching requests to another server (scheme, host, port; path and query kept), never to this Mac or the LAN. Change rules all apply in order; the first **Answers** rule (mock, status, delay, drop, pause) still ends the search, and when Wiretrace answers itself the changes are skipped. Traffic tags rows **MAPPED** and **REWRITTEN**; the detail shows **Sent to** and a **Changes** tab, and the comment names the rules and the target.
+
+### 10n–10o. Map local from a request
+
+![Map local menu](screens/10n-map-local-menu.png)
+
+![Map local dialog](screens/10o-map-local-dialog.png)
+
+Right-click a request (or **Map local…** in the detail): the response, editable, is saved under `mocks/<preset>/saved/` and, with **Answer with it now**, a Mock rule using it goes to the top of the rules.
