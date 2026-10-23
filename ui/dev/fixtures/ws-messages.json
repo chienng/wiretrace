@@ -1,0 +1,10 @@
+{
+  "messages": [
+    { "from_client": true, "type": "text", "text": "hello there\nsecond line" },
+    { "from_client": false, "type": "text", "text": "{\"type\":\"notification\",\"unread\":2}" },
+    { "from_client": true, "type": "binary", "hex": "000102ff" },
+    { "from_client": false, "type": "text", "text": "dropped update", "dropped": true },
+    { "from_client": true, "type": "text", "text": "injected by mitmproxy", "injected": true },
+    { "from_client": false, "type": "text", "text": "server push" }
+  ]
+}

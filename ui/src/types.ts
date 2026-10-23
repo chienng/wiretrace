@@ -15,6 +15,12 @@ export interface FlowSummary {
   mock: boolean;
   fault: string | null;
   websocket: boolean;
+  /** Messages on a WebSocket connection; null for any other row. */
+  ws_messages: number | null;
+  /** Who closed it: the app (`client`) or the server. Null while it is open, and for other rows. */
+  ws_closed_by: 'client' | 'server' | null;
+  ws_close_code: number | null;
+  ws_close_reason: string | null;
   /** The id of the request this one replays; null for a request from the app. */
   replay_of: string | null;
   /** Who sent it: the device's address, `mac` for this Mac (simulator, emulator), `wireguard` for a tunnel client. */
@@ -278,6 +284,40 @@ export interface Body {
   size: number;
   truncated: boolean;
   binary: boolean;
+}
+
+export type WsDirection = 'all' | 'sent' | 'received';
+
+/** One row of a WebSocket's Messages tab. `index` is its place in the connection. */
+export interface WsMessageSummary {
+  index: number;
+  from_client: boolean;
+  type: 'text' | 'binary';
+  ts: number;
+  size: number;
+  preview: string;
+  dropped: boolean;
+  injected: boolean;
+}
+
+export interface WsMessagePage {
+  total: number;
+  matched: number;
+  messages: WsMessageSummary[];
+}
+
+/** One message's content. Text is `text`; binary is lowercase hex. Cut at 2 MiB; `size` is the real length. */
+export interface WsMessageContent {
+  index: number;
+  from_client: boolean;
+  type: 'text' | 'binary';
+  ts: number;
+  size: number;
+  truncated: boolean;
+  dropped: boolean;
+  injected: boolean;
+  text: string | null;
+  hex: string | null;
 }
 
 export type Headers = [string, string][];

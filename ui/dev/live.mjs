@@ -32,6 +32,10 @@ export function liveFlow(n, epoch, done = true, prefix = 'live') {
     mock: n % 11 === 0,
     fault: n % 13 === 0 ? 'status 500' : null,
     websocket: false,
+    ws_messages: null,
+    ws_closed_by: null,
+    ws_close_code: null,
+    ws_close_reason: null,
   };
 }
 

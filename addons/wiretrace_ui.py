@@ -4,7 +4,8 @@ A Tornado application on mitmproxy's own asyncio loop, so every hook and every r
 on one thread and flows are read without locks. Listens on 127.0.0.1 only; every page, API
 call and WebSocket needs the token that is printed once as a link in the Terminal.
 Specs: docs/specs/006-wiretrace-ui-first-slice.md, 008-window-like-the-mockups.md, 013-switch-preset.md,
-018-switch-device.md, 021-switch-to-another-phone.md, 022-more-devices-port-encrypted-hosts-breakpoints.md.
+018-switch-device.md, 021-switch-to-another-phone.md, 022-more-devices-port-encrypted-hosts-breakpoints.md,
+025-websocket-messages-tab.md.
 
 Configured through mitmproxy options (`qa_ui_*`); the token is never an option. The addon
 prints the link and errors only: no flow content, header or log line goes to the Terminal.
@@ -132,6 +133,9 @@ SNIFF_BYTES = 8192
 MAX_META_BYTES = 64 << 10
 SEARCH_MIN = 3
 SEARCH_MAX = 200
+# A WebSocket message list page, and how much of a message the preview and the text search read.
+WS_PAGE_MAX = 500
+WS_PREVIEW_BYTES = 64 << 10
 # Flows searched between two yields to the event loop.
 SEARCH_CHUNK = 50
 SOURCES = {"device": session.DEVICE_LOG, "app": session.APP_LOG}
@@ -415,7 +419,12 @@ def summary(flow: http.HTTPFlow, paused: tuple[str, float] | None = None) -> dic
     faults = part_value(parts, "fault:")
     replays = part_value(parts, "replay:")
     start = request.timestamp_start
-    end = response.timestamp_end if response else (flow.error.timestamp if flow.error else None)
+    ws = flow.websocket
+    # A WebSocket's duration is how long the connection was open, known once it closes.
+    if ws is not None:
+        end = ws.timestamp_end
+    else:
+        end = response.timestamp_end if response else (flow.error.timestamp if flow.error else None)
     size = len(response.raw_content) if response is not None and response.raw_content is not None else None
     mapped = mapped_of(flow)
     return {
@@ -434,7 +443,8 @@ def summary(flow: http.HTTPFlow, paused: tuple[str, float] | None = None) -> dic
         "request_id": clean(request_ids[0]) if request_ids else None,
         "mock": any(part.startswith("mock:") for part in parts),
         "fault": clean(", ".join(faults)) if faults else None,
-        "websocket": flow.websocket is not None,
+        "websocket": ws is not None,
+        **ws_summary(ws),
         "replay_of": clean(replays[0]) if replays else None,
         "client": client_of(flow),
         "paused": paused[0] if paused else None,
@@ -443,6 +453,26 @@ def summary(flow: http.HTTPFlow, paused: tuple[str, float] | None = None) -> dic
         "rewritten": any(part.startswith("rewrite:") for part in parts),
         "mapped": mapped is not None,
         "sent_to": clean(mapped["to"]) if mapped else None,
+    }
+
+
+def ws_summary(ws: Any) -> dict:
+    """Message count and how the connection closed. All null until the flow is a WebSocket."""
+    empty = {"ws_messages": None, "ws_closed_by": None, "ws_close_code": None, "ws_close_reason": None}
+    if ws is None:
+        return empty
+    if ws.timestamp_end is None and ws.closed_by_client is None:
+        closed_by = None
+    elif ws.closed_by_client:
+        closed_by = "client"
+    else:
+        closed_by = "server"
+    reason = clean(ws.close_reason or "").replace("\r", " ").replace("\n", " ").strip()
+    return {
+        "ws_messages": len(ws.messages),
+        "ws_closed_by": closed_by,
+        "ws_close_code": ws.close_code if closed_by is not None else None,
+        "ws_close_reason": (reason or None) if closed_by is not None else None,
     }
 
 
@@ -937,6 +967,74 @@ def text_matches(flow: http.HTTPFlow, needle: str) -> bool:
     return False
 
 
+def message_matches(message: Any, direction: str, needle: str) -> bool:
+    """Direction, then text: binary messages and the part past 64 KiB are not searched."""
+    if direction == "sent" and not message.from_client:
+        return False
+    if direction == "received" and message.from_client:
+        return False
+    if not needle:
+        return True
+    if not message.is_text:
+        return False
+    text = bytes(message.content or b"")[:WS_PREVIEW_BYTES].decode("utf-8", "replace")
+    return needle in text.lower()
+
+
+def message_summary(index: int, message: Any) -> dict:
+    """One list row. The preview is the first line of a text message, from its first 64 KiB."""
+    content = bytes(message.content or b"")
+    if message.is_text:
+        preview = clean(content[:WS_PREVIEW_BYTES].decode("utf-8", "replace").split("\n", 1)[0].rstrip("\r"))
+    else:
+        preview = f"binary, {len(content)} B"
+    return {
+        "index": index,
+        "from_client": bool(message.from_client),
+        "type": "text" if message.is_text else "binary",
+        "ts": message.timestamp,
+        "size": len(content),
+        "preview": preview,
+        "dropped": bool(message.dropped),
+        "injected": bool(message.injected),
+    }
+
+
+def message_page(messages: list, start: int, limit: int, direction: str, query: str) -> dict:
+    """Matches with an index at or after `start`, at most `limit`, plus the totals. `matched` counts every match."""
+    needle = query.lower()
+    matched = 0
+    page = []
+    for index, message in enumerate(messages):
+        if not message_matches(message, direction, needle):
+            continue
+        matched += 1
+        if index < start or len(page) >= limit:
+            continue
+        page.append(message_summary(index, message))
+    return {"total": len(messages), "matched": matched, "messages": page}
+
+
+def message_content(message: Any, index: int) -> dict:
+    """One message, text or hex, cut at 2 MiB. `size` stays the real length."""
+    data = bytes(message.content or b"")
+    size = len(data)
+    shown = data[:MAX_BODY_BYTES]
+    text = message.is_text
+    return {
+        "index": index,
+        "from_client": bool(message.from_client),
+        "type": "text" if text else "binary",
+        "ts": message.timestamp,
+        "size": size,
+        "truncated": size > MAX_BODY_BYTES,
+        "dropped": bool(message.dropped),
+        "injected": bool(message.injected),
+        "text": clean(shown.decode("utf-8", "replace")) if text else None,
+        "hex": None if text else shown.hex(),
+    }
+
+
 # Flows and live updates
 
 class Hub:
@@ -1135,6 +1233,73 @@ class FlowDetail(Guarded):
         shown = detail(flow, display_dir(self.addon.mocks_dir(), self.addon.data_dir()), self.addon.hub.paused.get(flow_id) if live else None)
         shown["breakpoint"] = breakpoint_view(held) if held is not None else None
         self.write(shown)
+
+
+class WsMessages(Guarded):
+    """One page of a WebSocket's messages. The messages stay in the flow; this only reads them."""
+
+    async def get(self, flow_id: str) -> None:
+        flow = self.websocket_flow(flow_id)
+        if flow is None:
+            return
+        try:
+            start, limit, direction, query = self.message_query()
+        except ValueError as e:
+            return self.fail(400, str(e))
+        messages = list(flow.websocket.messages)
+        try:
+            page = await asyncio.to_thread(message_page, messages, start, limit, direction, query)
+        except Exception as e:
+            logger.error("Wiretrace UI: could not list messages (%s)", type(e).__name__)
+            return self.fail(500, "Could not list messages")
+        self.write(page)
+
+    def message_query(self) -> tuple[int, int, str, str]:
+        raw_from = self.get_query_argument("from", "0")
+        raw_limit = self.get_query_argument("limit", str(WS_PAGE_MAX))
+        direction = self.get_query_argument("dir", "all")
+        query = self.get_query_argument("q", "")
+        if not raw_from.isdigit():
+            raise ValueError("from must be a whole number")
+        if not raw_limit.isdigit() or int(raw_limit) < 1:
+            raise ValueError("limit must be a whole number")
+        if direction not in ("all", "sent", "received"):
+            raise ValueError("dir must be all, sent or received")
+        if len(query) > SEARCH_MAX:
+            raise ValueError(f"Search for at most {SEARCH_MAX} characters")
+        return int(raw_from), min(int(raw_limit), WS_PAGE_MAX), direction, query
+
+    def websocket_flow(self, flow_id: str) -> http.HTTPFlow | None:
+        store = self.store()
+        if store is None:
+            return None
+        flow = store.flows.get(flow_id)
+        if flow is None:
+            self.fail(404, "Unknown request: it was never listed or has been dropped from memory.")
+            return None
+        if getattr(flow, "websocket", None) is None:
+            self.fail(400, "Not a WebSocket connection")
+            return None
+        return flow
+
+
+class WsMessage(WsMessages):
+    """One message's content, bounded like a request body."""
+
+    async def get(self, flow_id: str, index: str) -> None:
+        flow = self.websocket_flow(flow_id)
+        if flow is None:
+            return
+        messages = flow.websocket.messages
+        i = int(index)
+        if i >= len(messages):
+            return self.fail(400, "No message at that index")
+        try:
+            body = await asyncio.to_thread(message_content, messages[i], i)
+        except Exception as e:
+            logger.error("Wiretrace UI: could not read a message (%s)", type(e).__name__)
+            return self.fail(500, "Could not read the message")
+        self.write(body)
 
 
 class Filter(Guarded):
@@ -1765,6 +1930,8 @@ class WiretraceUI:
                 (r"/api/flows/([^/]+)/replay", Replay, handler_args),
                 (r"/api/flows/([^/]+)/breakpoint", BreakpointAction, handler_args),
                 (r"/api/flows/([^/]+)/map-local", MapLocal, handler_args),
+                (r"/api/flows/([^/]+)/messages/(\d+)", WsMessage, handler_args),
+                (r"/api/flows/([^/]+)/messages", WsMessages, handler_args),
                 (r"/api/breakpoints/continue-all", ContinueAll, handler_args),
                 (r"/api/flows/([^/]+)", FlowDetail, handler_args),
                 (r"/api/filter", Filter, handler_args),
@@ -1812,6 +1979,10 @@ class WiretraceUI:
             logger.error("Wiretrace UI: could not list a request (%s)", type(e).__name__)
 
     response = websocket_start = websocket_end = track
+
+    def websocket_message(self, flow: http.HTTPFlow) -> None:
+        # The row's count goes out with the next batch. The messages stay in the flow.
+        self.track(flow)
 
     def request(self, flow: http.HTTPFlow) -> None:
         self.track(flow)

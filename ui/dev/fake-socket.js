@@ -6,6 +6,7 @@ const EPOCH = __EPOCH__;
 const NativeWebSocket = window.WebSocket;
 const sockets = new Set();
 let last = Math.floor(Date.now() / 1000 - EPOCH);
+let wsSeen = -1;
 
 class FakeSocket {
   constructor(url) {
@@ -49,6 +50,16 @@ setInterval(() => {
     setTimeout(() => broadcast({ type: 'flows', flows: [liveFlow(k, EPOCH, true)] }), 350);
     const { device, app } = liveLines(k, EPOCH);
     broadcast({ type: 'logs', lines: app ? [device, app] : [device] });
+  }
+  if (last !== wsSeen) {
+    wsSeen = last;
+    fetch('/api/flows')
+      .then((res) => res.json())
+      .then((body) => {
+        const ws = body.flows?.find((flow) => flow.path === '/ws/notifications');
+        if (ws) broadcast({ type: 'flows', flows: [ws] });
+      })
+      .catch(() => {});
   }
 }, 250);
 

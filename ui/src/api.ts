@@ -22,6 +22,9 @@ import type {
   SessionInfo,
   TunnelRow,
   ViewResult,
+  WsDirection,
+  WsMessageContent,
+  WsMessagePage,
 } from './types';
 
 export class ForbiddenError extends Error {
@@ -116,6 +119,25 @@ export const api = {
   flows: async (session?: string | null) => (await request<{ flows: FlowSummary[] }>(withSession('/api/flows', {}, session))).flows,
   flow: (id: string, signal?: AbortSignal, session?: string | null) =>
     request<FlowDetail>(withSession(`/api/flows/${encodeURIComponent(id)}`, {}, session), {}, signal),
+  /** One page of a WebSocket's messages. `from` is the first message index; `q` searches text only. */
+  wsMessages: (
+    id: string,
+    query: { from: number; limit: number; dir: WsDirection; q: string },
+    signal?: AbortSignal,
+    session?: string | null,
+  ) =>
+    request<WsMessagePage>(
+      withSession(
+        `/api/flows/${encodeURIComponent(id)}/messages`,
+        { from: String(query.from), limit: String(query.limit), dir: query.dir, ...(query.q ? { q: query.q } : {}) },
+        session,
+      ),
+      {},
+      signal,
+    ),
+  /** One message, text or hex, up to 2 MiB. */
+  wsMessage: (id: string, index: number, signal?: AbortSignal, session?: string | null) =>
+    request<WsMessageContent>(withSession(`/api/flows/${encodeURIComponent(id)}/messages/${index}`, {}, session), {}, signal),
   filter: async (expr: string, signal?: AbortSignal, session?: string | null) =>
     (await request<{ ids: string[] }>(withSession('/api/filter', { expr }, session), {}, signal)).ids,
   search: async (q: string, signal?: AbortSignal, session?: string | null) =>

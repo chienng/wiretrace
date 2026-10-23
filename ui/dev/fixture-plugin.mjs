@@ -84,6 +84,7 @@ export default function fixtures() {
     ...shiftTimes(read('flows.json'), shift).map((f) => ({ ...f, client: f.client ?? '192.0.2.31' })),
   ];
   const details = shiftTimes(read('flow-details.json'), shift);
+  const wsBase = read('ws-messages.json').messages;
   const logs = { device: shiftTimes(read('logs-device.json'), shift), app: shiftTimes(read('logs-app.json'), shift) };
   let reportBusy = false;
 
@@ -91,8 +92,109 @@ export default function fixtures() {
   const allFlows = () => {
     const out = baseFlows.slice();
     for (let n = 1; n <= liveCount(); n++) out.push(liveFlow(n, epoch));
-    return out;
+    const messages = wsMessagesFor('fx-05');
+    return out.map((f) =>
+      f.id === 'fx-05'
+        ? {
+            ...f,
+            status: 101,
+            websocket: true,
+            duration_ms: null,
+            size: null,
+            ws_messages: messages.length,
+            ws_closed_by: null,
+            ws_close_code: null,
+            ws_close_reason: null,
+          }
+        : {
+            ...f,
+            ws_messages: f.ws_messages ?? null,
+            ws_closed_by: f.ws_closed_by ?? null,
+            ws_close_code: f.ws_close_code ?? null,
+            ws_close_reason: f.ws_close_reason ?? null,
+          },
+    );
   };
+
+  function materialize(raw, index, ts) {
+    const type = raw.type === 'binary' ? 'binary' : 'text';
+    const text = type === 'text' ? String(raw.text ?? '') : null;
+    const hex = type === 'binary' ? String(raw.hex ?? '') : null;
+    const size = type === 'text' ? text.length : Math.floor(hex.length / 2);
+    const preview = type === 'text' ? text.split('\n', 1)[0] : `binary, ${size} B`;
+    return {
+      index,
+      from_client: !!raw.from_client,
+      type,
+      ts,
+      size,
+      preview,
+      dropped: !!raw.dropped,
+      injected: !!raw.injected,
+      text,
+      hex,
+    };
+  }
+
+  function wsMessagesFor(id) {
+    if (id !== 'fx-05') return null;
+    const out = wsBase.map((raw, index) => materialize(raw, index, epoch - 12 + index * 0.2));
+    const extra = Math.max(0, Math.floor(Date.now() / 1000 - epoch));
+    for (let i = 0; i < extra; i++) {
+      const text = JSON.stringify({ type: 'tick', n: i + 1 });
+      out.push(materialize({ from_client: i % 2 === 1, type: 'text', text }, out.length, epoch + i));
+    }
+    return out;
+  }
+
+  function wsSummary(message) {
+    const { text: _text, hex: _hex, ...row } = message;
+    return row;
+  }
+
+  function wsAnswer(id, index, url) {
+    const all = wsMessagesFor(id);
+    if (all === null) {
+      const found = allFlows().find((flow) => flow.id === id);
+      return found ? [400, { error: 'Not a WebSocket connection' }] : [404, { error: 'unknown flow' }];
+    }
+    if (index !== undefined) {
+      const message = all[Number(index)];
+      if (!message) return [400, { error: 'No message at that index' }];
+      return [
+        200,
+        {
+          index: message.index,
+          from_client: message.from_client,
+          type: message.type,
+          ts: message.ts,
+          size: message.size,
+          truncated: false,
+          dropped: message.dropped,
+          injected: message.injected,
+          text: message.text,
+          hex: message.hex,
+        },
+      ];
+    }
+    const from = Number(url.searchParams.get('from') ?? '0');
+    const rawLimit = Number(url.searchParams.get('limit') ?? '500');
+    const dir = url.searchParams.get('dir') ?? 'all';
+    const q = url.searchParams.get('q') ?? '';
+    if (!Number.isInteger(from) || from < 0) return [400, { error: 'from must be a whole number' }];
+    if (!Number.isInteger(rawLimit) || rawLimit < 1) return [400, { error: 'limit must be a whole number' }];
+    if (dir !== 'all' && dir !== 'sent' && dir !== 'received') return [400, { error: 'dir must be all, sent or received' }];
+    if (q.length > 200) return [400, { error: 'Search for at most 200 characters' }];
+    const limit = Math.min(500, rawLimit);
+    const needle = q.toLowerCase();
+    const matched = all.filter((message) => {
+      if (dir === 'sent' && !message.from_client) return false;
+      if (dir === 'received' && message.from_client) return false;
+      if (!needle) return true;
+      return message.type === 'text' && String(message.text ?? '').toLowerCase().includes(needle);
+    });
+    return [200, { total: all.length, matched: matched.length, messages: matched.filter((message) => message.index >= from).slice(0, limit).map(wsSummary) }];
+  }
   const allLogs = (source) => {
     const out = logs[source].slice();
     for (let n = 1; n <= liveCount(); n++) {
@@ -142,6 +244,8 @@ export default function fixtures() {
       if (!state.api_hosts.includes(host)) state.api_hosts.push(host);
       return [200, { host, applied: true }];
     }
+    const wsPath = /^\/api\/flows\/([^/]+)\/messages(?:\/(\d+))?$/.exec(p);
+    if (method === 'GET' && wsPath) return wsAnswer(decodeURIComponent(wsPath[1]), wsPath[2], url);
     if (method === 'GET' && p.startsWith('/api/flows/')) {
       const id = decodeURIComponent(p.slice('/api/flows/'.length));
       if (details[id]) return [200, details[id]];

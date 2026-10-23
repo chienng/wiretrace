@@ -277,7 +277,7 @@ illustrative. The mockups of every screen, with their source and notes, are in
   Simulator screenshots. You copy and download; nothing is sent anywhere.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
   and logs on one screen, a log timeline with the device's status, earlier sessions, search in
-  headers and bodies, replay and compare, the setup wizard and the Rules view. It also lists
+  headers and bodies, the messages of a WebSocket connection, replay and compare, the setup wizard and the Rules view. It also lists
   the connections it does not decrypt, and decrypts one more host on request. It is only
   reachable from the same Mac, with a new
   token at every start. While it runs, the menu bar shows that Wiretrace is recording and how

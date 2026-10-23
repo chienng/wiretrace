@@ -896,14 +896,26 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 - **Traffic list.** One row per request to the preset's hosts, as it happens: time, device
   (with the Wi-Fi proxy on: the phone's address, *This Mac* for a simulator or emulator,
   *WireGuard* for the tunnel), method, status (coloured by class, errors in red), path,
-  duration and size. A row can carry the badges *MOCK*, *FAULT*, *SLOW*, *REPLAY*, *PAUSED*,
+  duration and size. A WebSocket row shows its message count in the size column (↕ 128),
+  updating while the connection is open; once it closes, the duration is how long it was open.
+  A row can carry the badges *MOCK*, *FAULT*, *SLOW*, *REPLAY*, *PAUSED*,
   *EDITED*, *REWRITTEN* and *MAPPED* (see *Rules*). Right-click a row for *Map local…*, *Copy as
   mock*, *New rule from this request*, *Replay* and *Copy cURL*. The log receiver
   `qa-logs.internal` is not listed. The window keeps the newest 10,000 requests; older ones
   are only in `flows.mitm`.
 - **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
-  that carry this request's ID, with their number). *Copy cURL* copies the request as a `curl`
+  that carry this request's ID, with their number). A WebSocket row opens on *Messages*
+  instead, with the handshake still on the other tabs. Each message is one row: ↑ sent by the
+  app or ↓ received from the server, the time, text or binary, the size and a one-line
+  preview. New messages appear while the tab is open and the list follows the newest, until
+  you scroll up or select one. Select a message to read it below the list: JSON is folded,
+  other text is shown as text, and binary is a hex dump of its first 4 KiB. *Copy* copies the
+  text, or the hex for a binary message. The search box and *All*, *Sent* and *Received* narrow
+  the list, and the count reads how many match, such as *12 of 128*. The line above the list
+  says *Open* or who closed the connection, with the code and the reason. The same tab works
+  on a session opened from *Previous sessions*. A very busy connection keeps the newest
+  messages and loads older ones as you scroll up. *Copy cURL* copies the request as a `curl`
   command. *Copy as mock* copies the response body and shows the file to create under
   `mocks/<preset>/` (see *Mock a response*). *Map local…* writes that file for you (see *Map
   local* under *Rules*). A request changed by a Rewrite or Map remote rule has a *Changes* tab

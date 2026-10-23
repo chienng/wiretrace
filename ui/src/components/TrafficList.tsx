@@ -6,7 +6,8 @@ import { GIVE_UP, giveUpHint, waited } from '../logic/breakpoint';
 import { buildCurl, mockFilePath } from '../logic/curl';
 import { isError, isSlow } from '../logic/filters';
 import { copyMockOff, newRuleOff, replayOff, SAFE_METHODS } from '../logic/flowMenu';
-import { formatDuration, formatSize, formatTime, methodClass, methodLabel, statusClass } from '../logic/format';
+import { formatDuration, formatTime, methodClass, methodLabel, statusClass } from '../logic/format';
+import { trafficSize } from '../logic/wsMessages';
 import { decryptChoices, decryptMenuLabel, decryptOff, hostPort, isTunnel, openFor, tunnelTag } from '../logic/hosts';
 import { mapLocalOff } from '../logic/mapLocal';
 import { deviceText } from '../logic/proxyDevices';
@@ -76,7 +77,7 @@ const FlowRow = memo(function FlowRow({ flow, selected, onSelect, showDevice, on
         {flow.path}
       </span>
       {flow.paused ? <PausedFor since={flow.paused_since} /> : <span className="c-num c-dur">{formatDuration(flow.duration_ms)}</span>}
-      <span className="c-num c-size">{formatSize(flow.size)}</span>
+      <span className="c-num c-size">{trafficSize(flow.websocket, flow.ws_messages, flow.size)}</span>
       <span className="c-badges">
         {flow.paused && <span className="tag paused">Paused</span>}
         {!flow.paused && flow.edited && <span className="tag edited">Edited</span>}

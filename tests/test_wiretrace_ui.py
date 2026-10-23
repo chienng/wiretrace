@@ -392,7 +392,8 @@ def test_summary_of_a_response():
         "id": flow.id, "ts": 946681200, "method": "POST", "scheme": "http", "host": HOST,
         "port": flow.request.port, "path": "/api/v1/home?page=2", "status": 503, "error": None,
         "duration_ms": 3000, "size": 40, "mime": "application/json", "request_id": "req-7",
-        "mock": False, "fault": None, "websocket": False, "replay_of": None, "client": "mac",
+        "mock": False, "fault": None, "websocket": False, "ws_messages": None, "ws_closed_by": None,
+        "ws_close_code": None, "ws_close_reason": None, "replay_of": None, "client": "mac",
         "paused": None, "paused_since": None, "edited": False, "rewritten": False, "mapped": False, "sent_to": None}
 
 
@@ -4963,3 +4964,206 @@ def test_022_g_a_map_target_on_this_macs_network_is_refused_on_save(tmp_path):
         assert json.loads(response.body)["field"] == "action.target.host"
 
     rules_scenario(body, tmp_path)
+
+
+# WebSocket messages (spec 025)
+
+
+def ws_text(text, from_client=True, dropped=False, injected=False, timestamp=1.0):
+    from mitmproxy.websocket import Opcode, WebSocketMessage
+    data = text if isinstance(text, bytes) else text.encode()
+    return WebSocketMessage(Opcode.TEXT, from_client, data, timestamp, dropped, injected)
+
+
+def ws_binary(data, from_client=True, timestamp=1.0):
+    from mitmproxy.websocket import Opcode, WebSocketMessage
+    return WebSocketMessage(Opcode.BINARY, from_client, data, timestamp, False, False)
+
+
+def open_socket(messages=()):
+    """A WebSocket that is still open: no close, and no duration yet."""
+    flow = tflow.twebsocketflow(messages=False)
+    ws = flow.websocket
+    ws.messages[:] = list(messages)
+    ws.closed_by_client = None
+    ws.timestamp_end = None
+    ws.close_code = None
+    ws.close_reason = ""
+    return flow
+
+
+def test_summary_of_a_websocket_counts_messages_and_how_long_it_was_open():
+    closed = tflow.twebsocketflow(close_code=1001, close_reason="going\naway")
+    summary = wiretrace_ui.summary(closed)
+    assert summary["ws_messages"] == 3
+    assert summary["ws_closed_by"] == "server"
+    assert (summary["ws_close_code"], summary["ws_close_reason"]) == (1001, "going away")
+    assert summary["duration_ms"] == 5000
+    closed.websocket.closed_by_client = True
+    assert wiretrace_ui.summary(closed)["ws_closed_by"] == "client"
+
+    opened = open_socket([ws_text("hi")])
+    summary = wiretrace_ui.summary(opened)
+    assert (summary["ws_messages"], summary["ws_closed_by"], summary["ws_close_code"], summary["duration_ms"]) == (
+        1, None, None, None)
+
+
+def test_many_websocket_messages_in_one_batch_send_one_summary():
+    async def body(ui, client, tctx):
+        socket_ = await client.socket()
+        flow = open_socket()
+        ui.websocket_start(flow)
+        for i in range(5):
+            flow.websocket.messages.append(ws_text(f"m{i}", timestamp=10 + i))
+            ui.websocket_message(flow)
+        seen = await read_until(
+            socket_, lambda m: m.get("type") == "flows" and any(f.get("ws_messages") == 5 for f in m.get("flows", [])))
+        batches = [m for m in seen if m.get("type") == "flows" and any(f["id"] == flow.id for f in m["flows"])]
+        assert len(batches) == 1
+        row = next(f for f in batches[0]["flows"] if f["id"] == flow.id)
+        assert row["ws_messages"] == 5 and row["duration_ms"] is None
+
+    scenario(body)
+
+
+def test_a_message_hook_failure_logs_the_exception_type_only(caplog):
+    async def body(ui, client, tctx):
+        flow = open_socket([ws_text("secret-token-value")])
+        with mock.patch.object(ui.hub, "track", side_effect=RuntimeError("secret-token-value")):
+            ui.websocket_message(flow)
+        assert "RuntimeError" in caplog.text
+        assert "secret-token-value" not in caplog.text
+
+    scenario(body)
+
+
+def test_message_pages_filter_page_and_preview():
+    async def body(ui, client, tctx):
+        huge = b"a" * wiretrace_ui.WS_PREVIEW_BYTES + b"NEEDLE"
+        flow = open_socket([
+            ws_text("Hello\nthere", from_client=True, timestamp=10),
+            ws_text('{"n": 1}', from_client=False, timestamp=11),
+            ws_binary(b"NEEDLE", from_client=True, timestamp=12),
+            ws_text("nope", from_client=False, timestamp=13),
+            ws_text("dropped please", from_client=True, dropped=True, injected=True, timestamp=14),
+            ws_text(huge, from_client=False, timestamp=15),
+        ])
+        ui.websocket_start(flow)
+        page = await client.json(f"/api/flows/{flow.id}/messages")
+        assert (page["total"], page["matched"]) == (6, 6)
+        assert [m["index"] for m in page["messages"]] == list(range(6))
+        assert page["messages"][0]["preview"] == "Hello"
+        assert page["messages"][0]["from_client"] is True and page["messages"][0]["type"] == "text"
+        binary = page["messages"][2]
+        assert (binary["type"], binary["preview"], binary["size"]) == ("binary", "binary, 6 B", 6)
+        flags = page["messages"][4]
+        assert flags["dropped"] is True and flags["injected"] is True
+        preview = page["messages"][5]["preview"]
+        assert "NEEDLE" not in preview and preview == "a" * wiretrace_ui.WS_PREVIEW_BYTES
+        assert page["messages"][5]["size"] == len(huge)
+
+        sent = await client.json(f"/api/flows/{flow.id}/messages?dir=sent")
+        assert sent["matched"] == 3 and [m["index"] for m in sent["messages"]] == [0, 2, 4]
+        received = await client.json(f"/api/flows/{flow.id}/messages?dir=received&q=hello")
+        assert received["matched"] == 0 and received["messages"] == []
+        # "hello" is case-insensitive and does not match the binary message or "nope".
+        found = await client.json(f"/api/flows/{flow.id}/messages?q=hello")
+        assert found["matched"] == 1 and found["messages"][0]["index"] == 0
+        assert (await client.json(f"/api/flows/{flow.id}/messages?q=NEEDLE"))["matched"] == 0
+        assert (await client.json(f"/api/flows/{flow.id}/messages?q={'a' * 200}"))["matched"] == 1
+
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages?q={'b' * 201}")).code == 400
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages?dir=up")).code == 400
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages?from=-1")).code == 400
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages?limit=0")).code == 400
+
+    scenario(body)
+
+
+def test_message_pages_clamp_the_limit_and_start_at_from():
+    async def body(ui, client, tctx):
+        flow = open_socket([ws_text(f"m{i}", timestamp=i) for i in range(600)])
+        ui.websocket_start(flow)
+        page = await client.json(f"/api/flows/{flow.id}/messages?limit=1000")
+        assert page["total"] == 600 and page["matched"] == 600
+        assert [m["index"] for m in page["messages"]] == list(range(500))
+        tail = await client.json(f"/api/flows/{flow.id}/messages?from=200&limit=1000")
+        assert [m["index"] for m in tail["messages"]] == list(range(200, 600))
+        empty = await client.json(f"/api/flows/{flow.id}/messages?from=600")
+        assert empty["messages"] == [] and empty["total"] == 600
+
+    scenario(body)
+
+
+def test_one_message_is_text_json_or_hex_and_stops_at_2_mib():
+    async def body(ui, client, tctx):
+        raw = b'{"unread": 2}'
+        binary = bytes(range(256))
+        big = b"a" * (wiretrace_ui.MAX_BODY_BYTES + 10)
+        flow = open_socket([
+            ws_text("plain"),
+            ws_text(raw.decode()),
+            ws_binary(binary),
+            ws_text(big),
+        ])
+        ui.websocket_start(flow)
+        text = await client.json(f"/api/flows/{flow.id}/messages/0")
+        assert text["text"] == "plain" and text["hex"] is None and text["truncated"] is False
+        parsed = await client.json(f"/api/flows/{flow.id}/messages/1")
+        assert json.loads(parsed["text"]) == {"unread": 2} and parsed["type"] == "text"
+        dumped = await client.json(f"/api/flows/{flow.id}/messages/2")
+        assert dumped["text"] is None and dumped["hex"] == binary.hex() and dumped["type"] == "binary"
+        over = await client.json(f"/api/flows/{flow.id}/messages/3")
+        assert over["truncated"] is True and over["size"] == len(big) and len(over["text"]) == wiretrace_ui.MAX_BODY_BYTES
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages/4")).code == 400
+
+    scenario(body)
+
+
+def test_message_endpoints_refuse_what_is_not_a_websocket_and_need_the_cookie():
+    async def body(ui, client, tctx):
+        http_flow = make_flow()
+        ui.request(http_flow)
+        socket_flow = open_socket([ws_text("hi")])
+        ui.websocket_start(socket_flow)
+        assert (await client.fetch("/api/flows/missing/messages")).code == 404
+        assert (await client.fetch(f"/api/flows/{http_flow.id}/messages")).code == 400
+        assert (await client.fetch(f"/api/flows/{http_flow.id}/messages/0")).code == 400
+        assert (await client.fetch(f"/api/flows/{socket_flow.id}/messages", cookie=False)).code == 403
+        assert (await client.fetch(f"/api/flows/{socket_flow.id}/messages/0", cookie=False)).code == 403
+
+    scenario(body)
+
+
+def test_a_failure_while_listing_messages_logs_the_exception_type_only(caplog):
+    async def body(ui, client, tctx):
+        flow = open_socket([ws_text("secret-token-value")])
+        ui.websocket_start(flow)
+        with mock.patch.object(wiretrace_ui, "message_page", side_effect=RuntimeError("secret-token-value api.example.com")):
+            response = await client.fetch(f"/api/flows/{flow.id}/messages")
+        assert response.code == 500
+        assert json.loads(response.body)["error"] == "Could not list messages"
+        assert "RuntimeError" in caplog.text
+        assert "secret-token-value" not in caplog.text
+        assert "api.example.com" not in caplog.text
+
+    scenario(body)
+
+
+def test_messages_of_a_previous_session(sessions):
+    live, old, _ = sessions
+    flow = tflow.twebsocketflow(close_code=1000, close_reason="normal")
+    write_flows(old / session.FLOWS, [flow])
+
+    async def body(ui, client, tctx):
+        await client.json("/api/view", method="POST", body={"session": OLD})
+        page = await client.json(f"/api/flows/{flow.id}/messages?session={OLD}")
+        assert page["total"] == 3 and page["messages"][1]["preview"] == "hello text"
+        one = await client.json(f"/api/flows/{flow.id}/messages/1?session={OLD}")
+        assert one["text"] == "hello text"
+        listed = await client.json(f"/api/flows?session={OLD}")
+        row = next(item for item in listed["flows"] if item["id"] == flow.id)
+        assert row["ws_closed_by"] == "server" and row["ws_close_code"] == 1000 and row["ws_messages"] == 3
+        assert (await client.fetch(f"/api/flows/{flow.id}/messages")).code == 404
+
+    scenario(body, folder=live)

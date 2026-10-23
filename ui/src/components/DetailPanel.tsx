@@ -9,25 +9,19 @@ import { decryptOff, hostPort, notDecryptedText, openFor, tunnelTag } from '../l
 import { matchesRequest } from '../logic/logs';
 import { newRuleOff, replayOff, SAFE_METHODS } from '../logic/flowMenu';
 import { mapLocalOff } from '../logic/mapLocal';
+import { detailTabs } from '../logic/wsMessages';
 import { deviceText } from '../logic/proxyDevices';
 import { changeGroups, changeGroupTitle, changeParts, sideText } from '../logic/rules';
 import { useData, useDispatch, useStore } from '../store';
 import type { FlowDetail, FlowSummary, Headers, TunnelRow } from '../types';
 import { useNow } from '../hooks';
 import { BodyView } from './BodyView';
+import { WsMessages } from './WsMessages';
 import { BreakpointEditor, BreakpointOriginal } from './BreakpointEditor';
 import { LogRow, LOG_ROW_HEIGHT } from './LogRow';
 import { VirtualList } from './VirtualList';
 
-type Tab = 'edit' | 'original' | 'request' | 'response' | 'headers' | 'changes' | 'timing' | 'logs';
-const TABS: { id: Tab; label: string }[] = [
-  { id: 'request', label: 'Request' },
-  { id: 'response', label: 'Response' },
-  { id: 'headers', label: 'Headers' },
-  { id: 'changes', label: 'Changes' },
-  { id: 'timing', label: 'Timing' },
-  { id: 'logs', label: 'Logs' },
-];
+type Tab = 'edit' | 'original' | 'messages' | 'request' | 'response' | 'headers' | 'changes' | 'timing' | 'logs';
 
 function Changes({ detail }: { detail: FlowDetail }) {
   return (
@@ -246,15 +240,17 @@ export function DetailPanel({ flow, onMapLocal }: { flow: FlowSummary | null; on
     setConfirming(false);
   }, [id]);
 
+  const changed = (flow?.rewritten ?? false) || (flow?.mapped ?? false);
+  const socket = flow?.websocket ?? false;
+  useEffect(() => {
+    if (!changed) setTab((t) => (t === 'changes' ? (socket ? 'messages' : 'response') : t));
+  }, [id, changed, socket]);
+
   useEffect(() => {
     if (paused) setTab('edit');
-    else setTab((t) => (t === 'edit' || t === 'original' ? 'response' : t));
-  }, [id, paused]);
-
-  const changed = (flow?.rewritten ?? false) || (flow?.mapped ?? false);
-  useEffect(() => {
-    if (!changed) setTab((t) => (t === 'changes' ? 'response' : t));
-  }, [id, changed]);
+    else if (socket) setTab('messages');
+    else setTab((t) => (t === 'edit' || t === 'original' || t === 'messages' ? 'response' : t));
+  }, [id, paused, socket]);
 
   useEffect(() => {
     if (id === null) {
@@ -288,7 +284,7 @@ export function DetailPanel({ flow, onMapLocal }: { flow: FlowSummary | null; on
   const error = loaded && 'error' in loaded && loaded.id === flow.id ? loaded.error : null;
   const held = flow.paused ? (detail?.breakpoint ?? null) : null;
   const draft = held && detail ? draftOf(detail) : null;
-  const shown = changed ? TABS : TABS.filter((t) => t.id !== 'changes');
+  const shown = detailTabs(socket, changed);
   const tabs: { id: Tab; label: string }[] = held
     ? [{ id: 'edit', label: held.phase === 'request' ? 'Edit request' : 'Edit response' }, { id: 'original', label: 'Original' }, ...shown]
     : shown;
@@ -445,7 +441,8 @@ export function DetailPanel({ flow, onMapLocal }: { flow: FlowSummary | null; on
       </div>
       <div className="detail-body">
         {error && <div className="note warn">{error}</div>}
-        {!error && !detail && tab !== 'logs' && <div className="note">Loading…</div>}
+        {!error && !detail && tab !== 'logs' && tab !== 'messages' && <div className="note">Loading…</div>}
+        {tab === 'messages' && socket && <WsMessages flow={flow} session={viewing} />}
         {detail && tab === 'edit' && held && draft && (
           <BreakpointEditor key={`${flow.id}:${held.revision}`} flowId={flow.id} held={held} initial={draft} onGone={() => setRefetch((n) => n + 1)} />
         )}
