@@ -1,4 +1,20 @@
-import type { FlowSummary, LogLine } from '../types';
+import type { FlowSummary, LogLine, TunnelRow } from '../types';
+
+export function tunnel(over: Partial<TunnelRow> = {}): TunnelRow {
+  return {
+    id: 'tunnel-1',
+    ts: 1_700_000_000,
+    closed_at: null,
+    client: null,
+    host: 'cdn.example.net',
+    port: 443,
+    tls: true,
+    method: 'CONNECT',
+    headers: [['Host', 'cdn.example.net:443']],
+    answer: 'HTTP/1.1 200 Connection established',
+    ...over,
+  };
+}
 
 export function flow(over: Partial<FlowSummary> = {}): FlowSummary {
   return {
@@ -19,6 +35,13 @@ export function flow(over: Partial<FlowSummary> = {}): FlowSummary {
     fault: null,
     websocket: false,
     replay_of: null,
+    client: null,
+    paused: null,
+    paused_since: null,
+    edited: false,
+    rewritten: false,
+    mapped: false,
+    sent_to: null,
     ...over,
   };
 }

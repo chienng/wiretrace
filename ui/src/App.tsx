@@ -11,13 +11,13 @@ import { Toast } from './components/Toast';
 import { TrafficView } from './components/TrafficView';
 import { Connection } from './connection';
 import { useServerFilter } from './hooks';
-import { applyFilters, hostCounts, quickCounts } from './logic/filters';
+import { applyFilters, clientCounts, hostCounts, mergeRows, quickCounts } from './logic/filters';
 import { APP_HINT, loadDismissed, showAppHint, storeDismissed } from './logic/appHint';
 import { flowLinkChoice } from './logic/flowLink';
 import { takeResume } from './logic/setup';
 import { browserStorage } from './storage';
 import { useData, useDispatch, useStore } from './store';
-import type { FlowSummary } from './types';
+import type { FlowSummary, TunnelRow } from './types';
 import { backToLive } from './viewing';
 
 function useConnection(switching: string | null) {
@@ -122,27 +122,44 @@ export function App() {
   useConnection(switching);
   useFlowLink();
   const resumed = useSetupResume();
-  const { flows, viewing } = useData();
+  const { flows, tunnels, viewing } = useData();
 
   // Pause and Clear act on the live session only.
   const listed = useMemo(
     () => (viewing ? flows : flows.filter((f) => !ui.hidden.has(f.id) && (ui.frozen === null || ui.frozen.has(f.id)))),
     [viewing, flows, ui.hidden, ui.frozen],
   );
+  const listedTunnels = useMemo(
+    () => tunnels.filter((t) => !ui.hidden.has(t.id) && (ui.frozen === null || ui.frozen.has(t.id))),
+    [tunnels, ui.hidden, ui.frozen],
+  );
   const newCount = useMemo(
     () => (viewing || ui.frozen === null ? 0 : flows.filter((f) => !ui.hidden.has(f.id) && !ui.frozen!.has(f.id)).length),
     [viewing, flows, ui.hidden, ui.frozen],
   );
-  const counts = useMemo(() => quickCounts(listed), [listed]);
+  const counts = useMemo(() => quickCounts(listed, listedTunnels, ui.showEncrypted), [listed, listedTunnels, ui.showEncrypted]);
   const hosts = useMemo(() => hostCounts(listed), [listed]);
+  const clients = useMemo(() => clientCounts(listed), [listed]);
   const server = useServerFilter(ui.search, flows, viewing);
   const filtered = useMemo(
-    () => applyFilters(listed, { quick: ui.quick, host: ui.host, text: ui.search, serverIds: server.ids }),
-    [listed, ui.quick, ui.host, ui.search, server.ids],
+    () =>
+      applyFilters(mergeRows(listed, listedTunnels), {
+        quick: ui.quick,
+        host: ui.host,
+        client: ui.client,
+        text: ui.search,
+        serverIds: server.ids,
+        showEncrypted: ui.showEncrypted,
+      }),
+    [listed, listedTunnels, ui.quick, ui.host, ui.client, ui.search, server.ids, ui.showEncrypted],
   );
   const selected = useMemo<FlowSummary | null>(
     () => (ui.selectedFlowId === null ? null : (flows.find((f) => f.id === ui.selectedFlowId) ?? null)),
     [flows, ui.selectedFlowId],
+  );
+  const selectedTunnel = useMemo<TunnelRow | null>(
+    () => (ui.selectedFlowId === null ? null : (tunnels.find((t) => t.id === ui.selectedFlowId) ?? null)),
+    [tunnels, ui.selectedFlowId],
   );
 
   if (switching) {
@@ -179,7 +196,17 @@ export function App() {
       <ProxyDeviceBanner viewing={viewing} />
       <AppHint viewing={viewing} />
       <main className="main">
-        {ui.view === 'traffic' && <TrafficView flows={filtered} selected={selected} counts={counts} hosts={hosts} filterError={server.error} />}
+        {ui.view === 'traffic' && (
+          <TrafficView
+            rows={filtered}
+            selected={selected}
+            selectedTunnel={selectedTunnel}
+            counts={counts}
+            hosts={hosts}
+            clients={clients}
+            filterError={server.error}
+          />
+        )}
         {ui.view === 'logs' && <LogsView />}
         {ui.view === 'rules' && !view && <RulesView />}
       </main>

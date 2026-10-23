@@ -131,6 +131,8 @@ export default function fixtures() {
     if ((method === 'PUT' || method === 'POST' || method === 'DELETE') && req.headers['x-wiretrace'] !== '1') return [403, { error: 'missing header' }];
     if (method === 'GET' && p === '/api/state') return [200, { ...state, flow_count: allFlows().length }];
     if (method === 'GET' && p === '/api/flows') return [200, { flows: allFlows() }];
+    if (method === 'GET' && p === '/api/tunnels') return [200, { tunnels: [] }];
+    if (method === 'GET' && p === '/api/rules') return [200, read('rules.json')];
     if (method === 'GET' && p.startsWith('/api/flows/')) {
       const id = decodeURIComponent(p.slice('/api/flows/'.length));
       if (details[id]) return [200, details[id]];

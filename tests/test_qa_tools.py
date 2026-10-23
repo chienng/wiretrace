@@ -17,6 +17,7 @@ from pathlib import Path
 
 import pytest
 from mitmproxy import exceptions
+from mitmproxy import http as mhttp
 from mitmproxy.test import taddons, tflow
 
 from addons import qa_tools
@@ -77,7 +78,7 @@ def test_non_api_host_is_untouched(mocks, host):
         assert flow.live and flow.killable and flow.error is None
 
         answered = make_flow(host, response_headers={"X-Request-ID": "def"})
-        addon.response(answered)
+        await addon.response(answered)
         assert answered.comment == ""
 
     scenario(body, qa_mocks_dir=str(mocks), qa_fault_filter="~all", qa_fault_status=500,
@@ -547,7 +548,7 @@ def test_request_id_from_the_request_header():
 
         flow.response = tflow.tresp()
         flow.response.headers["X-Request-ID"] = "from-response"
-        addon.response(flow)
+        await addon.response(flow)
         assert flow.comment == "request-id: req-1"
 
     scenario(body)
@@ -558,7 +559,7 @@ def test_request_id_from_the_response_when_the_request_has_none():
         flow = make_flow(response_headers={"X-Request-ID": "resp-1"})
         await addon.request(flow)
         assert flow.comment == ""
-        addon.response(flow)
+        await addon.response(flow)
         assert flow.comment == "request-id: resp-1"
 
     scenario(body)
@@ -568,7 +569,7 @@ def test_no_request_id_anywhere_leaves_no_comment():
     async def body(addon, tctx):
         flow = make_flow(response_headers={})
         await addon.request(flow)
-        addon.response(flow)
+        await addon.response(flow)
         assert flow.comment == ""
 
     scenario(body)
@@ -581,7 +582,7 @@ def test_request_id_is_cut_to_128_characters():
         assert flow.comment == "request-id: " + "x" * 128
 
         answered = make_flow(response_headers={"X-Request-ID": "y" * 300})
-        addon.response(answered)
+        await addon.response(answered)
         assert answered.comment == "request-id: " + "y" * 128
 
     scenario(body)
@@ -593,7 +594,7 @@ def test_response_request_id_goes_first_in_the_comment(mocks):
         await addon.request(flow)
         assert flow.comment == "fault: delay 10 ms; mock: GET/api/v1/profile.json"
         flow.response.headers["X-Request-ID"] = "resp-1"
-        addon.response(flow)
+        await addon.response(flow)
         assert flow.comment == "request-id: resp-1; fault: delay 10 ms; mock: GET/api/v1/profile.json"
 
     scenario(body, qa_mocks_dir=str(mocks), qa_fault_filter="~all", qa_fault_delay_ms=10)
@@ -869,6 +870,275 @@ def test_testing_a_rule_changes_no_counter(tmp_path):
     scenario(body, qa_rules_file=str(file))
 
 
+# Breakpoints (spec 022, slice D)
+
+PAUSE = {"type": "pause", "status": 200, "body": "", "mock_file": "", "delay_ms": 0}
+
+
+class FakeWindow:
+    """The window addon's side of a pause: it may refuse, and it registers what paused."""
+    name = "wiretraceui"
+
+    def __init__(self, refusal=None):
+        self.refusal = refusal
+        self.held: list[tuple[str, str]] = []
+        self.originals: list = []
+
+    def pause_refusal(self):
+        return self.refusal
+
+    def paused(self, flow, phase, original=None):
+        self.held.append((flow.id, phase))
+        self.originals.append(original)
+
+
+def pause_scenario(tmp_path, body, pause_at="request", window=None, **options):
+    file = tmp_path / "rules.json"
+    write_rules(file, rule(action={**PAUSE, "pause_at": pause_at}))
+
+    async def run(addon, tctx):
+        if window is not None:
+            tctx.master.addons.add(window)
+        await body(addon, tctx)
+
+    scenario(run, qa_rules_file=str(file), **{"qa_breakpoints": True, **options})
+
+
+def with_response(flow):
+    flow.response = tflow.tresp()
+    return flow
+
+
+@pytest.mark.parametrize("pause_at, at_request, at_response", [
+    ("request", True, False), ("response", False, True), ("both", True, True)])
+def test_022_d_a_pause_rule_holds_the_flow_at_its_phase(tmp_path, pause_at, at_request, at_response):
+    window = FakeWindow()
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        assert flow.intercepted is at_request and flow.response is None
+        flow.resume()
+        answering = asyncio.create_task(addon.response(with_response(flow)))
+        await asyncio.sleep(0.01)
+        assert flow.intercepted is at_response and answering.done() is not at_response
+        flow.resume()
+        await asyncio.wait_for(answering, 1)
+        phases = [phase for _, phase in window.held]
+        assert phases == [p for p, on in (("request", at_request), ("response", at_response)) if on]
+        expected = ["rule: Orders fail"] + [f"breakpoint: {p}" for p in phases]
+        assert flow.comment == "; ".join(expected)
+        assert qa_tools.PAUSE_KEY not in flow.metadata
+
+    pause_scenario(tmp_path, body, pause_at, window)
+
+
+@pytest.mark.parametrize("window, option, reason", [
+    (FakeWindow("10 already paused"), True, "10 already paused"),
+    (None, True, "no window"),
+    (FakeWindow(), False, "no window"),
+])
+def test_022_d_a_match_that_cannot_pause_passes_with_its_comment(tmp_path, window, option, reason):
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        assert not flow.intercepted and flow.response is None
+        assert flow.comment == f"rule: Orders fail; breakpoint: not paused, {reason}"
+        assert not (window and window.held)
+
+    pause_scenario(tmp_path, body, window=window, qa_breakpoints=option)
+
+
+def test_022_d_replays_and_websocket_handshakes_are_never_paused(tmp_path):
+    window = FakeWindow()
+
+    async def body(addon, tctx):
+        replayed = post()
+        replayed.is_replay = "request"
+        socket = post(headers={"Upgrade": "websocket", "Connection": "Upgrade"})
+        for flow in (replayed, socket):
+            await addon.request(flow)
+            assert not flow.intercepted and "breakpoint" not in flow.comment
+        assert window.held == []
+
+    pause_scenario(tmp_path, body, pause_at="both", window=window)
+
+
+def test_022_d_pause_rules_parse_and_old_files_still_load():
+    for field, action in (("action.delay_ms", {**PAUSE, "delay_ms": 100}),
+                          ("action.pause_at", {**PAUSE, "pause_at": "later"}),
+                          ("action.pause_at", {**PAUSE, "pause_at": 1})):
+        got = parse(rule(action=action))
+        assert isinstance(got, qa_tools.RuleError) and got.field == field
+    paused = parse(rule(action=PAUSE)).rules[0]
+    assert paused.pause_at == "request" and paused.data["action"]["pause_at"] == "request"
+    assert qa_tools.describe(paused).startswith("Paused before it is sent")
+    # A 0.9.1 rule keeps exactly its keys, so the file it is saved back to still loads in 0.9.1.
+    assert parse(rule()).rules[0].data == rule()
+    assert parse(rule(action={"pause_at": "request"})).rules[0].data == rule()
+
+
+# Rewrite rules and the rule order (spec 022, slice E)
+
+def rewrite_rule(rule_id="rewrite1", name="Premium", ops=None, action=None, **over):
+    ops = ops if ops is not None else [
+        {"on": "request", "op": "set_header", "name": "X-Feature", "value": "on"},
+        {"on": "response", "op": "set_json", "path": "data.isPremium", "value": "true"}]
+    return rule(id=rule_id, name=name, action={"type": "rewrite", "status": 200, "body": "", "mock_file": "",
+                                               "delay_ms": 0, "ops": ops, **(action or {})}, **over)
+
+
+def server_answer(flow, body=b'{"data": {"isPremium": false}}', **headers):
+    flow.response = tflow.tresp()
+    flow.response.headers["Content-Type"] = "application/json"
+    for name, value in headers.items():
+        flow.response.headers[name] = value
+    flow.response.content = body
+    return flow
+
+
+def test_022_e_rewrite_changes_the_request_now_and_the_response_later(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rewrite_rule())
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        assert flow.response is None and flow.request.headers["X-Feature"] == "on"
+        assert flow.comment == "rewrite: Premium (2 changes)"
+        assert qa_tools.REWRITE_KEY in flow.metadata
+        await addon.response(server_answer(flow))
+        assert json.loads(flow.response.content) == {"data": {"isPremium": True}}
+        assert qa_tools.REWRITE_KEY not in flow.metadata
+        changes = flow.metadata[qa_tools.CHANGES_KEY]
+        assert [(c["on"], c["op"], c["target"], c["applied"]) for c in changes] == [
+            ("request", "set_header", "X-Feature", True), ("response", "set_json", "data.isPremium", True)]
+        assert addon.rule_stats()["rewrite1"] == {**addon.rule_stats()["rewrite1"], "matches": 1, "applied": 1}
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_022_e_change_rules_stack_and_an_answer_ends_the_walk(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file,
+                rewrite_rule("rewrite1", "One", [{"on": "request", "op": "add_header", "name": "X-A", "value": "1"}]),
+                rule(id="slowrule", name="Slow", action={"type": "delay", "delay_ms": 20}),
+                rewrite_rule("rewrite2", "Two", [{"on": "request", "op": "add_header", "name": "X-A", "value": "2"}]))
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        # The delay answers: the walk ends there, so the second Rewrite is neither counted nor applied.
+        assert flow.request.headers.get_all("X-A") == ["1"]
+        assert flow.comment == "rule: Slow; fault: delay 20 ms; rewrite: One (1 change)"
+        stats = addon.rule_stats()
+        assert (stats["rewrite1"]["applied"], stats["slowrule"]["applied"], stats["rewrite2"]["matches"]) == (1, 1, 0)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_022_e_a_request_answered_by_wiretrace_is_never_rewritten(tmp_path, mocks):
+    file = tmp_path / "rules.json"
+    write_rules(file, rewrite_rule(apply={"mode": "once"}),
+                rule(id="status50", action={"status": 503}, match={"method": "POST", "path": "/api/v1/orders"}))
+
+    async def body(addon, tctx):
+        answered = post()
+        await addon.request(answered)
+        assert answered.response.status_code == 503 and "X-Feature" not in answered.request.headers
+        assert "rewrite" not in answered.comment and qa_tools.CHANGES_KEY not in answered.metadata
+        await addon.response(answered)
+        assert json.loads(answered.response.content) == {"error": "injected by Wiretrace"}
+        # A once rule not applied stays armed.
+        assert addon.rule_stats()["rewrite1"] == {**addon.rule_stats()["rewrite1"], "matches": 1, "applied": 0}
+        mocked = make_flow()
+        mocked_rules = [rewrite_rule(match={"method": "GET", "path": "/api/v1/profile"})]
+        write_rules(file, *mocked_rules)
+        addon.reload_rules()
+        await addon.request(mocked)
+        assert mocked.marked == qa_tools.MOCK_MARK and "X-Feature" not in mocked.request.headers
+
+    scenario(body, qa_rules_file=str(file), qa_mocks_dir=str(mocks))
+
+
+def test_022_e_response_changes_skip_a_mock_and_a_non_json_body_and_keep_gzip(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rewrite_rule())
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        compressed = server_answer(flow)
+        compressed.response.headers["Content-Encoding"] = "gzip"
+        compressed.response.content = b'{"data": {"isPremium": false}, "price": 1.50}'
+        await addon.response(compressed)
+        assert compressed.response.headers["Content-Encoding"] == "gzip"
+        assert gzip.decompress(compressed.response.raw_content) == b'{"data":{"isPremium":true},"price":1.5}'
+        assert compressed.response.headers["Content-Length"] == str(len(compressed.response.raw_content))
+
+        html = post()
+        await addon.request(html)
+        await addon.response(server_answer(html, b"<html></html>", **{"Content-Type": "text/html"}))
+        assert html.response.content == b"<html></html>"
+        assert html.metadata[qa_tools.CHANGES_KEY][-1]["reason"] == "body is not JSON"
+
+        mocked = post()
+        await addon.request(mocked)
+        mocked.response = mhttp.Response.make(200, b'{"data": {"isPremium": false}}', qa_tools.JSON)
+        mocked.marked = qa_tools.MOCK_MARK
+        await addon.response(mocked)
+        assert json.loads(mocked.response.content) == {"data": {"isPremium": False}}
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_022_e_a_pause_sees_the_rewritten_request_and_its_original_the_one_before(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rewrite_rule(), rule(id="pauserul", name="Hold", action={**PAUSE, "pause_at": "both"}))
+    window = FakeWindow()
+
+    async def body(addon, tctx):
+        tctx.master.addons.add(window)
+        flow = post()
+        await addon.request(flow)
+        assert flow.intercepted and flow.request.headers["X-Feature"] == "on"
+        assert "X-Feature" not in window.originals[0].headers
+        flow.resume()
+        answering = asyncio.create_task(addon.response(server_answer(flow)))
+        await asyncio.sleep(0.01)
+        assert json.loads(flow.response.content)["data"]["isPremium"] is True
+        assert json.loads(window.originals[1].content)["data"]["isPremium"] is False
+        flow.resume()
+        await asyncio.wait_for(answering, 1)
+
+    scenario(body, qa_rules_file=str(file), qa_breakpoints=True)
+
+
+def test_022_e_rewrite_rules_parse_and_files_without_them_keep_0_9_1_keys():
+    assert parse(rewrite_rule(ops=[])).field == "action.ops"
+    assert parse(rewrite_rule(ops=[{"on": "request", "op": "set_header", "name": "Host", "value": "x"}])).field \
+        == "action.ops.0.name"
+    assert parse(rewrite_rule(action={"delay_ms": 10})).field == "action.delay_ms"
+    parsed = parse(rewrite_rule()).rules[0]
+    assert parsed.data["action"]["ops"] == rewrite_rule()["action"]["ops"] and len(parsed.ops) == 2
+    assert qa_tools.describe(parsed) == "The server's response, with 2 changes to the request and the response"
+    for plain in (rule(), rule(action={"type": "delay", "delay_ms": 5}), rule(action={"type": "drop"})):
+        assert set(parse(plain).rules[0].data["action"]) == set(RULE["action"])
+
+
+def test_022_e_an_error_drops_the_pending_response_changes(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, rewrite_rule())
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        addon.error(flow)
+        assert qa_tools.REWRITE_KEY not in flow.metadata
+
+    scenario(body, qa_rules_file=str(file))
+
+
 def test_a_missing_rules_file_means_no_rules(tmp_path):
     async def body(addon, tctx):
         assert addon.rules.rules == () and addon.rules_error == ""
@@ -1080,3 +1350,179 @@ def test_a_mocks_dir_that_resolves_outside_the_wiretrace_folder_is_ignored(tmp_p
     link.symlink_to("/")
     assert qa_tools.mock_file(str(link), "GET", "/etc/passwd") is None
     assert qa_tools.resolve_mock(str(link), "GET/etc/passwd.json") is None
+
+
+# Map remote (spec 022, slice G)
+
+STAGING = "staging-api.example.net"
+
+
+def map_rule(rule_id="maprule1", name="Staging", target=None, **over):
+    target = {"scheme": "https", "host": STAGING, "port": 443, **(target or {})}
+    action = {"type": "map_remote", "status": 200, "body": "", "mock_file": "", "delay_ms": 0, "target": target,
+              **over.pop("action", {})}
+    return rule(id=rule_id, name=name, action=action, **over)
+
+
+@pytest.fixture
+def staging_resolves(monkeypatch):
+    """STAGING and any other name resolve to the addresses in `.answer`; this Mac is 198.51.100.7."""
+    found = {"answer": ["203.0.113.10"], "asked": []}
+
+    async def lookup(host: str):
+        found["asked"].append(host)
+        return [(0, 0, 0, "", (address, 0)) for address in found["answer"]]
+
+    monkeypatch.setattr(qa_tools.guard, "_lookup", lookup)
+    monkeypatch.setattr(qa_tools.guard, "own_addresses", lambda: frozenset({"198.51.100.7"}))
+    return found
+
+
+@pytest.mark.parametrize("host", ["localhost", "api.localhost", "printer.local", "10.0.0.5", "127.0.0.1", "::1", "[::1]",
+                                  "100.64.0.1", "172.16.0.1", "192.168.1.20", "169.254.1.1", "fe80::1", "fc00::1",
+                                  "fd12::1", "0.0.0.0", "::", "224.0.0.1", "ff02::1", "::ffff:10.0.0.1", "LOCALHOST."])
+def test_022_g_a_target_on_this_macs_network_is_refused_on_save(host):
+    got = parse(map_rule(target={"host": host}))
+    assert (got.field, got.message) == ("action.target.host", "must not be this Mac or an address on your network")
+
+
+@pytest.mark.parametrize("target, field", [
+    ({"host": ""}, "action.target.host"), ({"host": "staging"}, "action.target.host"),
+    ({"host": "-a.example.com"}, "action.target.host"), ({"host": "a_b.example.com"}, "action.target.host"),
+    ({"host": "a..example.com"}, "action.target.host"), ({"host": "1.2.3"}, "action.target.host"),
+    ({"host": "https://x.example.com"}, "action.target.host"), ({"host": "x.example.com/v1"}, "action.target.host"),
+    ({"host": "x.example.com:8443"}, "action.target.host"), ({"host": "ü.example.com"}, "action.target.host"),
+    ({"host": 7}, "action.target.host"), ({"port": 0}, "action.target.port"), ({"port": 65536}, "action.target.port"),
+    ({"port": "443"}, "action.target.port"), ({"port": True}, "action.target.port"),
+    ({"scheme": "ftp"}, "action.target.scheme"), ({"extra": 1}, "action.target.extra"),
+    ({"host": HOST}, "action.target.host"),
+])
+def test_022_g_target_checks_name_the_field(target, field):
+    got = parse(map_rule(target=target, match={"method": "POST", "host": HOST, "path": "/api/v1/orders"}))
+    assert isinstance(got, qa_tools.RuleError) and got.field == field, got
+
+
+def test_022_g_target_is_normalized_and_its_shape_checked():
+    data = parse(map_rule(target={"host": "Staging-API.Example.net."})).rules[0].data
+    assert data["action"]["target"] == {"scheme": "https", "host": STAGING, "port": 443}
+    assert parse(map_rule(target={"host": "[2606:4700::1]"})).rules[0].target.url == "https://[2606:4700::1]"
+    # The matched host on another port is another server.
+    assert not isinstance(parse(map_rule(target={"host": HOST, "port": 8443},
+                                         match={"method": "ANY", "host": HOST, "path": "/*"})), qa_tools.RuleError)
+    assert parse(map_rule(action={"delay_ms": 10})).field == "action.delay_ms"
+    missing = map_rule()
+    del missing["action"]["target"]
+    assert parse(missing).field == "action.target.host"
+    assert parse(rule(action={"target": {"host": STAGING}})).rules[0].data == rule()
+    described = parse(map_rule(target={"scheme": "http", "port": 8080})).rules[0]
+    assert qa_tools.describe(described) == f"The response of http://{STAGING}:8080, with the same path and query"
+
+
+def test_022_g_a_mapped_request_goes_to_the_target_and_keeps_the_asked_host(tmp_path, staging_resolves):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(target={"port": 8443}), rewrite_rule())
+
+    async def body(addon, tctx):
+        assert addon.map_targets() == {STAGING}
+        flow = post("/api/v1/orders?page=2")
+        flow.request.scheme, flow.request.port = "https", 443
+        flow.request.headers["Host"] = HOST
+        await addon.request(flow)
+        req = flow.request
+        assert (req.scheme, req.host, req.port, req.path) == ("https", STAGING, 8443, "/api/v1/orders?page=2")
+        assert req.host_header == f"{STAGING}:8443" and req.headers["X-Feature"] == "on"
+        assert flow.metadata[qa_tools.MAPPED_KEY] == {"from": HOST, "to": f"https://{STAGING}:8443",
+                                                      "rule": "Staging", "from_scheme": "https",
+                                                      "from_port": 443}
+        assert flow.comment == f"map remote: {HOST} → {STAGING}:8443; rewrite: Premium (2 changes)"
+        assert staging_resolves["asked"] == [STAGING]
+        # The response hook still knows the request was to an API host: response rewrites run.
+        await addon.response(server_answer(flow))
+        assert json.loads(flow.response.content) == {"data": {"isPremium": True}}
+        stats = addon.rule_stats()
+        assert (stats["maprule1"]["applied"], stats["rewrite1"]["applied"]) == (1, 1)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+@pytest.mark.parametrize("address", ["10.0.0.5", "127.0.0.1", "::1", "198.51.100.7"])
+def test_022_g_a_target_resolving_to_this_macs_network_is_answered_502(tmp_path, staging_resolves, address):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(), rewrite_rule())
+    staging_resolves["answer"] = ["203.0.113.10", address]
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        assert flow.request.host == HOST and "X-Feature" not in flow.request.headers
+        assert flow.response.status_code == 502
+        assert json.loads(flow.response.content) == {"error": "Wiretrace refuses Map remote to an address on your network"}
+        assert flow.comment == "map remote: refused, local address"
+        assert qa_tools.MAPPED_KEY not in flow.metadata and qa_tools.CHANGES_KEY not in flow.metadata
+        await addon.response(flow)
+        assert flow.response.status_code == 502
+        stats = addon.rule_stats()
+        assert (stats["maprule1"]["applied"], stats["rewrite1"]["applied"]) == (0, 0)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_022_g_only_the_first_map_remote_applies(tmp_path, staging_resolves):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(), map_rule("maprule2", "Other", target={"host": "other.example.org"}))
+
+    async def body(addon, tctx):
+        flow = post()
+        await addon.request(flow)
+        assert flow.request.host == STAGING and flow.comment == f"map remote: {HOST} → {STAGING}"
+        stats = addon.rule_stats()
+        assert (stats["maprule2"]["matches"], stats["maprule2"]["applied"]) == (1, 0)
+
+    scenario(body, qa_rules_file=str(file))
+
+
+def test_022_g_no_map_for_a_websocket_handshake_an_answered_request_or_a_replay(tmp_path, staging_resolves, mocks):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(match={"method": "ANY", "path": "/*"}))
+
+    async def body(addon, tctx):
+        socket_flow = make_flow(path="/socket")
+        socket_flow.request.headers["Upgrade"] = "websocket"
+        await addon.request(socket_flow)
+        assert socket_flow.request.host == HOST and not socket_flow.comment
+        mocked = make_flow()
+        await addon.request(mocked)
+        assert mocked.request.host == HOST and mocked.response is not None and "map remote" not in mocked.comment
+        replayed = post()
+        replayed.is_replay = "request"
+        await addon.request(replayed)
+        assert replayed.request.host == HOST
+        assert staging_resolves["asked"] == []
+        assert addon.rule_stats()["maprule1"]["applied"] == 0
+
+    scenario(body, qa_rules_file=str(file), qa_mocks_dir=str(mocks))
+
+
+def test_022_g_a_pause_sees_the_mapped_request_and_its_original(tmp_path, staging_resolves):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(), rule(id="pause001", name="Hold", action={"type": "pause", "pause_at": "request"}))
+    window = FakeWindow()
+
+    async def body(addon, tctx):
+        tctx.master.addons.add(window)
+        flow = post()
+        await addon.request(flow)
+        assert window.held == [(flow.id, "request")]
+        assert flow.request.host == STAGING and window.originals[0].host == HOST
+
+    scenario(body, **{"qa_rules_file": str(file), "qa_breakpoints": True})
+
+
+def test_022_g_disabled_map_rules_are_not_targets(tmp_path):
+    file = tmp_path / "rules.json"
+    write_rules(file, map_rule(enabled=False), map_rule("maprule2", target={"host": "other.example.org"}))
+
+    async def body(addon, tctx):
+        assert addon.map_targets() == {"other.example.org"}
+
+    scenario(body, qa_rules_file=str(file))

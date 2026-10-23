@@ -41,6 +41,7 @@ function stubFetch(handler: (url: string) => ReturnType<typeof json>) {
 const okHandler = (url: string) => {
   if (url === '/api/state') return json(200, { preset: 'p', default_filter: '' });
   if (url === '/api/flows') return json(200, { flows: [flow({ id: 'loaded' })] });
+  if (url === '/api/tunnels') return json(200, { tunnels: [] });
   return json(200, { lines: [] });
 };
 
@@ -91,7 +92,7 @@ describe('Connection', () => {
     ws.push({ type: 'flows', flows: [flow({ id: 'during' })] });
     await flush();
 
-    expect(calls.sort()).toEqual(['/api/flows', '/api/logs?source=app', '/api/logs?source=device', '/api/state']);
+    expect(calls.sort()).toEqual(['/api/flows', '/api/logs?source=app', '/api/logs?source=device', '/api/state', '/api/tunnels']);
     expect(h.loads).toHaveLength(1);
     expect(h.loads[0]?.buffered).toHaveLength(1);
     expect(h.phases.slice(-1)).toEqual(['live']);

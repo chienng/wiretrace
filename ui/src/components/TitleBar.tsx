@@ -234,6 +234,31 @@ function Recording({ startedAt, reconnecting, paused, fromApp }: { startedAt: nu
   );
 }
 
+/** Requests held at a breakpoint now, live session only (spec 022, slice D). */
+function PausedChip({ count }: { count: number }) {
+  const dispatch = useDispatch();
+  const [busy, setBusy] = useState(false);
+  const continueAll = async () => {
+    setBusy(true);
+    try {
+      const { continued } = await api.continueAll();
+      dispatch({ type: 'toast', text: `${continued} paused ${continued === 1 ? 'request' : 'requests'} sent unchanged` });
+    } catch (e) {
+      dispatch({ type: 'toast', text: e instanceof ApiError ? e.message : 'Could not reach Wiretrace' });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <span className="paused-chip">
+      <span>⏸ {count} paused</span>
+      <button type="button" className="btn small" disabled={busy} onClick={() => void continueAll()} title="Every paused request goes on unchanged">
+        Continue all
+      </button>
+    </span>
+  );
+}
+
 export function TitleBar({ newCount }: Props) {
   const { appState, ui, phase, flows } = useStore();
   const { logs, viewing } = useData();
@@ -299,6 +324,7 @@ export function TitleBar({ newCount }: Props) {
             Clear
           </button>
         )}
+        {(appState?.paused_count ?? 0) > 0 && <PausedChip count={appState?.paused_count ?? 0} />}
       </div>
       <div className="tb-group end">
         {appState && pill && (

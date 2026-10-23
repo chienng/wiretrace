@@ -1,0 +1,37 @@
+{
+ "revision": "fixture-1",
+ "rules": [
+  {
+   "id": "maptostaging",
+   "name": "Map to staging",
+   "enabled": true,
+   "match": {"method": "ANY", "host": "api.example.com", "path": "/api/*", "body_contains": ""},
+   "action": {"type": "map_remote", "status": 200, "body": "", "mock_file": "", "delay_ms": 0,
+              "target": {"scheme": "https", "host": "staging-api.example.com", "port": 443}},
+   "apply": {"mode": "always", "n": 0}
+  },
+  {
+   "id": "premiumuser",
+   "name": "Premium user",
+   "enabled": true,
+   "match": {"method": "GET", "host": "api.example.com", "path": "/api/v1/profile", "body_contains": ""},
+   "action": {"type": "rewrite", "status": 200, "body": "", "mock_file": "", "delay_ms": 0,
+              "ops": [{"on": "request", "op": "set_header", "name": "x-feature-flags", "value": "checkout-v2"},
+                      {"on": "response", "op": "set_json", "path": "data.user.isPremium", "value": "true"}]},
+   "apply": {"mode": "always", "n": 0}
+  },
+  {
+   "id": "orders500",
+   "name": "Orders fail",
+   "enabled": true,
+   "match": {"method": "POST", "host": "api.example.com", "path": "/api/v1/orders", "body_contains": ""},
+   "action": {"type": "status", "status": 500, "body": "", "mock_file": "", "delay_ms": 0},
+   "apply": {"mode": "once", "n": 0}
+  }
+ ],
+ "stats": {},
+ "legacy_faults_on": false,
+ "file": "rules/staging-example.json",
+ "error": null,
+ "api_hosts": ["api.example.com", "auth.example.com"]
+}

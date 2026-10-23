@@ -26,11 +26,54 @@ OK, WARN, FAIL, INFO = "OK", "WARN", "FAIL", "INFO"
 
 TIMEOUT_S = 10
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
-PORTS = [
-    ("udp", "0.0.0.0", 51820, "WireGuard"),
-    ("tcp", "0.0.0.0", 8888, "proxy"),
-    ("tcp", "127.0.0.1", 8081, "mitmweb UI"),
-]
+WIRETRACE_DIR = Path(__file__).resolve().parent.parent
+# Spec 022, slice B: 8888 is Charles's port on the same Mac.
+PROXY_PORT = 8889
+WIREGUARD_PORT = 51820
+UI_PORT = 8081
+# The port the window chose last, one integer; `start --port` never writes it.
+PROXY_PORT_FILE = ".proxy-port"
+MIN_PORT, MAX_PORT = 1024, 65535
+MAX_PORT_FILE_BYTES = 16
+
+
+def ports_for(proxy_port: int) -> list[tuple[str, str, int, str]]:
+    return [
+        ("udp", "0.0.0.0", WIREGUARD_PORT, "WireGuard"),
+        ("tcp", "0.0.0.0", proxy_port, "proxy"),
+        ("tcp", "127.0.0.1", UI_PORT, "mitmweb UI"),
+    ]
+
+
+PORTS = ports_for(PROXY_PORT)
+
+
+def port_problem(port: object, ui_port: int = UI_PORT) -> str | None:
+    """Why `port` cannot be the Wi-Fi proxy's port, or None."""
+    if not isinstance(port, int) or isinstance(port, bool):
+        return "The port must be a whole number."
+    if not MIN_PORT <= port <= MAX_PORT:
+        return f"The port must be {MIN_PORT}–{MAX_PORT}."
+    if port in (UI_PORT, ui_port):
+        return f"Port {port} is the Wiretrace window's port."
+    if port == WIREGUARD_PORT:
+        return f"Port {port} is the WireGuard tunnel's port."
+    return None
+
+
+def saved_proxy_port(wiretrace_dir: Path = WIRETRACE_DIR) -> int:
+    """The port in `.proxy-port`, or PROXY_PORT when the file is missing, unreadable or not a valid port."""
+    try:
+        fd = os.open(wiretrace_dir / PROXY_PORT_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, "rb") as f:
+            raw = f.read(MAX_PORT_FILE_BYTES + 1)
+    except OSError:
+        return PROXY_PORT
+    text = raw.decode("ascii", "replace").strip()
+    if len(raw) > MAX_PORT_FILE_BYTES or not text.isdigit() or not text.isascii():
+        return PROXY_PORT
+    port = int(text)
+    return port if port_problem(port) is None else PROXY_PORT
 PACKAGES = ["pyyaml", "pymobiledevice3", "httpx", "keyring"]
 
 Run = Callable[[list[str]], str]
@@ -162,8 +205,8 @@ def check_port(proto: str, host: str, port: int, label: str) -> Result:
     return Result(OK, name, "free")
 
 
-def check_ports(ports: list[tuple[str, str, int, str]] = PORTS) -> list[Result]:
-    return [check_port(*p) for p in ports]
+def check_ports(ports: list[tuple[str, str, int, str]] | None = None) -> list[Result]:
+    return [check_port(*p) for p in (ports if ports is not None else ports_for(saved_proxy_port()))]
 
 
 # 6 + 7. CA certificate and private key
@@ -214,15 +257,16 @@ def parse_fw_app(out: str) -> str:
     return "unknown"
 
 
-def check_firewall(run: Run = _run, python: Path | None = None) -> list[Result]:
+def check_firewall(run: Run = _run, python: Path | None = None, proxy_port: int | None = None) -> list[Result]:
     name = "macOS firewall"
     python = python or Path(sys.executable).resolve()
+    ports = f"UDP {WIREGUARD_PORT}, TCP {proxy_port if proxy_port is not None else saved_proxy_port()}"
     try:
         enabled = parse_fw_enabled(run([SOCKETFILTERFW, "--getglobalstate"]))
         if enabled is False:
             return [Result(OK, name, "off")]
         if parse_fw_block_all(run([SOCKETFILTERFW, "--getblockall"])):
-            return [Result(FAIL, name, "blocks all incoming connections; ask IT for an allow rule (UDP 51820, TCP 8888)")]
+            return [Result(FAIL, name, f"blocks all incoming connections; ask IT for an allow rule ({ports})")]
         app = parse_fw_app(run([SOCKETFILTERFW, "--getappblocked", str(python)]))
     except (OSError, subprocess.CalledProcessError):
         return [Result(WARN, name, "could not read the firewall state")]
@@ -234,7 +278,7 @@ def check_firewall(run: Run = _run, python: Path | None = None) -> list[Result]:
     return [Result(
         WARN, name,
         "on; macOS will ask to allow incoming connections on first start. "
-        "If no prompt appears, the firewall is managed: ask IT for an allow rule (UDP 51820, TCP 8888)",
+        f"If no prompt appears, the firewall is managed: ask IT for an allow rule ({ports})",
     )]
 
 

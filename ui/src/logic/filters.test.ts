@@ -2,18 +2,20 @@ import { describe, expect, it } from 'vitest';
 import {
   activeChips,
   applyFilters,
+  clientCounts,
   flowUrl,
   hostCounts,
   isBodySearch,
   isServerExpr,
   matchesQuick,
   matchesText,
+  mergeRows,
   quickCounts,
   type FlowFilter,
 } from './filters';
-import { flow } from './testing';
+import { flow, tunnel } from './testing';
 
-const base: FlowFilter = { quick: 'all', host: null, text: '', serverIds: null };
+const base: FlowFilter = { quick: 'all', host: null, client: null, text: '', serverIds: null };
 
 describe('quick filters', () => {
   it('treats 4xx, 5xx and flows without a response as errors', () => {
@@ -39,7 +41,48 @@ describe('quick filters', () => {
       flow({ id: 'e', websocket: true, status: 101 }),
       flow({ id: 'f', status: null, error: 'boom', duration_ms: null }),
     ];
-    expect(quickCounts(flows)).toEqual({ all: 6, errors: 2, slow: 1, mocked: 1, faulted: 1, websocket: 1 });
+    expect(quickCounts(flows)).toEqual({ all: 6, errors: 2, slow: 1, mocked: 1, faulted: 1, websocket: 1, encrypted: 0 });
+  });
+});
+
+describe('encrypted connections (spec 022, slice C)', () => {
+  const rows = mergeRows(
+    [flow({ id: 'a', ts: 10 }), flow({ id: 'b', ts: 30, status: 500 }), flow({ id: 'c', ts: 50, client: '192.168.1.31' })],
+    [
+      tunnel({ id: 'tunnel-1', ts: 5, host: 'cdn.example.net' }),
+      tunnel({ id: 'tunnel-2', ts: 30, host: 'o1.ingest.sentry.io', client: '192.168.1.31' }),
+      tunnel({ id: 'tunnel-3', ts: 60, host: 'push.example.org', tls: false, method: 'TCP' }),
+    ],
+  );
+  const ids = (r: readonly { id: string }[]) => r.map((x) => x.id);
+
+  it('merges requests and connections by time, a request first at the same time', () => {
+    expect(ids(rows)).toEqual(['tunnel-1', 'a', 'b', 'tunnel-2', 'c', 'tunnel-3']);
+    expect(mergeRows([flow({ id: 'a' })], [])).toHaveLength(1);
+  });
+  it('lists connections in All and Encrypted only, and hides them with Show encrypted off', () => {
+    expect(ids(applyFilters(rows, { ...base, quick: 'encrypted' }))).toEqual(['tunnel-1', 'tunnel-2', 'tunnel-3']);
+    expect(ids(applyFilters(rows, { ...base, quick: 'errors' }))).toEqual(['b']);
+    expect(ids(applyFilters(rows, { ...base, showEncrypted: false }))).toEqual(['a', 'b', 'c']);
+    expect(ids(applyFilters(rows, { ...base, quick: 'encrypted', showEncrypted: false }))).toHaveLength(3);
+  });
+  it('matches connections by host in the search, the host filter and the device filter', () => {
+    expect(ids(applyFilters(rows, { ...base, text: 'sentry' }))).toEqual(['tunnel-2']);
+    expect(ids(applyFilters(rows, { ...base, text: 'connect example' }))).toEqual(['tunnel-1']);
+    expect(ids(applyFilters(rows, { ...base, host: 'cdn.example.net' }))).toEqual(['tunnel-1']);
+    expect(ids(applyFilters(rows, { ...base, client: '192.168.1.31' }))).toEqual(['tunnel-2', 'c']);
+  });
+  it('never matches a connection with a mitmproxy expression', () => {
+    expect(ids(applyFilters(rows, { ...base, text: '~d example', serverIds: null }))).toEqual(['a', 'b', 'c']);
+  });
+  it('counts connections in All while shown and in Encrypted always', () => {
+    const flows = [flow({ id: 'a' })];
+    const tunnels = [tunnel({ id: 'tunnel-1' }), tunnel({ id: 'tunnel-2' })];
+    expect(quickCounts(flows, tunnels)).toMatchObject({ all: 3, encrypted: 2, errors: 0 });
+    expect(quickCounts(flows, tunnels, false)).toMatchObject({ all: 1, encrypted: 2 });
+  });
+  it('names the quick filter in its chip', () => {
+    expect(activeChips({ quick: 'encrypted', host: null, client: null, text: '' }, '')).toEqual([{ kind: 'quick', label: 'Encrypted' }]);
   });
 });
 
@@ -95,15 +138,39 @@ describe('body search and chips', () => {
     expect(isBodySearch(' abc ')).toBe(true);
     expect(isBodySearch('~c 500')).toBe(false);
   });
-  it('lists host, quick filter and search, marking the preset filter', () => {
-    expect(activeChips({ quick: 'all', host: null, text: '' }, '')).toEqual([]);
-    expect(activeChips({ quick: 'errors', host: 'api.example.com', text: 'orders' }, '~d example.com')).toEqual([
+  it('lists host, device, quick filter and search, marking the preset filter', () => {
+    expect(activeChips({ quick: 'all', host: null, client: null, text: '' }, '')).toEqual([]);
+    expect(
+      activeChips({ quick: 'errors', host: 'api.example.com', client: '192.168.1.42', text: 'orders' }, '~d example.com'),
+    ).toEqual([
       { kind: 'host', label: 'host: api.example.com' },
+      { kind: 'client', label: 'device: 192.168.1.42' },
       { kind: 'quick', label: 'Errors 4xx / 5xx' },
       { kind: 'search', label: 'search: orders' },
     ]);
-    expect(activeChips({ quick: 'all', host: null, text: ' ~d example.com ' }, '~d example.com')).toEqual([
+    expect(activeChips({ quick: 'all', host: null, client: null, text: ' ~d example.com ' }, '~d example.com')).toEqual([
       { kind: 'default', label: 'preset filter: ~d example.com' },
+    ]);
+  });
+});
+
+describe('devices (spec 022)', () => {
+  const flows = [
+    flow({ id: 'a', client: '192.168.1.31' }),
+    flow({ id: 'b', client: '192.168.1.42' }),
+    flow({ id: 'c', client: '192.168.1.31' }),
+    flow({ id: 'd', client: 'mac' }),
+    flow({ id: 'e', client: null }),
+  ];
+  it('filters by one device and leaves the others alone without one', () => {
+    expect(applyFilters(flows, { ...base, client: '192.168.1.31' }).map((f) => f.id)).toEqual(['a', 'c']);
+    expect(applyFilters(flows, base)).toHaveLength(5);
+  });
+  it('counts requests per device', () => {
+    expect([...clientCounts(flows)]).toEqual([
+      ['192.168.1.31', 2],
+      ['192.168.1.42', 1],
+      ['mac', 1],
     ]);
   });
 });

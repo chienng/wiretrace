@@ -171,6 +171,11 @@ def test_each_device_starts_its_target_and_mode_in_app_mode(device, target, mode
         "--ui", "wiretrace", "--from-app"]
 
 
+def test_022_b_the_app_starts_without_a_port_so_the_saved_one_is_used():
+    for device in app.DEVICES:
+        assert "--port" not in app.start_command("staging", device)
+
+
 def test_every_device_starts_both_modes():
     assert {mode for _, mode in app.DEVICES.values()} == {"both"}
 

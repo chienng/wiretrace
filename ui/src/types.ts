@@ -17,6 +17,51 @@ export interface FlowSummary {
   websocket: boolean;
   /** The id of the request this one replays; null for a request from the app. */
   replay_of: string | null;
+  /** Who sent it: the device's address, `mac` for this Mac (simulator, emulator), `wireguard` for a tunnel client. */
+  client: string | null;
+  /** Held at a breakpoint now (spec 022, slice D): its phase and since when (Unix seconds); live session only. */
+  paused: PausePhase | null;
+  paused_since: number | null;
+  /** Changed at a breakpoint before it went on. */
+  edited: boolean;
+  /** Changed by a Rewrite rule (spec 022, slice E). */
+  rewritten: boolean;
+  /** Sent elsewhere by a Map remote rule (spec 022, slice G); `host` stays the one the app asked for. */
+  mapped: boolean;
+  /** Where it went, e.g. `https://staging-api.example.com`; null unless mapped. */
+  sent_to: string | null;
+}
+
+export type PausePhase = 'request' | 'response';
+
+/** A connection Wiretrace passed through without decrypting (spec 022, slice C): live session only. */
+export interface TunnelRow {
+  id: string;
+  ts: number;
+  /** null while it is open. */
+  closed_at: number | null;
+  client: string | null;
+  host: string;
+  port: number | null;
+  tls: boolean;
+  /** `CONNECT` on the Wi-Fi proxy; `TLS`, or `TCP` when it is not TLS, on WireGuard. */
+  method: 'CONNECT' | 'TLS' | 'TCP';
+  /** The CONNECT request headers the phone sent, `Proxy-Authorization` masked; null on WireGuard. */
+  headers: Headers | null;
+  answer: string | null;
+}
+
+/** A row of Traffic: a request, or an encrypted connection. */
+export type TrafficRow = FlowSummary | TunnelRow;
+
+/** A device the Wi-Fi proxy accepts in this session (spec 022): only on the token-protected API. */
+export interface ProxyClient {
+  address: string;
+  /** When it first connected since it was accepted; null until then. */
+  seen_at: number | null;
+  requests: number;
+  /** Failed TLS handshakes with API hosts: it does not trust the certificate yet. */
+  tls_failures: number;
 }
 
 /** A session folder, from its name and meta.json. Counts are null when meta.json does not have them. */
@@ -100,6 +145,8 @@ export interface AppState {
   /** Why device logs are off, when they are. */
   device_logs_off: string | null;
   default_filter: string;
+  /** The API hosts the running session decrypts; one decrypted from the window is added at once. */
+  api_hosts: string[];
   proxy_port: number;
   /** The Wi-Fi proxy accepts only the first device that connects (no `--client`). */
   proxy_pin: boolean;
@@ -107,6 +154,13 @@ export interface AppState {
   proxy_device: string | null;
   /** Devices the Wi-Fi proxy refused, the most recent first; empty without pinning or while viewing. */
   proxy_waiting: ProxyWaiting[];
+  /** The sidebar's devices: accepted ones in order with pinning, the `--client` ones that connected without.
+   *  Empty in WireGuard mode and while viewing. */
+  proxy_clients: ProxyClient[];
+  /** How many devices besides this Mac a session accepts at most. */
+  proxy_max: number;
+  /** What phones set as their Wi-Fi proxy, `<Mac IP>:<port>`; null in WireGuard mode. */
+  proxy_address: string | null;
   /** Started from Wiretrace.app: there is no Terminal, the menu bar is the stop. */
   from_app: boolean;
   wireguard_conf: string | null;
@@ -115,6 +169,9 @@ export interface AppState {
   faults_on: boolean;
   mocks_dir: string;
   flow_count: number;
+  /** Requests held at a breakpoint now, and how many may be at once. */
+  paused_count: number;
+  paused_max: number;
   rules_on: number;
   /** When a device last connected to mitmproxy, any host (Unix seconds). */
   device_seen_at: number | null;
@@ -146,16 +203,38 @@ export interface DeviceStatus {
   updated_at: number | null;
 }
 
-export type RuleAction = 'mock' | 'status' | 'delay' | 'drop';
-export type ApplyMode = 'always' | 'once' | 'every_nth';
+export type RuleAction = 'mock' | 'status' | 'delay' | 'drop' | 'pause' | 'rewrite' | 'map_remote';
+export type TargetScheme = 'https' | 'http';
 
-/** The rules file format (`version: 1`) of addons/qa_tools.py. */
+/** Where a Map remote rule sends matching requests; path and query are kept. */
+export interface MapTarget {
+  scheme: TargetScheme;
+  host: string;
+  port: number;
+}
+export type ApplyMode = 'always' | 'once' | 'every_nth';
+export type PauseAt = 'request' | 'response' | 'both';
+export type RewriteSide = 'request' | 'response';
+export type RewriteKind = 'set_header' | 'add_header' | 'remove_header' | 'set_json' | 'remove_json';
+
+/** One change of a Rewrite rule; a header change has `name`, a JSON change `path`, and a set has `value`. */
+export interface RewriteOp {
+  on: RewriteSide;
+  op: RewriteKind;
+  name?: string;
+  path?: string;
+  value?: string;
+}
+
+/** The rules file format (`version: 1`) of addons/qa_tools.py. A key a newer action added is present only
+ *  for that action, so a file without such rules still loads in an older Wiretrace. */
 export interface Rule {
   id: string;
   name: string;
   enabled: boolean;
   match: { method: string; host: string; path: string; body_contains: string };
-  action: { type: RuleAction; status: number; body: string; mock_file: string; delay_ms: number };
+  action: { type: RuleAction; status: number; body: string; mock_file: string; delay_ms: number; pause_at?: PauseAt; ops?: RewriteOp[];
+    target?: MapTarget };
   apply: { mode: ApplyMode; n: number };
 }
 
@@ -221,10 +300,54 @@ export interface FlowDetail {
   };
   comment: string;
   mock_path: string;
+  /** Present on the live session's detail; null unless the flow is held at a breakpoint now. */
+  breakpoint?: BreakpointInfo | null;
+  /** What Rewrite rules did to this request, in order; values of secret headers come masked. */
+  changes: ChangeEntry[];
+  /** The Map remote step, when one sent this request elsewhere. */
+  map_remote?: { rule: string; from: string; to: string } | null;
 }
+
+/** What Map local sends (spec 022, slice F); `revision` is the rules revision the dialog loaded. */
+export interface MapLocalSave {
+  file: string;
+  status: number;
+  body: string;
+  rule: boolean;
+  replace: boolean;
+  revision: string;
+}
+
+export interface ChangeEntry {
+  rule: string;
+  on: RewriteSide | '';
+  op: RewriteKind | string;
+  /** The header name or JSON path. */
+  target: string;
+  value: string | null;
+  applied: boolean;
+  /** Why it was skipped: `not found`, `body is not JSON`, `body is over 1 MiB`. */
+  reason: string;
+}
+
+/** A flow held at a breakpoint. `original` is the message as it arrived; `revision` guards an action. */
+export interface BreakpointInfo {
+  phase: PausePhase;
+  since: number;
+  revision: number;
+  /** Why the body cannot be edited as text: `binary` or `over 1 MiB`; null when it can. */
+  body_not_editable: string | null;
+  original: { method?: string; path?: string; status?: number; headers: Headers; body: Body };
+}
+
+/** What Continue sends: every part of the held message, the body null when it was not edited. */
+export type BreakpointEdits =
+  | { method: string; path: string; headers: Headers; body: string | null }
+  | { status: number; headers: Headers; body: string | null };
 
 export type ServerMessage =
   | { type: 'flows'; flows: FlowSummary[] }
+  | { type: 'tunnels'; tunnels: TunnelRow[] }
   | { type: 'logs'; lines: LogLine[] }
   | { type: 'state'; state: AppState }
   | { type: 'rules'; revision: string; stats: Record<string, RuleStats>; error: string | null }

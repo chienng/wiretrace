@@ -20,7 +20,9 @@ With `--ui wiretrace`, a session whose mitmdump exited on its own after the wind
 `.switch.json` goes back to PREPARE with the preset and target it names
 (docs/specs/013-switch-preset.md, 018-switch-device.md). A stop signal never does.
 With a `client` in that file, the next session's Wi-Fi proxy accepts only that address
-from its first connection (docs/specs/021-switch-to-another-phone.md).
+from its first connection (docs/specs/021-switch-to-another-phone.md). With a `proxy_port`,
+the next session listens there and `.proxy-port` keeps it for later runs
+(docs/specs/022-more-devices-port-encrypted-hosts-breakpoints.md, slice B).
 """
 
 from __future__ import annotations
@@ -46,9 +48,9 @@ from .preset import PRESETS_DIR, Preset, PresetError, allow_hosts_regexes, load_
 
 TARGETS = ("android", "ios", "android-emu", "ios-sim", "device")
 MODES = ("wireguard", "proxy", "both")
-PROXY_PORT = 8888
+PROXY_PORT = doctor.PROXY_PORT
 # Written out in both mode: `--listen-port` would otherwise be WireGuard's port too.
-WIREGUARD_PORT = 51820
+WIREGUARD_PORT = doctor.WIREGUARD_PORT
 STOP_SIGNALS = (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)
 STILL_STOPPING_S = 15
 COLLECTOR_STOP_S = 3
@@ -89,6 +91,7 @@ SIMULATOR_NEEDS_PROXY = "The iOS Simulator needs the Wi-Fi proxy: stop and start
 # Spec 021, invariant 3. Neither names the address.
 CLIENT_NOT_PINNABLE = "The device to switch to does not have an address the Wi-Fi proxy can accept. Not started."
 CLIENT_WITH_CLIENTS = "This run names its devices with --client, so it does not switch them. Not started."
+PORT_NOT_SAVED = "Could not save the Wi-Fi proxy port: the next run starts on the port it used before."
 
 RUNNING, STOPPING, KILLED = "RUNNING", "STOPPING", "KILLED"
 STATUS = {RUNNING: "exited", STOPPING: "stopped", KILLED: "killed"}
@@ -150,6 +153,27 @@ def client_problem(addresses: Sequence[str]) -> str | None:
     return None
 
 
+def resolve_proxy_port(wiretrace_dir: Path, override: int | None = None) -> int:
+    """`--port`, else the port saved in `.proxy-port`, else PROXY_PORT."""
+    return override if override is not None else doctor.saved_proxy_port(wiretrace_dir)
+
+
+def save_proxy_port(wiretrace_dir: Path, port: int) -> None:
+    """`.proxy-port`: one integer, 0600 from the start, replaced whole."""
+    path = wiretrace_dir / doctor.PROXY_PORT_FILE
+    tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w", encoding="ascii") as f:
+            f.write(f"{port}\n")
+        os.replace(tmp, path)
+    finally:
+        try:
+            tmp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def pinnable_client(value: str) -> str | None:
     """A client switch's address, normalized like addons/proxy_guard.py, or None when a session may not
     start pinned to it: not an IP address, or loopback, link-local, unspecified or multicast."""
@@ -164,6 +188,13 @@ def pinnable_client(value: str) -> str | None:
     return str(address)
 
 
+def allow_hosts_args(preset: Preset) -> list[str]:
+    """mitmproxy's `allow_hosts`: the API hosts, then the receiver and the certificate page. The window's
+    live update (spec 022, slice C) uses this list too, so it equals what a restart would pass."""
+    # Only the receiver host, no subdomains, so its HTTPS request is decrypted.
+    return [*allow_hosts_regexes(preset), RECEIVER_ALLOW_HOSTS, ONBOARDING_ALLOW_HOSTS]
+
+
 def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
                   proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
                   ui_port: int = UI_PORT, clients: Sequence[str] = (), from_app: bool = False,
@@ -176,11 +207,8 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         cmd += ["--mode", "regular", "--listen-port", str(proxy_port), "--mode", f"wireguard@{WIREGUARD_PORT}"]
     else:
         cmd += ["--mode", "regular", "--listen-port", str(proxy_port)]
-    for regex in allow_hosts_regexes(preset):
+    for regex in allow_hosts_args(preset):
         cmd += ["--allow-hosts", regex]
-    # Only the receiver host, no subdomains, so its HTTPS request is decrypted.
-    cmd += ["--allow-hosts", RECEIVER_ALLOW_HOSTS]
-    cmd += ["--allow-hosts", ONBOARDING_ALLOW_HOSTS]
     cmd += ["--save-stream-file", str(flows)]
     cmd += ["-s", str(QA_ADDON), "-s", str(APP_LOGS_ADDON)]
     if mode in ("proxy", "both"):
@@ -209,7 +237,7 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         cmd += ["--set", "flow_detail=0", "--set", f"qa_ui_port={ui_port}",
                 "--set", f"qa_ui_session_dir={flows.parent}",
                 "--set", f"qa_ui_default_filter={preset.default_filter or ''}",
-                "--set", "qa_ui_open_browser=true"]
+                "--set", "qa_ui_open_browser=true", "--set", "qa_breakpoints=true"]
         if from_app:
             # Its output goes to app-start.log, a file: the link with the token must not.
             cmd += ["--set", "qa_ui_print_link=false", "--set", "qa_ui_from_app=true"]
@@ -365,14 +393,21 @@ def _menu_problem() -> str | None:
 
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool | str = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
-        bin_dir: Path | None = None, proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
+        bin_dir: Path | None = None, proxy_port: int | None = None, wiretrace_dir: Path = WIRETRACE_DIR,
         ui_port: int = UI_PORT, clients: Sequence[str] = (), no_menu_bar: bool = False,
         collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command,
         menu_available: Callable[[], str | None] | None = None, from_app: bool = False) -> int:
+    """`proxy_port`: `--port`, for this run only; None reads `.proxy-port`."""
     problem = client_problem(clients)
     if problem:
         say(problem, err=True)
         return 1
+    if proxy_port is not None:
+        problem = doctor.port_problem(proxy_port, ui_port)
+        if problem:
+            say(f"--port: {problem} Not started.", err=True)
+            return 1
+    proxy_port = resolve_proxy_port(wiretrace_dir, proxy_port)
     kind = ui_kind(ui)
     if from_app and (kind != WIRETRACE or no_menu_bar):
         say(APP_NEEDS_MENU, err=True)
@@ -498,10 +533,24 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 if pinned is None:
                     say(CLIENT_NOT_PINNABLE, err=True)
                     return 1
+            # Spec 022, slice B, invariant 2: the port is checked again; a switch without one keeps the port.
+            next_port = outcome.switch_to.proxy_port
+            if next_port is not None:
+                problem = doctor.port_problem(next_port, ui_port)
+                if problem:
+                    say(f"{problem} Not started.", err=True)
+                    return 1
             target = outcome.switch_to.target
             # Invariant 8.
-            if ports_busy(mode, kind, proxy_port, ui_port):
+            if ports_busy(mode, kind, proxy_port if next_port is None else next_port, ui_port):
                 return 1
+            if next_port is not None:
+                # Spec 022, slice B, invariant 3: saved only once both checks passed.
+                proxy_port = next_port
+                try:
+                    save_proxy_port(wiretrace_dir, proxy_port)
+                except OSError:
+                    say(PORT_NOT_SAVED, err=True)
             if from_app:
                 remember_for_app(wiretrace_dir, preset.name, target)
             switched = True
@@ -564,11 +613,12 @@ def create_folder(preset: Preset, target: str, meta: dict, sessions_dir: Path, *
 
 class Switch(NamedTuple):
     """What `.switch.json` asks for: the next session's preset and target, and the address its Wi-Fi
-    proxy accepts (None: the first device to connect)."""
+    proxy accepts (None: the first device to connect) or its Wi-Fi proxy port (None: the same)."""
 
     name: str
     target: str
     client: str | None = None
+    proxy_port: int | None = None
 
 
 @dataclass
@@ -580,6 +630,8 @@ class Outcome:
 
 
 def switch_line(switch: Switch, target: str) -> str:
+    if switch.proxy_port is not None:
+        return "Changing the Wi-Fi proxy port: saving this session first."
     if switch.client is not None:
         return "Switching to another device on the Wi-Fi proxy: saving this session first."
     if switch.target != target and switch.target in TARGET_LABELS:
@@ -588,8 +640,8 @@ def switch_line(switch: Switch, target: str) -> str:
 
 
 def take_switch(folder: Path) -> Switch | None:
-    """The preset, target and optional client in `.switch.json`, or None. The file is deleted whatever it
-    holds (invariant 6)."""
+    """The preset and target, and a client or a port, in `.switch.json`, or None. The file is deleted
+    whatever it holds (invariant 6). The port is only shape-checked here; the loop checks its value."""
     path = folder / session.SWITCH
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
@@ -608,14 +660,18 @@ def take_switch(folder: Path) -> Switch | None:
         data = json.loads(raw)
     except ValueError:
         return None
-    if not isinstance(data, dict) or set(data) not in ({"name", "target"}, {"name", "target", "client"}):
+    shapes = ({"name", "target"}, {"name", "target", "client"}, {"name", "target", "proxy_port"})
+    if not isinstance(data, dict) or set(data) not in shapes:
         return None
     if not isinstance(data["name"], str) or not isinstance(data["target"], str):
         return None
     client = data.get("client")
     if "client" in data and not isinstance(client, str):
         return None
-    return Switch(data["name"], data["target"], client)
+    port = data.get("proxy_port")
+    if "proxy_port" in data and (not isinstance(port, int) or isinstance(port, bool)):
+        return None
+    return Switch(data["name"], data["target"], client, port)
 
 
 # RUNNING, STOPPING, KILLED

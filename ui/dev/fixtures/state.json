@@ -1,5 +1,5 @@
 {
- "version": "0.9.1",
+ "version": "0.10.0",
  "preset": "staging-example",
  "target": "pixel-example",
  "mode": "wireguard",
@@ -7,8 +7,20 @@
  "session": "2026-10-14_example",
  "device_logs": "android",
  "default_filter": "",
- "proxy_port": 9090,
+ "proxy_port": 8889,
  "proxy_pin": true,
+ "proxy_clients": [
+  {"address": "192.0.2.31", "seen_at": 1791900005.0, "requests": 0, "tls_failures": 0}
+ ],
+ "proxy_device": null,
+ "proxy_waiting": [
+  {"address": "192.0.2.42", "first_at": 1791900030.0, "last_at": 1791900040.0, "count": 2}
+ ],
+ "proxy_max": 4,
+ "proxy_address": "192.0.2.10:8889",
+ "paused_count": 0,
+ "paused_max": 10,
+ "api_hosts": ["api.example.com", "auth.example.com"],
  "from_app": true,
  "wireguard_conf": "[Interface]\nPrivateKey = test-private-key-not-real=\nAddress = 10.0.0.2/32\nDNS = 10.0.0.53\n\n[Peer]\nPublicKey = test-public-key-not-real=\nAllowedIPs = 0.0.0.0/0\nEndpoint = 192.0.2.10:51820\n",
  "mac_ip": "192.0.2.10",

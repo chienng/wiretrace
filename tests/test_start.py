@@ -6,6 +6,7 @@ import os
 import re
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import threading
@@ -16,7 +17,7 @@ from pathlib import Path
 import pytest
 
 from cli import __main__ as cli_main
-from cli import redact, session, start
+from cli import doctor, redact, session, start
 from cli.preset import Preset
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -453,11 +454,13 @@ def test_mitmweb_command_wireguard():
     assert cmd[cmd.index("--save-stream-file") + 1] == "/s/flows.mitm"
     assert "view_filter=!~t image" in cmd
     assert not any("dumper_filter" in arg for arg in cmd)
+    assert not any("qa_breakpoints" in arg for arg in cmd)
 
 
 def test_mitmdump_filter_is_an_option_not_positional():
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"))
-    assert cmd[:5] == ["/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8888"]
+    assert not any("qa_breakpoints" in arg for arg in cmd)
+    assert cmd[:5] == ["/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8889"]
     assert cmd[-2:] == ["--set", "dumper_filter=!~t image"]
 
 
@@ -569,7 +572,7 @@ def test_proxy_and_wireguard_commands_are_unchanged():
     proxy = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
                                 wiretrace_dir=Path("/d"))
     assert proxy == [
-        "/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8888", *base, "-s", str(start.PROXY_GUARD),
+        "/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8889", *base, "-s", str(start.PROXY_GUARD),
         *options, "--set", "qa_proxy_clients=127.0.0.0/8", "--set", "qa_proxy_clients=::1",
         "--set", "qa_proxy_pin=true", "--set", "dumper_filter=!~t image",
     ]
@@ -598,7 +601,7 @@ def test_the_default_mode_is_both_and_the_three_modes_are_accepted(monkeypatch):
     assert parse_start(monkeypatch)[0][2] == "both"
     for mode in ("both", "proxy", "wireguard"):
         assert parse_start(monkeypatch, "--mode", mode)[0][2] == mode
-    assert start.PROXY_PORT == 8888 and start.WIREGUARD_PORT == 51820
+    assert start.PROXY_PORT == 8889 and start.WIREGUARD_PORT == 51820
 
 
 # Integration: real mitmdump
@@ -1138,8 +1141,9 @@ def test_wiretrace_command_sets_the_four_ui_options_and_no_view_or_print_filter(
     options = {arg.split("=", 1)[0]: arg.split("=", 1)[1] for arg in cmd if arg.startswith("qa_ui_")}
     assert options == {"qa_ui_port": "8081", "qa_ui_session_dir": "/s", "qa_ui_default_filter": "!~t image",
                        "qa_ui_open_browser": "true"}
-    assert "flow_detail=0" in cmd
-    assert all(cmd[i - 1] == "--set" for i, a in enumerate(cmd) if a.startswith(("qa_ui_", "flow_detail")))
+    assert "flow_detail=0" in cmd and "qa_breakpoints=true" in cmd
+    assert all(cmd[i - 1] == "--set" for i, a in enumerate(cmd)
+               if a.startswith(("qa_ui_", "flow_detail", "qa_breakpoints")))
     assert not any(arg.startswith(("view_filter", "dumper_filter")) for arg in cmd)
     # The launcher's other options are the same as for the other windows.
     assert "qa_app_log_file=/s/app.log.jsonl" in cmd and "qa_request_id_header=X-Request-ID" in cmd
@@ -1596,7 +1600,7 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
 def test_the_version_is_0_7_2():
     from cli import __version__
 
-    assert __version__ == "0.9.1"
+    assert __version__ == "0.10.0"
 
 
 def test_main_sets_a_private_umask(monkeypatch):
@@ -1800,7 +1804,7 @@ def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", mode="proxy",
     monkeypatch.setattr(start, "busy_ports", kwargs.pop("busy_ports", lambda ports: []))
     code = start.run("staging", "android", mode, ui, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", ui_port=free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", ui_port=kwargs.pop("ui_port", None) or free_port(),
                      collector_for=kwargs.pop("collector_for", lambda *a: (None, "off (test)")),
                      menu_available=lambda: None, **kwargs)
     return code, calls
@@ -2023,6 +2027,170 @@ def test_021_the_switch_line_has_no_address():
     assert line == "Switching to another device on the Wi-Fi proxy: saving this session first."
     assert start.switch_line(start.Switch("staging", "ios"), "android") == "Switching to iPhone: saving this session first."
     assert start.switch_line(start.Switch("other", "ios"), "ios") == "Switching presets: saving this session first."
+
+
+# The Wi-Fi proxy port (spec 022, slice B)
+
+def listen_port(cmd):
+    return int(cmd[cmd.index("--listen-port") + 1])
+
+
+def test_022_b_a_switch_file_with_a_port_names_it_and_is_deleted(tmp_path):
+    (tmp_path / session.SWITCH).write_text(json.dumps({"name": "staging", "target": "ios", "proxy_port": 8890}))
+    assert start.take_switch(tmp_path) == start.Switch("staging", "ios", None, 8890)
+    assert not (tmp_path / session.SWITCH).exists()
+    assert start.Switch("staging", "ios").proxy_port is None
+    assert start.switch_line(start.Switch("staging", "ios", None, 8890), "ios") == (
+        "Changing the Wi-Fi proxy port: saving this session first.")
+
+
+@pytest.mark.parametrize("raw", [{"name": "staging", "target": "ios", "proxy_port": "8890"},
+                                 {"name": "staging", "target": "ios", "proxy_port": 8890.0},
+                                 {"name": "staging", "target": "ios", "proxy_port": True},
+                                 {"name": "staging", "target": "ios", "proxy_port": None},
+                                 {"name": "staging", "target": "ios", "proxy_port": 8890, "x": 1},
+                                 {"name": "staging", "target": "ios", "proxy_port": 8890, "client": PHONE_B}])
+def test_022_b_a_switch_file_with_a_port_of_another_shape_is_no_switch_and_is_deleted(tmp_path, raw):
+    (tmp_path / session.SWITCH).write_text(json.dumps(raw))
+    assert start.take_switch(tmp_path) is None
+    assert not (tmp_path / session.SWITCH).exists()
+
+
+def test_022_b_the_port_is_8889_and_proxy_port_prefers_the_flag_then_the_file(tmp_path):
+    assert start.PROXY_PORT == doctor.PROXY_PORT == 8889
+    assert start.resolve_proxy_port(tmp_path) == 8889
+    (tmp_path / ".proxy-port").write_text("8890\n")
+    assert start.resolve_proxy_port(tmp_path) == 8890
+    assert start.resolve_proxy_port(tmp_path, 9100) == 9100
+
+
+@pytest.mark.parametrize("text", ["", "abc", "8890x", "-8890", "80", "70000", "8081", "51820", "8 890",
+                                  "٨٨٩٠", "8890" + " " * 20, "88.90"])
+def test_022_b_an_invalid_port_file_means_8889(tmp_path, text):
+    (tmp_path / ".proxy-port").write_text(text, encoding="utf-8")
+    assert start.resolve_proxy_port(tmp_path) == 8889
+
+
+def test_022_b_a_symlinked_port_file_is_not_followed(tmp_path):
+    (tmp_path / "elsewhere").write_text("8890")
+    (tmp_path / ".proxy-port").symlink_to(tmp_path / "elsewhere")
+    assert start.resolve_proxy_port(tmp_path) == 8889
+
+
+def test_022_b_save_proxy_port_writes_one_integer_0600_and_replaces_the_file(tmp_path):
+    (tmp_path / ".proxy-port").write_text("9000")
+    os.chmod(tmp_path / ".proxy-port", 0o644)
+    start.save_proxy_port(tmp_path, 8890)
+    assert (tmp_path / ".proxy-port").read_text() == "8890\n"
+    assert stat.S_IMODE((tmp_path / ".proxy-port").stat().st_mode) == 0o600
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".proxy-port"]
+
+
+def test_022_b_a_port_switch_starts_the_next_session_on_it_and_saves_it(tmp_path, monkeypatch, capsys):
+    (tmp_path / "wiretrace").mkdir()
+    checked = []
+
+    def busy_ports(ports):
+        checked.append([p[2] for p in ports if p[3] == "proxy"])
+        return []
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, 9123)),
+                                                        (start.RUNNING, start.Switch("staging", "android"))],
+                                mode="both", busy_ports=busy_ports)
+    assert code == 0 and len(calls) == 3
+    first = listen_port(calls[0]["cmd"])
+    assert [listen_port(c["cmd"]) for c in calls] == [first, 9123, 9123]
+    assert checked == [[first], [9123], [9123]]
+    assert (tmp_path / "wiretrace" / ".proxy-port").read_text() == "9123\n"
+    assert stat.S_IMODE((tmp_path / "wiretrace" / ".proxy-port").stat().st_mode) == 0o600
+    assert "Wi-Fi proxy to this Mac's IP address, port 9123." in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("port", [80, 1023, 65536, 8081, 51820, -1, 0])
+def test_022_b_the_launcher_checks_a_switched_port_again_and_saves_nothing(tmp_path, monkeypatch, capsys, port):
+    (tmp_path / "wiretrace").mkdir()
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, port))])
+    assert code == 1 and len(calls) == 1
+    assert "Not started." in capsys.readouterr().err
+    assert not (tmp_path / "wiretrace" / ".proxy-port").exists()
+
+
+def test_022_b_the_window_port_of_this_run_is_refused_too(tmp_path, monkeypatch, capsys):
+    (tmp_path / "wiretrace").mkdir()
+    ui_port = free_port()
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, ui_port))],
+                                ui_port=ui_port)
+    assert code == 1 and len(calls) == 1
+    assert f"Port {ui_port} is the Wiretrace window's port. Not started." in capsys.readouterr().err
+    assert not (tmp_path / "wiretrace" / ".proxy-port").exists()
+
+
+def test_022_b_a_busy_switched_port_ends_wiretrace_and_saves_nothing(tmp_path, monkeypatch, capsys):
+    (tmp_path / "wiretrace").mkdir()
+    seen = []
+
+    def busy_ports(ports):
+        port = next(p[2] for p in ports if p[3] == "proxy")
+        seen.append(port)
+        return [doctor.Result(doctor.FAIL, f"Port TCP {port} (proxy)", "in use")] if port == 9124 else []
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, 9124))],
+                                busy_ports=busy_ports)
+    assert code == 1 and len(calls) == 1 and seen[-1] == 9124
+    assert "Not started." in capsys.readouterr().err
+    assert not (tmp_path / "wiretrace" / ".proxy-port").exists()
+
+
+def test_022_b_a_switch_without_a_port_keeps_the_port_and_a_failed_save_still_starts(tmp_path, monkeypatch, capsys):
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, 9125)),
+                                                        (start.RUNNING, "other")])
+    assert code == 0 and [listen_port(c["cmd"]) for c in calls][1:] == [9125, 9125]
+    assert start.PORT_NOT_SAVED in capsys.readouterr().err
+
+
+def test_022_b_a_stop_signal_after_a_port_switch_was_decided_starts_nothing(tmp_path, monkeypatch):
+    (tmp_path / "wiretrace").mkdir()
+
+    def collector_for(preset, target, *args):
+        if target == "ios":
+            os.kill(os.getpid(), signal.SIGINT)
+        return None, "off (test)"
+
+    code, calls = switching_run(tmp_path, monkeypatch, [(start.RUNNING, start.Switch("staging", "ios", None, 9126))],
+                                collector_for=collector_for)
+    assert code == 0 and len(calls) == 1
+
+
+@pytest.mark.parametrize("port", [80, 65536, 8081, 51820])
+def test_022_b_a_bad_port_flag_starts_nothing(tmp_path, monkeypatch, capsys, port):
+    monkeypatch.setattr(start, "supervise", lambda *a, **k: pytest.fail("must not start"))
+    code = start.run("staging", "android", "proxy", "wiretrace", presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", proxy_port=port, wiretrace_dir=tmp_path)
+    assert code == 1
+    assert capsys.readouterr().err.startswith("--port: ")
+    assert not (tmp_path / "sessions").exists()
+
+
+def test_022_b_the_port_flag_is_for_this_run_only(tmp_path, monkeypatch):
+    (tmp_path / "wiretrace").mkdir()
+    code, calls = switching_run(tmp_path, monkeypatch, [])
+    assert code == 0 and not (tmp_path / "wiretrace" / ".proxy-port").exists()
+    assert parse_start(monkeypatch, "--port", "9200")[1]["proxy_port"] == 9200
+    assert parse_start(monkeypatch)[1]["proxy_port"] is None
+
+
+def test_022_b_without_the_flag_run_listens_on_the_saved_port(tmp_path, monkeypatch):
+    (tmp_path / "presets").mkdir()
+    (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
+    (tmp_path / "wiretrace").mkdir()
+    (tmp_path / "wiretrace" / ".proxy-port").write_text("9127")
+    calls = []
+    monkeypatch.setattr(start, "supervise", lambda cmd, *a, **k: calls.append(cmd) or 0)
+    monkeypatch.setattr(start, "busy_ports", lambda ports: [])
+    code = start.run("staging", "android", "proxy", "none", presets_dir=tmp_path / "presets",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", wiretrace_dir=tmp_path / "wiretrace",
+                     collector_for=lambda *a: (None, "off (test)"))
+    assert code == 0 and listen_port(calls[0]) == 9127
 
 
 # Started from Wiretrace.app (spec 014)

@@ -111,7 +111,8 @@ export function SwitchDeviceDialog({ device, state, fromWizard = false, onClose 
 /** Asked before switching to a device the Wi-Fi proxy refused: the next session accepts only its address. */
 export function SwitchClientDialog({ address, accepted, state, onClose }: {
   address: string;
-  accepted: string;
+  /** Every device the current session accepts: the dialog names each one the next session refuses. */
+  accepted: readonly string[];
   state: AppState;
   onClose: () => void;
 }) {

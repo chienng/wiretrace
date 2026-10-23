@@ -51,6 +51,7 @@ import {
 import { browserStorage as storage } from '../storage';
 import { useData, useDispatch, useStore } from '../store';
 import type { AppState, DeviceInfo } from '../types';
+import { ChangePortDialog } from './ChangePortDialog';
 import { Modal } from './Modal';
 import { SwitchDeviceDialog } from './SwitchDeviceDialog';
 
@@ -269,6 +270,7 @@ function ConnectStep({
   const [since] = useState(() => Date.now());
   const [confShown, setConfShown] = useState(false);
   const [qrFailed, setQrFailed] = useState(false);
+  const [changingPort, setChangingPort] = useState(false);
   const onQrFail = useCallback(() => setQrFailed(true), []);
   const wg = wireguardSteps(state.mode, choice, kind);
   const choosable = state.mode === 'both' && !needsProxy(kind);
@@ -301,7 +303,16 @@ function ConnectStep({
             <button type="button" className="btn small" onClick={() => copy(address, 'Address')}>
               Copy
             </button>
+            <span className="port-note">
+              Port {state.proxy_port}
+              <button type="button" className="btn small" onClick={() => setChangingPort(true)}>
+                Change port…
+              </button>
+            </span>
           </div>
+        )}
+        {changingPort && (
+          <ChangePortDialog current={state.proxy_port} macIp={state.mac_ip} onClose={() => setChangingPort(false)} />
         )}
         <Steps steps={proxySteps(kind, macIp, state.proxy_port)} copy={copy} />
         <Connection state={state} since={since} />

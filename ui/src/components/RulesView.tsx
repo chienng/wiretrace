@@ -11,7 +11,9 @@ import {
   parseImport,
   replaceAt,
   ruleFromFlow,
+  ruleKind,
   ruleSummary,
+  RULE_ORDER_NOTE,
   serverError,
   type TypeFilter,
 } from '../logic/rules';
@@ -20,13 +22,17 @@ import type { Rule, RuleAction } from '../types';
 import { Modal } from './Modal';
 import { RuleEditor, Toggle, type SaveProblem } from './RuleEditor';
 
-const TAG_CLASS: Record<RuleAction, string> = { mock: 'mock', status: 'fault', delay: 'slow', drop: 'fault' };
+const TAG_CLASS: Record<RuleAction, string> = { mock: 'mock', status: 'fault', delay: 'slow', drop: 'fault', pause: 'paused', rewrite: 'rewritten',
+  map_remote: 'mapped' };
 const TYPE_FILTERS: { id: TypeFilter; label: string }[] = [
   { id: 'all', label: 'All types' },
   { id: 'mock', label: 'Mock' },
   { id: 'status', label: 'Status' },
   { id: 'delay', label: 'Delay' },
   { id: 'drop', label: 'Drop' },
+  { id: 'pause', label: 'Pause' },
+  { id: 'rewrite', label: 'Rewrite' },
+  { id: 'map_remote', label: 'Map remote' },
 ];
 
 /** The rule being edited: a saved one (by id) or a new one not saved yet. */
@@ -54,7 +60,8 @@ function RuleItem({ rule, selected, onSelect, onToggle, busy }: { rule: Rule; se
       </div>
       {onToggle ? <Toggle on={rule.enabled} label={rule.enabled ? 'Turn the rule off' : 'Turn the rule on'} onChange={onToggle} disabled={busy} /> : <span className="tag new">new</span>}
       <div className="ra">
-        <span className={`tag ${TAG_CLASS[rule.action.type]}`}>{rule.action.type}</span>
+        <span className={`kind ${ruleKind(rule) === 'Changes' ? 'chg' : 'ans'}`}>{ruleKind(rule)}</span>
+        <span className={`tag ${TAG_CLASS[rule.action.type]}`}>{rule.action.type.replace('_', ' ')}</span>
         <span className="rn">{rule.name || 'Unnamed rule'}</span>
         <span className="rs"> · {ruleSummary(rule)}</span>
       </div>
@@ -274,6 +281,7 @@ export function RulesView() {
               </select>
             </span>
           </div>
+          <div className="rule-order top">{RULE_ORDER_NOTE}</div>
           <div className="rule-items">
             {editing?.kind === 'new' && <RuleItem rule={editing.rule} selected onSelect={() => undefined} busy={busy} />}
             {visible.map((r) => (
@@ -292,7 +300,6 @@ export function RulesView() {
             {rules && list.length > 0 && visible.length === 0 && <div className="note">No rule matches the filter.</div>}
             {!rules && !loadError && <div className="note">Loading…</div>}
           </div>
-          <div className="rule-order">Rules apply in this order; the first enabled one that applies wins.</div>
         </div>
         {draftRule && rules ? (
           <RuleEditor

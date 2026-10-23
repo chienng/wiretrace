@@ -102,7 +102,44 @@ def test_firewall_check():
     assert firewall_status(on, "disabled", "not part of the firewall") == WARN
 
 
+def test_022_b_the_firewall_advice_names_the_port_in_use(monkeypatch):
+    on = "Firewall is enabled. (State = 1)"
+    unknown = fake_run({"--getglobalstate": on, "--getblockall": "Firewall has block all state set to disabled.",
+                        "/p/python3.12": "not part of the firewall"})
+    block_all = fake_run({"--getglobalstate": on, "--getblockall": "Firewall has block all state set to enabled."})
+    for run in (unknown, block_all):
+        assert "(UDP 51820, TCP 9100)" in doctor.check_firewall(run=run, python="/p/python3.12", proxy_port=9100)[0].detail
+    monkeypatch.setattr(doctor, "saved_proxy_port", lambda wiretrace_dir=doctor.WIRETRACE_DIR: 8890)
+    assert "(UDP 51820, TCP 8890)" in doctor.check_firewall(run=unknown, python="/p/python3.12")[0].detail
+
+
 # Ports
+
+def test_022_b_doctor_checks_the_saved_port_else_8889(monkeypatch, tmp_path):
+    assert doctor.saved_proxy_port(tmp_path) == 8889
+    (tmp_path / ".proxy-port").write_text("8890\n")
+    assert doctor.saved_proxy_port(tmp_path) == 8890
+    checked = []
+    monkeypatch.setattr(doctor, "check_port", lambda proto, host, port, label: checked.append((port, label)))
+    monkeypatch.setattr(doctor, "saved_proxy_port", lambda wiretrace_dir=doctor.WIRETRACE_DIR: 8890)
+    doctor.check_ports()
+    assert checked == [(51820, "WireGuard"), (8890, "proxy"), (8081, "mitmweb UI")]
+    assert doctor.PORTS[1] == ("tcp", "0.0.0.0", 8889, "proxy")
+
+
+@pytest.mark.parametrize("port, problem", [
+    (1024, None), (65535, None), (8888, None), (8890, None),
+    (1023, "The port must be 1024–65535."), (65536, "The port must be 1024–65535."),
+    (8081, "Port 8081 is the Wiretrace window's port."), (51820, "Port 51820 is the WireGuard tunnel's port."),
+    ("8890", "The port must be a whole number."), (8890.0, "The port must be a whole number."),
+    (True, "The port must be a whole number."), (None, "The port must be a whole number."),
+])
+def test_022_b_port_problem(port, problem):
+    assert doctor.port_problem(port) == problem
+
+
+def test_022_b_port_problem_refuses_this_runs_window_port():
+    assert doctor.port_problem(9001, 9001) == "Port 9001 is the Wiretrace window's port."
 
 def test_port_free():
     with socket.socket() as probe:

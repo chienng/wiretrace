@@ -272,6 +272,163 @@ def test_021_the_refusal_line_is_unchanged_and_has_no_address(capsys):
     assert "192.0.2.7" not in printed
 
 
+# allow and remove (spec 022, slice A)
+
+class _Flow:
+    def __init__(self, ip: str, mode: mode_specs.ProxyMode | None = REGULAR, replay: str | None = None) -> None:
+        self.client_conn = _Client(ip, mode)
+        self.is_replay = replay
+        self.killed = False
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def pinned_guard(first: str = "192.0.2.10") -> ProxyGuard:
+    addon = guard("127.0.0.0/8", "::1", pin=True)
+    assert connect(addon, first).error is None
+    return addon
+
+
+def test_022_allow_accepts_a_waiting_address_which_then_connects():
+    addon = pinned_guard()
+    assert connect(addon, "192.0.2.11").error
+    assert addon.allow("192.0.2.11") is None
+    assert addon.accepted() == ["192.0.2.10", "192.0.2.11"]
+    assert "192.0.2.11" not in {w.address for w in addon.waiting()}
+    assert connect(addon, "192.0.2.11").error is None
+    assert addon.refused == 1
+
+
+def test_022_allow_keeps_the_order_and_the_ipv4_form():
+    addon = pinned_guard()
+    for ip in ("192.0.2.13", "192.0.2.11"):
+        connect(addon, ip)
+    assert addon.allow("192.0.2.13") is None
+    assert addon.allow("::ffff:192.0.2.11") is None
+    assert addon.accepted() == ["192.0.2.10", "192.0.2.13", "192.0.2.11"]
+
+
+@pytest.mark.parametrize("value, reason", [
+    ("not-an-ip", proxy_guard.NOT_AN_ADDRESS), ("127.0.0.1", proxy_guard.NOT_PINNABLE),
+    ("169.254.1.1", proxy_guard.NOT_PINNABLE), ("0.0.0.0", proxy_guard.NOT_PINNABLE),
+    ("224.0.0.1", proxy_guard.NOT_PINNABLE), ("192.0.2.10", proxy_guard.ALREADY_ACCEPTED),
+    ("192.0.2.99", proxy_guard.NOT_WAITING)])
+def test_022_allow_refusals_change_nothing(value, reason):
+    addon = pinned_guard()
+    connect(addon, "192.0.2.11")
+    before = (addon.accepted(), addon.waiting())
+    assert addon.allow(value) == reason
+    assert (addon.accepted(), addon.waiting()) == before
+
+
+def test_022_allow_and_remove_need_pinning():
+    addon = guard("127.0.0.0/8", pin=False)
+    connect(addon, "192.0.2.11")
+    assert addon.allow("192.0.2.11") == proxy_guard.NOT_PINNING
+    assert addon.remove("192.0.2.11") == proxy_guard.NOT_PINNING
+    assert addon.accepted() == []
+
+
+def test_022_at_most_four_are_accepted_besides_this_mac():
+    addon = pinned_guard()
+    for n in range(11, 16):
+        connect(addon, f"192.0.2.{n}")
+    for n in range(11, 14):
+        assert addon.allow(f"192.0.2.{n}") is None
+    assert len(addon.accepted()) == proxy_guard.MAX_ACCEPTED == 4
+    assert addon.allow("192.0.2.14") == proxy_guard.AT_MOST
+    assert connect(addon, "192.0.2.14").error
+    assert connect(addon, "127.0.0.1").error is None
+
+
+def test_022_remove_the_pinned_device_and_its_place_can_be_allowed():
+    addon = pinned_guard()
+    for n in range(11, 15):
+        connect(addon, f"192.0.2.{n}")
+    for n in range(11, 14):
+        assert addon.allow(f"192.0.2.{n}") is None
+    assert addon.remove("192.0.2.10") is None
+    assert addon.pinned is None and addon.accepted() == ["192.0.2.11", "192.0.2.12", "192.0.2.13"]
+    assert addon.allow("192.0.2.14") is None
+    assert len(addon.accepted()) == 4
+
+
+def test_022_a_removed_address_is_refused_and_listed_as_waiting():
+    addon = pinned_guard()
+    connect(addon, "192.0.2.11")
+    addon.allow("192.0.2.11")
+    assert addon.remove("192.0.2.11") is None
+    assert addon.accepted() == ["192.0.2.10"]
+    assert connect(addon, "192.0.2.11").error
+    assert [w.address for w in addon.waiting()] == ["192.0.2.11"]
+    assert addon.allow("192.0.2.11") is None
+
+
+def test_022_remove_refuses_an_address_that_is_not_accepted():
+    addon = pinned_guard()
+    connect(addon, "192.0.2.11")
+    assert addon.remove("192.0.2.11") == proxy_guard.NOT_ACCEPTED
+    assert addon.remove("127.0.0.1") == proxy_guard.NOT_PINNABLE
+    assert addon.remove("nope") == proxy_guard.NOT_AN_ADDRESS
+    assert addon.accepted() == ["192.0.2.10"]
+
+
+def test_022_after_every_device_is_removed_the_next_new_one_is_refused_not_pinned():
+    addon = pinned_guard()
+    assert addon.remove("192.0.2.10") is None
+    assert addon.accepted() == [] and addon.pin_used
+    assert connect(addon, "192.0.2.20").error
+    assert addon.pinned is None
+    assert connect(addon, "192.0.2.10").error
+
+
+def test_022_an_options_update_never_pins_again_after_the_pinned_device_was_removed():
+    from mitmproxy.test import taddons
+
+    addon = ProxyGuard()
+    with taddons.context(addon) as tctx:
+        tctx.configure(addon, qa_proxy_clients=["127.0.0.0/8"], qa_proxy_pin=True, qa_proxy_pinned="192.0.2.72")
+        assert addon.pin_used and addon.pinned == "192.0.2.72"
+        assert addon.remove("192.0.2.72") is None
+        tctx.configure(addon, qa_proxy_clients=["127.0.0.0/8", "::1"])
+        assert addon.pinned is None and addon.accepted() == []
+
+
+def test_022_requestheaders_kills_a_removed_devices_flow_and_leaves_the_others():
+    addon = pinned_guard()
+    connect(addon, "192.0.2.11")
+    addon.allow("192.0.2.11")
+    flows = {ip: _Flow(ip) for ip in ("192.0.2.10", "192.0.2.11", "127.0.0.1")}
+    addon.remove("192.0.2.11")
+    for flow in flows.values():
+        addon.requestheaders(flow)
+    assert {ip: f.killed for ip, f in flows.items()} == {"192.0.2.10": False, "192.0.2.11": True,
+                                                       "127.0.0.1": False}
+
+
+def test_022_requestheaders_leaves_wireguard_clients_and_replays_alone():
+    addon = pinned_guard()
+    addon.remove("192.0.2.10")
+    tunnel, replay = _Flow("10.0.0.1", WIREGUARD), _Flow("192.0.2.10", replay="request")
+    addon.requestheaders(tunnel)
+    addon.requestheaders(replay)
+    assert not tunnel.killed and not replay.killed
+
+
+def test_022_wireguard_clients_are_never_accepted_refused_or_counted():
+    addon = pinned_guard()
+    for _ in range(3):
+        assert connect(addon, "10.0.0.1", WIREGUARD).error is None
+    assert addon.accepted() == ["192.0.2.10"] and addon.refused == 0 and addon.waiting() == []
+    assert addon.allow("10.0.0.1") == proxy_guard.NOT_WAITING
+
+
+def test_022_the_refusal_line_has_no_address_and_says_how_to_allow():
+    assert "Allow it in the Wiretrace window" in REFUSAL
+    assert not __import__("re").search(r"\d+\.\d+\.\d+\.\d+", REFUSAL)
+
+
 # server_connect
 
 def _run(addon: ProxyGuard, client_ip: str, host: str, mode: mode_specs.ProxyMode | None = REGULAR) -> _Data:
@@ -340,6 +497,61 @@ def test_a_literal_does_not_call_the_resolver(monkeypatch):
     monkeypatch.setattr(proxy_guard, "_lookup", lookup)
     data = _run(guard(pin=False), "192.0.2.10", "127.0.0.1")
     assert data.server.error
+
+
+# Map remote targets (spec 022, slice G)
+
+TARGET = "staging-api.example.net"
+
+
+@pytest.fixture
+def map_target(monkeypatch):
+    """`TARGET` is the target of an enabled Map remote rule, resolving to the addresses set in `.answer`."""
+    found = {"answer": ["203.0.113.10"]}
+
+    async def lookup(host: str):
+        assert host == TARGET
+        return [(0, 0, 0, "", (address, 0)) for address in found["answer"]]
+
+    monkeypatch.setattr(proxy_guard, "_lookup", lookup)
+    monkeypatch.setattr(proxy_guard, "own_addresses", lambda: frozenset({"198.51.100.7"}))
+    monkeypatch.setattr(ProxyGuard, "_map_target", staticmethod(lambda host: host == TARGET))
+    return found
+
+
+@pytest.mark.parametrize("address", ["10.0.0.5", "172.16.3.4", "192.168.1.20", "100.64.0.1", "127.0.0.1", "::1",
+                                     "169.254.1.1", "fe80::1", "fd00::1", "0.0.0.0", "224.0.0.1", "::ffff:10.0.0.5",
+                                     "198.51.100.7"])
+@pytest.mark.parametrize("client_ip, mode", [("192.0.2.10", REGULAR), ("127.0.0.1", REGULAR), ("10.0.0.1", WIREGUARD)])
+def test_022_g_a_map_target_on_this_macs_network_is_refused_for_every_client(map_target, address, client_ip, mode):
+    map_target["answer"] = ["203.0.113.10", address]
+    data = _run(guard(pin=False), client_ip, TARGET, mode)
+    assert data.server.error == proxy_guard.MAP_REFUSED
+
+
+@pytest.mark.parametrize("client_ip, mode", [("192.0.2.10", REGULAR), ("127.0.0.1", REGULAR), ("10.0.0.1", WIREGUARD)])
+def test_022_g_a_public_map_target_is_allowed(map_target, client_ip, mode):
+    assert _run(guard(pin=False), client_ip, TARGET, mode).server.error is None
+
+
+def test_022_g_other_hosts_keep_the_loopback_check(map_target, monkeypatch):
+    async def lookup(host: str):
+        return [(0, 0, 0, "", ("10.0.0.5", 0))]
+
+    monkeypatch.setattr(proxy_guard, "_lookup", lookup)
+    # A private address is fine for a host that is not a map target, from any client.
+    assert _run(guard(pin=False), "192.0.2.10", "intranet.example.com").server.error is None
+    assert _run(guard(), "127.0.0.1", "127.0.0.1").server.error is None
+    assert _run(guard(pin=False), "192.0.2.10", "127.0.0.1").server.error
+
+
+def test_022_g_blocked_for_map_holds_the_strict_ranges_only():
+    for address in ("10.1.2.3", "172.31.255.255", "192.168.0.1", "100.127.0.1", "fc00::1", "ff02::1", "::", "0.1.2.3"):
+        assert proxy_guard._blocked_for_map(address), address
+    for address in ("172.32.0.1", "100.128.0.1", "8.8.8.8", "2606:4700::1", "not-an-ip"):
+        assert not proxy_guard._blocked_for_map(address), address
+    # The existing check is unchanged: private addresses stay open to remote clients.
+    assert not proxy_guard._blocked("10.0.0.5")
 
 
 # Real mitmdump: the script loads, and client.error closes the connection.

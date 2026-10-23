@@ -3,7 +3,7 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.9.1**.
+Current version: **0.10.0**.
 
 **Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
 the steps below do not work for them. Follow the guide of your version instead:
@@ -38,7 +38,7 @@ for checks, options and reports; run them one block at a time. The
 [user guide](docs/user-guide.md) explains each step in more detail.
 
 **1. Download**
-[wiretrace-0.9.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz)
+[wiretrace-0.10.0-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz)
 and double-click it in Downloads. A `wiretrace` folder appears next to it.
 
 **2. Drag the `wiretrace` folder onto your home folder.** In Finder, choose **Go → Home** in
@@ -48,15 +48,15 @@ folder.) If Downloads already had a `wiretrace` folder, the new one is `wiretrac
 that one and rename it `wiretrace`.
 
 Optional, to check the download: also save
-[wiretrace-0.9.1-macos.tar.gz.sha256](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.tar.gz.sha256)
+[wiretrace-0.10.0-macos.tar.gz.sha256](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz.sha256)
 in Downloads and run this. It must print `OK`; if it prints `FAILED`, download again.
 
 ```bash
-cd ~/Downloads && shasum -a 256 -c wiretrace-0.9.1-macos.tar.gz.sha256
+cd ~/Downloads && shasum -a 256 -c wiretrace-0.10.0-macos.tar.gz.sha256
 ```
 
 The same files also come as
-[wiretrace-0.9.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.9.1/wiretrace-0.9.1-macos.dmg):
+[wiretrace-0.10.0-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg):
 double-click it and drag the `wiretrace` folder from its window onto your home folder (a
 slower copy), then eject it.
 
@@ -91,7 +91,7 @@ Change either from the window's title bar: *Preset: …* switches to
 WireGuard*) switches to an Android phone, the iOS Simulator or Android emulator on this Mac,
 or another device with a Wi-Fi proxy. Each switch saves the session and starts a new one.
 Every device accepts both ways to connect: the phone's Wi-Fi proxy (this Mac's IP address,
-port 8888), or the WireGuard tunnel for an app that ignores the proxy. The setup wizard
+port 8889), or the WireGuard tunnel for an app that ignores the proxy. The setup wizard
 shows the steps, and its *Choose device* step can switch the device too.
 
 <details>
@@ -113,7 +113,7 @@ cd ~/wiretrace
 ./wiretrace start --preset default --target android --ui wiretrace
 ```
 
-Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8888, or turn the WireGuard
+Then set the phone's Wi-Fi proxy to this Mac's IP address, port 8889, or turn the WireGuard
 tunnel on if the app ignores the proxy. Wiretrace listens for both at once; the setup wizard
 shows the steps. `--mode proxy` or `--mode wireguard` starts one of the two only.
 
@@ -129,8 +129,11 @@ does not have, such as `--client` or `--no-ui`.
 wizard: set the phone's Wi-Fi proxy (or, with the *Wi-Fi proxy | WireGuard* switch on
 WireGuard, install the WireGuard app, scan the QR code and turn the tunnel on), then open
 `http://mitm.it` on the phone and install the certificate. The Wi-Fi proxy accepts this Mac
-and the first other device that connects; any other device is refused until Wiretrace
-restarts (or name the device with `--client <its IP address>` in Terminal). On an iPhone, also turn on full trust for it in Settings →
+and the first other device that connects; the window's banner lets you allow up to 4 devices
+in one session, or switch to another one (or name the devices with `--client <its IP
+address>` in Terminal). Upgrading from 0.9.1: the Wi-Fi proxy port is now 8889; set it on
+your phones, or change it back to 8888 with *Change…* in the window's sidebar. On an iPhone,
+also turn on full trust for it in Settings →
 General → About → Certificate Trust Settings. Details:
 [Part 2 of the user guide](docs/user-guide.md#part-2--prepare-a-test-device-once-per-device).
 
@@ -223,9 +226,9 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 
 - **Setup check.** `./wiretrace doctor` checks Python, mitmproxy, the ports, the macOS
   firewall, `adb` and connected devices, and the CA certificate, and says what to fix.
-- **Capture.** `./wiretrace start` runs mitmproxy as a Wi-Fi proxy (TCP 8888) and a WireGuard
+- **Capture.** `./wiretrace start` runs mitmproxy as a Wi-Fi proxy (TCP 8889) and a WireGuard
   server (UDP 51820) at the same time, in one session. `--mode proxy` or `--mode wireguard`
-  starts one of the two only. `--target` is `android`, `ios`,
+  starts one of the two only; `--port N` picks another proxy port for one run. `--target` is `android`, `ios`,
   `android-emu`, `ios-sim` or `device`. Each session is saved in its own folder under
   `sessions/`, as it happens.
 - **Presets.** One YAML file per project and environment. Only the listed API hosts are
@@ -235,7 +238,9 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
 - **Mocks from files.** A file `mocks/<preset>/<METHOD>/<path>.json` answers that request
   instead of the backend. Changes apply to the next request, without a restart.
 - **Rules.** Per request: answer with a mock or a status code, wait a number of
-  milliseconds, or drop the connection, always, once, or every Nth call. Edited in the
+  milliseconds, drop the connection, pause at a breakpoint to edit the request or response,
+  rewrite headers and JSON fields, or send it to another server (Map remote), always, once, or
+  every Nth call. *Map local…* saves a response as a mock file and a rule. Edited in the
   Wiretrace window's *Rules* view and saved in `rules/<preset>.json`. The older
   `qa_fault_*` options still work in mitmweb.
 - **Device logs.** The app's own process log, collected next to the traffic: `adb logcat`
@@ -255,7 +260,8 @@ builds screens 1 to 4. Source and notes: [`mockups/`](mockups/README.md).
   Simulator screenshots. You copy and download; nothing is sent anywhere.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
   and logs on one screen, a log timeline with the device's status, earlier sessions, search in
-  headers and bodies, replay and compare, the setup wizard and the Rules view. It is only
+  headers and bodies, replay and compare, the setup wizard and the Rules view. It also lists
+  the connections it does not decrypt, and decrypts one more host on request. It is only
   reachable from the same Mac, with a new
   token at every start. While it runs, the menu bar shows that Wiretrace is recording and how
   many requests failed; from there you can open the window, jump to the last error, or stop

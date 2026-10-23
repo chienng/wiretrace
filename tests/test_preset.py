@@ -631,3 +631,31 @@ def test_preset_edit_16_a_new_temporary_name_is_hidden_from_the_preset_list(tmp_
     monkeypatch.setattr(preset.os, "replace", spy)
     preset.replace_file(folder / "staging.yaml", "name: staging\n")
     assert seen == [[]]
+
+
+@pytest.mark.parametrize(
+    "host, choices",
+    [
+        ("cdn.example.net", ["cdn.example.net", "example.net"]),
+        ("cdn.example.co.uk", ["cdn.example.co.uk", "example.co.uk"]),
+        ("example.co.uk", ["example.co.uk"]),
+        ("example.net", ["example.net"]),
+        ("a.b.example.com", ["a.b.example.com", "b.example.com"]),
+        ("CDN.Example.NET.", ["cdn.example.net", "example.net"]),
+        ("203.0.113.9", ["203.0.113.9"]),
+        ("2001:db8::1", ["2001:db8::1"]),
+        ("localhost", ["localhost"]),
+    ],
+)
+def test_022_c_decrypt_choices_are_the_host_then_a_parent_that_is_a_domain(host, choices):
+    assert preset.decrypt_choices(host) == choices
+    assert "co.uk" not in preset.decrypt_choices(host)
+
+
+def test_022_c_an_api_host_covers_itself_and_its_subdomains_only():
+    hosts = ["example.net"]
+    assert preset.covers(hosts, "example.net")
+    assert preset.covers(hosts, "CDN.example.net")
+    assert not preset.covers(hosts, "badexample.net")
+    assert not preset.covers(hosts, "net")
+    assert not preset.covers([], "example.net")

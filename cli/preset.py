@@ -8,11 +8,13 @@ features still load; inside `redact` they are an error, because a typo would tur
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import json
 import os
 import re
 import secrets
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
@@ -222,6 +224,32 @@ def allow_hosts_regex(host: str) -> str:
 
 def allow_hosts_regexes(preset: Preset) -> list[str]:
     return [allow_hosts_regex(host) for host in preset.api_hosts]
+
+
+# A two-label parent whose first label is one of these is a public suffix such as co.uk, not a domain.
+SECOND_LEVEL_SUFFIXES = ("co", "com", "net", "org", "gov", "edu", "ac")
+
+
+def decrypt_choices(host: str) -> list[str]:
+    """What the window offers to decrypt for a passed-through host: the host, then its parent domain
+    when that is a domain (spec 022, slice C). An IP address is offered alone."""
+    host = host.lower().rstrip(".")
+    try:
+        ipaddress.ip_address(host)
+        return [host]
+    except ValueError:
+        pass
+    labels = host.split(".")
+    parent = labels[1:]
+    if len(parent) < 2 or (len(parent) == 2 and parent[0] in SECOND_LEVEL_SUFFIXES):
+        return [host]
+    return [host, ".".join(parent)]
+
+
+def covers(api_hosts: Sequence[str], host: str) -> bool:
+    """Whether an API host already decrypts `host`: it is that host or one of its subdomains."""
+    host = host.lower()
+    return any(host == h.lower() or host.endswith("." + h.lower()) for h in api_hosts)
 
 
 # The window's form (spec 013, extension A). It edits fields; the file is rendered whole from them.
