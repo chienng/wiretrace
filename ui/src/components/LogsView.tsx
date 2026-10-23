@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { copyText } from '../clipboard';
 import { download } from '../download';
 import { formatTime, methodClass, methodLabel, statusClass } from '../logic/format';
@@ -28,12 +28,14 @@ import {
   type Level,
   type LogItem,
 } from '../logic/logs';
+import { LIST_MIN, LOGS_DETAIL, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
 import type { Range } from '../logic/timeline';
 import { useData, useDispatch, useStore } from '../store';
 import type { FlowSummary, LogLine } from '../types';
 import { DevicePicker } from './DevicePicker';
 import { LogRow, LOG_ROW_HEIGHT } from './LogRow';
 import { Toggle } from './RuleEditor';
+import { Splitter } from './Splitter';
 import { Timeline } from './Timeline';
 import { VirtualList } from './VirtualList';
 
@@ -155,6 +157,9 @@ export function LogsView() {
   const patch = useCallback((p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p }), [dispatch]);
   const [rows, setRows] = useState<[number, number]>([-1, -1]);
   const onRange = useCallback((first: number, last: number) => setRows([first, last]), []);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const size = useBoxWidth(bodyRef);
+  const detail = usePaneWidth(LOGS_DETAIL, size.box - LIST_MIN, size.window);
 
   // Pause and Clear act on the live session only.
   const frozen = viewing ? null : ui.logsFrozen;
@@ -336,7 +341,7 @@ export function LogsView() {
         </label>
       </div>
       <Timeline flows={shownFlows} lines={sourceLines} shown={shown} selected={selected?.ts ?? null} onPick={pick} />
-      <div className="lg-body">
+      <div className="lg-body" ref={bodyRef} style={{ '--detail-w': `${detail.width}px` } as CSSProperties}>
         <div className="lg-list">
           <div className="lhead">
             <span>Time</span>
@@ -374,6 +379,7 @@ export function LogsView() {
           </div>
         </div>
         <LogDetail line={selected} context={context} flows={shownFlows} />
+        <Splitter label="Resize the log line details" edge="end" pane={detail} />
       </div>
     </div>
   );
