@@ -31,6 +31,21 @@ The same two files are also in your download: `~/wiretrace/README.md` and
 
 Use Wiretrace only with apps, devices and accounts you are allowed to test.
 
+## The certificate
+
+The root certificate on the phone is created on your Mac the first time Wiretrace starts.
+mitmproxy does not ship this certificate, and Wiretrace does not send it to the mitmproxy
+authors. The private key stays in `~/.mitmproxy/mitmproxy-ca.pem` on that Mac. What the phone
+installs, from `http://mitm.it`, is only the public certificate, and Wiretrace itself serves
+that page. The public certificate cannot decrypt traffic. Each Mac has its own key, so one
+tester's key does not work on another tester's phone.
+
+Do not copy or share `mitmproxy-ca.pem`. Anyone who later has that file can sign certificates
+that a phone which still trusts this CA will accept. When a phone leaves testing, remove the
+mitmproxy profile (iPhone: Settings → General → VPN & Device Management; Android: Trusted
+credentials → User). `./wiretrace doctor` warns if other users on the Mac can read the private
+key.
+
 ## Quick start
 
 Steps 1 to 3 happen in Finder, and step 4 in the Wiretrace app. The **Terminal** commands are
