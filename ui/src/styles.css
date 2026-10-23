@@ -654,7 +654,7 @@ ul.plain li { margin-bottom: 5px; }
 .toggle-line { height: 30px; display: flex; align-items: center; }
 .editor { padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; min-height: 0; }
 .editor .empty { position: static; }
-.editor .field.fixed, .editor .w-status, .editor .w-delay { flex: none; }
+.editor > .field, .editor .field.fixed, .editor .w-status, .editor .w-delay { flex: none; }
 .editor .w-status { width: 220px; }
 .editor .w-delay { width: 150px; }
 .editor .textin { height: 30px; font-size: 12.5px; }
