@@ -591,8 +591,10 @@ def test_both_banner_gives_both_ways_and_the_pinning_note(ui):
     tunnel = next(line for line in lines if line.startswith("Phone, if an app ignores the proxy:"))
     assert "turn the WireGuard tunnel on instead" in tunnel
     assert ("scan the QR code" in tunnel) or ("enter the configuration printed below" in tunnel)
-    assert ("Wi-Fi proxy: only the first other device that connects is accepted, unless --client names it."
-            in lines)
+    note = ("Wi-Fi proxy: the first other device that connects is accepted; allow more in the window, "
+            "or name them with --client." if ui == start.WIRETRACE else
+            "Wi-Fi proxy: only the first other device that connects is accepted, unless --client names it.")
+    assert note in lines
     for single in ("proxy", "wireguard"):
         assert "Phone, if an app ignores the proxy" not in start.banner(PRESET_WITH_FILTER, "android", single, ui, Path("/s"))
 

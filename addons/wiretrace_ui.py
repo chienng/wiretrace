@@ -1893,6 +1893,10 @@ class WiretraceUI:
 
     def next_layer(self, nextlayer) -> None:
         try:
+            # Script hooks run before mitmproxy's own NextLayer, which keeps a layer already set:
+            # deciding with it here is the same decision, and the only way to see a passthrough.
+            if nextlayer.layer is None and (decider := ctx.master.addons.get("nextlayer")) is not None:
+                decider.next_layer(nextlayer)
             row = self.tunnels.layer(nextlayer, client_label(nextlayer.context.client), time.time())
         except Exception as e:
             logger.error("Wiretrace UI: could not list an encrypted connection (%s)", type(e).__name__)

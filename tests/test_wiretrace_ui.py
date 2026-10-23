@@ -4192,6 +4192,26 @@ def test_022_c_wiretraces_own_hosts_and_decrypted_connections_are_no_rows(tmp_pa
     client_scenario(body, tmp_path)
 
 
+def test_022_c_a_connection_is_listed_although_mitmproxy_decides_its_layer_after_the_window(tmp_path):
+    """mitmproxy runs script hooks before its own NextLayer, so the window never sees a decided layer."""
+    from mitmproxy.addons.next_layer import NextLayer
+    from mitmproxy.proxy.layers import TCPLayer, modes
+
+    mitmproxys = NextLayer()
+
+    async def body(ui, client, tctx):
+        tctx.options.update(allow_hosts=[r"(^|\.)api\.example\.com(:\d+)?$"])
+        undecided = decided(client_hello("cdn.example.net"), address=("cdn.example.net", 443), layer=False)
+        undecided.context.layers = [modes.HttpProxy(undecided.context)]
+        ui.next_layer(undecided)
+        mitmproxys.next_layer(undecided)
+        assert isinstance(undecided.layer, TCPLayer) and undecided.layer.flow is None
+        [row] = (await client.json("/api/tunnels"))["tunnels"]
+        assert (row["method"], row["host"], row["port"], row["tls"]) == ("TLS", "cdn.example.net", 443, True)
+
+    scenario(body, extra=(mitmproxys,))
+
+
 def test_022_c_a_decrypt_writes_the_file_then_gives_mitmproxy_the_lists_built_from_it(tmp_path, monkeypatch):
     async def body(ui, client, tctx, folder):
         pass_through(ui, "cdn.example.net")

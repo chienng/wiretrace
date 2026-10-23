@@ -34,7 +34,7 @@ def decided(data: bytes = b"", *, ignore=True, address=("203.0.113.9", 443), cli
     context.server = tflow.tserver_conn()
     context.server.address = address
     chosen = layers.TCPLayer(context, ignore=ignore) if layer else None
-    return SimpleNamespace(layer=chosen, context=context, data_client=lambda: data)
+    return SimpleNamespace(layer=chosen, context=context, data_client=lambda: data, data_server=lambda: b"")
 
 
 def connect_flow(host: str, client=None, headers=()):

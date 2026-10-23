@@ -35,7 +35,8 @@ def main(argv: list[str] | None = None) -> int:
                            help="run mitmdump in this Terminal instead of mitmweb")
     start_cmd.add_argument("--client", action="append", default=[], metavar="ADDR",
                            help="IP address allowed to use the proxy, besides this Mac (repeatable). "
-                                "Without it, only the first other device that connects is accepted")
+                                "Without it, the first other device that connects is accepted; "
+                                "with --ui wiretrace, the window can allow more")
     start_cmd.add_argument("--no-menu-bar", action="store_true",
                            help="with --ui wiretrace, do not show the menu bar item")
     # Wiretrace.app's sessions: no link printed, the menu bar is the stop.

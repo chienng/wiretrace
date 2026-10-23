@@ -367,8 +367,12 @@ def banner(preset: Preset, target: str, mode: str, ui: bool | str, folder: Path,
         lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
         lines.append(f"Phone, if an app ignores the proxy: turn the WireGuard tunnel on instead "
                      f"(first time: {first_time}).")
-        lines.append("Wi-Fi proxy: only the first other device that connects is accepted, "
-                     "unless --client names it.")
+        if kind == WIRETRACE:
+            lines.append("Wi-Fi proxy: the first other device that connects is accepted; "
+                         "allow more in the window, or name them with --client.")
+        else:
+            lines.append("Wi-Fi proxy: only the first other device that connects is accepted, "
+                         "unless --client names it.")
     else:
         lines.append(f"Phone: set the Wi-Fi proxy to this Mac's IP address, port {proxy_port}.")
     lines.append(TARGET_HINTS[target])
