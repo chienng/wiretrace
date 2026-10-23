@@ -526,7 +526,7 @@ def test_real_mitmdump_receiver_in_proxy_mode(tmp_path):
     preset = Preset(name="staging", api_hosts=("127.0.0.1",))
     # The launcher's own command line, so its receiver arguments are what is tested.
     cmd = start.build_command(preset, "proxy", False, session_dir / "flows.mitm", VENV_BIN,
-                              proxy_port=port, wiretrace_dir=tmp_path)
+                              proxy_port=port, data_dir=tmp_path)
     mitmdump = Mitmdump(tmp_path, cmd[1:])
     try:
         wait_for(lambda: accepts(port))
@@ -569,7 +569,7 @@ def test_real_mitmdump_receiver_with_curl(tmp_path):
     port = free_port()
     preset = Preset(name="staging", api_hosts=("api.example.com",))
     cmd = start.build_command(preset, "proxy", False, session_dir / "flows.mitm", VENV_BIN,
-                              proxy_port=port, wiretrace_dir=tmp_path)
+                              proxy_port=port, data_dir=tmp_path)
     mitmdump = Mitmdump(tmp_path, cmd[1:])
     try:
         wait_for(lambda: accepts(port) and mitmdump.ca.exists())

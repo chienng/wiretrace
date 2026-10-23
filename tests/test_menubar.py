@@ -48,8 +48,8 @@ def test_starting_until_a_status_file_has_been_read():
     view = render(None, 1_000.0, False)
     assert view.state == STARTING
     assert view.title == "Wiretrace"
-    assert labels(view) == ["Starting…", "Open Wiretrace", "Quit"]
-    assert enabled_actions(view) == {"open", "quit"}
+    assert labels(view) == ["Starting…", "Open Wiretrace", "Show data folder", "Quit"]
+    assert enabled_actions(view) == {"open", "data_folder", "quit"}
 
 
 def test_live_menu_matches_the_counts_and_hides_a_zero():
@@ -62,7 +62,7 @@ def test_live_menu_matches_the_counts_and_hides_a_zero():
     assert row(view, "Duration").value == "00:01:40"
     assert (row(view, "requests").value, row(view, "errors").value, row(view, "rules on").value) == ("248", "6", "2")
     assert row(view, "errors").alert is True
-    assert enabled_actions(view) == {"open", "last_error", "stop", "quit"}
+    assert enabled_actions(view) == {"open", "last_error", "data_folder", "stop", "quit"}
     assert row(view, "Open Wiretrace").shortcut == "o"
     assert row(view, "Show last error").shortcut == "r"
     assert view.last_error == "flow-1"
@@ -115,8 +115,8 @@ def test_updated_at_exactly_five_seconds_old_is_live_and_older_is_stale():
     stale = render(fresh, 1_000.0 + FRESH_S + 0.001, False)
     assert stale.state == STALE
     assert stale.title == "Wiretrace · ?"
-    assert labels(stale) == ["No status from Wiretrace", "Open Wiretrace", "Stop session", "Quit"]
-    assert enabled_actions(stale) == {"open", "stop", "quit"}
+    assert labels(stale) == ["No status from Wiretrace", "Open Wiretrace", "Show data folder", "Stop session", "Quit"]
+    assert enabled_actions(stale) == {"open", "data_folder", "stop", "quit"}
 
 
 def test_a_file_that_vanished_after_it_was_seen_is_stale_and_recovers():

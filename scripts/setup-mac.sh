@@ -199,6 +199,10 @@ if "$ROOT/scripts/make-app.sh"; then
     app_made=1
 fi
 
+step "Your data folder (presets, rules, mocks, sessions)"
+# Creates it and takes the data an older version kept in this folder; a problem is doctor's FAIL line.
+"$ROOT/wiretrace" data || true
+
 step "Checking the setup (./wiretrace doctor)"
 set +e
 "$ROOT/wiretrace" doctor

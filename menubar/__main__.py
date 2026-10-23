@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import signal
+import subprocess
 import sys
 import time
 import webbrowser
@@ -124,6 +125,15 @@ class Bar:
         # osascript's stdin, so the token is not on a command line.
         webbrowser.open(window_url(self.port, self.token, flow_id), new=2)
 
+    def show_data_folder(self) -> None:
+        """Finder hides ~/Library, so the menu opens the data folder (spec 023)."""
+        from cli import datadir
+        try:
+            subprocess.run(["open", str(datadir.data_dir())], stdin=subprocess.DEVNULL,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5)
+        except (datadir.DataDirError, OSError, subprocess.TimeoutExpired):
+            pass
+
     def show_last_error(self) -> None:
         if not any(row.action == "last_error" and row.enabled for row in self.view.rows):
             return
@@ -168,6 +178,7 @@ class Bar:
         actions = {
             "open": "openWindow:",
             "last_error": "showLastError:",
+            "data_folder": "showDataFolder:",
             "stop": "stopSession:",
             "quit": "quitItem:",
         }
@@ -211,6 +222,9 @@ def _define_controller(appkit):
 
         def showLastError_(self, _sender) -> None:
             self.bar.show_last_error()
+
+        def showDataFolder_(self, _sender) -> None:
+            self.bar.show_data_folder()
 
         def stopSession_(self, _sender) -> None:
             self.bar.stop_session()

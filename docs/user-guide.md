@@ -16,7 +16,9 @@ and the WireGuard tunnel at the same time; the setup wizard shows the Wi-Fi prox
 New in 0.10.0: up to 4 devices on the Wi-Fi proxy, which now listens on port **8889** (change
 it from the window); the hosts the app reaches without decryption, listed as *Encrypted*;
 breakpoints; and rules that rewrite requests and responses, save a response as a mock (*Map
-local*) or send requests to another server (*Map remote*).
+local*) or send requests to another server (*Map remote*); and a data folder,
+`~/Library/Application Support/Wiretrace`, for your presets, rules, mocks and sessions, so an
+update is unpack and `./install` (*Your data folder*, Part 1).
 
 **Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
 Wi-Fi proxy to `<Mac IP>:8889`, or change the port back to 8888 in the window (sidebar,
@@ -107,12 +109,39 @@ The first run takes a few minutes. It installs, all inside your home folder:
 | Android platform-tools r37.0.1 (`adb`) | `~/tools/platform-tools` |
 | Two `PATH` lines | `~/.zshrc` |
 | The Wiretrace app | `~/Applications/Wiretrace.app` |
+| Your presets, rules, mock files and sessions (the **data folder**) | `~/Library/Application Support/Wiretrace` |
 
 Every download is checked against a SHA-256 checksum stored in the script; a file that
 does not match is never installed. Running the script again is safe and quick.
 
 Do **not** run it with `sudo`. It refuses, because the files in your home folder would
 end up owned by root.
+
+### Your data folder
+
+Everything you create — presets, rules, mock files, sessions, and the Wi-Fi proxy port you
+chose last — is kept in `~/Library/Application Support/Wiretrace`, not in `~/wiretrace`. An
+update replaces `~/wiretrace` and never touches the data folder. It is in your home folder,
+so it needs no admin password and no macOS permission.
+
+Finder hides `~/Library`. To get there:
+
+- `./wiretrace data --open` opens the data folder in Finder; `./wiretrace data` prints its path.
+- While Wiretrace records, **Show data folder** in the **Wiretrace** menu (the W icon at the top
+  right) does the same.
+- In Terminal: `cd ~/"Library/Application Support/Wiretrace"`.
+
+Inside are `presets/`, `rules/`, `mocks/` and `sessions/`, laid out as described in this guide.
+The setup puts the shipped examples there (`presets/default.yaml`, `presets/example.yaml`,
+`rules/example.json`, `mocks/example/`). Each start adds an example that is missing, and never
+changes one you edited. To keep the data folder somewhere else, set `WIRETRACE_DATA` to an
+absolute path, for example `export WIRETRACE_DATA=~/wiretrace-data` in `~/.zshrc`.
+
+**Coming from 0.9.1 or older**, which kept these folders inside `~/wiretrace`: the first start
+(or `./install`) copies the presets, rules and mock files it finds in `~/wiretrace` into the
+data folder, moves the sessions, and prints one line saying what it took. A file that is
+already in the data folder is kept. If you moved the old folder aside, for example to
+`~/wiretrace-old`, run `./wiretrace import-data ~/wiretrace-old` (see *Updating and removing*).
 
 ### The Wiretrace app
 
@@ -174,19 +203,21 @@ continue.
 | `WARN Android devices: … unauthorized` | Unlock the phone and accept **Allow USB debugging**. |
 | `INFO CA certificate: not created yet` | Normal before the first start. |
 | `WARN CA private key: readable by other users` | Run the `chmod 600 …` command shown. |
+| `FAIL Data folder: …` | The data folder cannot be created or written; the line says why. Fix that folder's permissions, or set `WIRETRACE_DATA` to a folder you can write (an absolute path), or unset it. |
+| `WARN Old data: The install folder still has presets/ …` | An older version left that folder in `~/wiretrace`; Wiretrace no longer reads it. Check that your files are in the data folder, then delete the folder from `~/wiretrace`. |
 
 ### Step 6 — Optional: create a preset for your project
 
 A preset tells Wiretrace which API hosts to decrypt: only the hosts under its `api_hosts:`
-are decrypted. It is one file per project and environment in `~/wiretrace/presets/`.
-Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
+are decrypted. It is one file per project and environment in `presets/` of the data folder
+(see *Your data folder*). Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
 and start with `--preset default`. With `--ui wiretrace` you can also do this in the window:
 **Preset → Edit presets…** to put your app's hosts into `default`, or **New preset…** (see
 *Editing and creating presets* under the Wiretrace window). In Terminal, start from the
 example:
 
 ```bash
-cd ~/wiretrace
+cd ~/"Library/Application Support/Wiretrace"
 cp presets/example.yaml presets/staging.yaml
 open -e presets/staging.yaml
 ```
@@ -396,7 +427,7 @@ cd ~/wiretrace
 ```
 
 mitmweb opens in a browser tab; Wiretrace accepts the Wi-Fi proxy and the WireGuard tunnel. Wiretrace prints where the session is
-saved, for example `sessions/2026-10-13_143005_staging_android/`.
+saved, for example `sessions/2026-10-13_143005_staging_android/` in the data folder.
 
 - Only the preset's `api_hosts` and their subdomains are decrypted. Other apps and
   third-party traffic pass through untouched.
@@ -492,7 +523,8 @@ The log goes to `device.log.jsonl` in the session folder: one JSON object per li
 | `tag` | Android: the log tag. iOS: the log category, or the subsystem. |
 | `message` | The text, as the app logged it. |
 
-Watch it while you test: `tail -f sessions/<session folder>/device.log.jsonl`.
+Watch it while you test:
+`tail -f ~/"Library/Application Support/Wiretrace/sessions/<session folder>/device.log.jsonl"`.
 
 What to expect:
 
@@ -621,8 +653,9 @@ or chats.
 ### Mock a response
 
 Wiretrace can answer a request with a JSON file from your Mac, so the app gets that data and
-the real backend is not contacted. Put one file per request under `mocks/<preset>/`, in a
-folder named after the request method, and then the request path:
+the real backend is not contacted. Put one file per request under `mocks/<preset>/` in the data
+folder (see *Your data folder*), in a folder named after the request method, and then the
+request path:
 
 ```text
 mocks/staging/GET/api/v1/profile.json    answers GET /api/v1/profile
@@ -639,14 +672,15 @@ mocks/staging/GET/index.json             answers GET /
   not restart anything.
 - No file for a request means the request goes to the backend as usual.
 - A mocked flow is marked 🚧 in mitmweb, and its comment names the file.
-- The folder comes from the preset's `mocks_dir`; the default is `mocks/<preset name>`.
-  Wiretrace prints at start where it reads mocks from and how many files it found.
+- The folder comes from the preset's `mocks_dir`, relative to the data folder; the default is
+  `mocks/<preset name>`. A `mocks_dir` outside the data folder is refused. Wiretrace prints at
+  start where it reads mocks from and how many files it found.
 
 ### Make requests fail or slow
 
 The easiest way is a rule in the Wiretrace window (`--ui wiretrace`): open *Rules* in the
 title bar, see *Rules* under *The Wiretrace window (preview)*. Rules are saved in
-`rules/<preset>.json` and apply with every UI, including mitmweb and `--no-ui`; you can also
+`rules/<preset>.json` in the data folder and apply with every UI, including mitmweb and `--no-ui`; you can also
 edit that file by hand, and Wiretrace picks up the change within a second. Rules are checked
 first, then the `qa_fault_*` options below, then mock files.
 
@@ -1028,7 +1062,8 @@ the launcher does not pass on yet:
 
 ```bash
 cd ~/wiretrace && source .venv/bin/activate
-mkdir -p sessions/my-session && cd sessions/my-session
+mkdir -p ~/"Library/Application Support/Wiretrace/sessions/my-session"
+cd ~/"Library/Application Support/Wiretrace/sessions/my-session"
 mitmweb --mode wireguard \
   --allow-hosts '(^|\.)api-staging\.mycompany\.com(:\d+)?$' \
   -w flows.mitm
@@ -1129,7 +1164,7 @@ Rules for the app:
 - Turn the WireGuard tunnel off when you are not testing.
 - When a device leaves testing: delete the tunnel, and remove the **mitmproxy** profile /
   certificate (iPhone: VPN & Device Management; Android: Security → Trusted credentials → User).
-- Wiretrace keeps the **5 newest** previous sessions in `~/wiretrace/sessions/`, none older
+- Wiretrace keeps the **5 newest** previous sessions in `sessions/` of the data folder, none older
   than 14 days (counted from the date in its name). When you start a session, or switch the
   preset or the device, it deletes the others and tells you how many. **To keep a session, move its folder out of `sessions/`**
   (for example to `~/Documents/bugs/`) before then. Only folders that Wiretrace created are
@@ -1196,22 +1231,36 @@ Rules for the app:
 
 ## Updating and removing
 
-**Update to a new version:** move the old folder aside, extract the new one, run setup.
-Your device setup (CA and tunnel in `~/.mitmproxy`) stays valid.
+**Update to a new version:** unpack it into your home folder and run the setup. Your presets,
+rules, mock files and sessions are in the data folder, which the update does not touch, and
+your device setup (CA and tunnel in `~/.mitmproxy`) stays valid.
 
 ```bash
-mv ~/wiretrace ~/wiretrace-old
+rm -rf ~/wiretrace
 tar -xzf wiretrace-<version>-macos.tar.gz -C ~
 cd ~/wiretrace && ./install
 ```
 
-The setup also updates the Wiretrace app, which then opens the new folder.
+Unpacking over the old `~/wiretrace` works too. The setup also updates the Wiretrace app.
 
-Copy the presets you created from `~/wiretrace-old/presets/` to `~/wiretrace/presets/`, your mock
-files from `~/wiretrace-old/mocks/` to `~/wiretrace/mocks/`, your rules from
-`~/wiretrace-old/rules/` to `~/wiretrace/rules/`, and any sessions you want to keep from
-`~/wiretrace-old/sessions/`. If you changed `presets/default.yaml`, copy it too: the new
-version comes with its own. Then delete `~/wiretrace-old`.
+**Updating from 0.9.1 or older**, which kept your data inside `~/wiretrace`: unpack over the
+old folder, or move it aside first (`mv ~/wiretrace ~/wiretrace-old`), then run `./install`.
+Unpacked over the old folder, the setup takes your data from it by itself. Moved aside, bring
+it over with:
+
+```bash
+cd ~/wiretrace && ./wiretrace import-data ~/wiretrace-old
+```
+
+Both copy presets, rules and mock files, and move sessions. A file that already exists in the
+data folder is kept, so you can run `import-data` again. They print one line, for example
+`Moved your data to ~/Library/Application Support/Wiretrace: 3 presets, 2 rule files, 5 mock
+files, 12 sessions. Kept 1 existing file: presets/default.yaml.` Once your presets are there,
+delete `~/wiretrace-old`, and the `presets/`, `rules/`, `mocks/` and `sessions/` folders that
+`./wiretrace doctor` still finds in `~/wiretrace`.
+
+To go back to 0.9.1: it still finds the presets, rules and mock files in its own folder, since
+they were copied, but not the sessions, which were moved to the data folder.
 
 Stop Wiretrace (Ctrl+C, or **Stop session** in the **Wiretrace** menu) before you update: it reloads its add-on files when they change. Two
 builds can carry the same version number, so to check which one you run, look at the Terminal
@@ -1222,7 +1271,10 @@ banner: a build with rules prints a `Rules:` line.
 ```bash
 rm -rf ~/wiretrace ~/tools/platform-tools ~/.local/share/uv ~/Applications/Wiretrace.app
 rm -f ~/.local/bin/uv ~/.local/bin/uvx
+rm -rf ~/"Library/Application Support/Wiretrace"
 ```
+
+The last line deletes your presets, rules, mock files and sessions; leave it out to keep them.
 
 Then delete the two `export PATH=…` lines Wiretrace added to `~/.zshrc`. Deleting
 `~/.mitmproxy` as well removes the CA and the tunnel keys; every device then needs a new

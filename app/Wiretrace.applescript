@@ -65,7 +65,14 @@ on run
 	if projectName is "" then
 		set answer to display dialog "No project yet. Add one to the presets folder (user guide, Part 2), then open Wiretrace again." with title appTitle buttons {"Open presets folder", "OK"} default button "OK"
 		if button returned of answer is "Open presets folder" then
-			do shell script "open " & quoted form of (root & "/presets")
+			-- Presets live in the data folder, outside the install folder (spec 023).
+			try
+				set dataDir to do shell script quoted form of cli & " app data-dir"
+				do shell script "open " & quoted form of (dataDir & "/presets")
+			on error errText
+				giveUp(errText)
+				return
+			end try
 		end if
 		quit
 		return

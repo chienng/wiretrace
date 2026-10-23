@@ -1,5 +1,10 @@
 .venv/
-sessions/
+# User data of 0.10.0 and older; it now lives in the data folder (docs/specs/023).
+/presets/
+/rules/
+/mocks/
+/sessions/
+/.proxy-port
 /dist/
 .download.*/
 __pycache__/

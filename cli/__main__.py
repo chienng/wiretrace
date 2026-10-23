@@ -1,8 +1,10 @@
 import argparse
 import os
+import subprocess
 import sys
+from pathlib import Path
 
-from . import __version__, app, doctor, report, session, start
+from . import __version__, app, datadir, doctor, report, session, start
 from .preset import PRESETS_DIR
 
 
@@ -18,7 +20,7 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("doctor", help="check that this Mac is ready to run Wiretrace")
 
     start_cmd = commands.add_parser("start", help="capture traffic with a preset, saved in sessions/")
-    start_cmd.add_argument("--preset", required=True, help="preset name: presets/<name>.yaml")
+    start_cmd.add_argument("--preset", required=True, help="preset name: presets/<name>.yaml in the data folder")
     start_cmd.add_argument("--target", choices=start.TARGETS, default="device",
                            help="device under test (default: %(default)s)")
     start_cmd.add_argument("--mode", choices=start.MODES, default="both",
@@ -48,15 +50,33 @@ def main(argv: list[str] | None = None) -> int:
     app_start = app_commands.add_parser("start", help="start a session detached")
     app_start.add_argument("--project", required=True)
     app_start.add_argument("--device", required=True, choices=tuple(app.DEVICES))
+    app_commands.add_parser("data-dir", help="print the data folder")
 
     report_cmd = commands.add_parser(
         "report", help="write a bug report zip of a session (secrets masked) into its folder")
     report_cmd.add_argument("session", nargs="?",
                             help="session folder name or path (default: the most recent session)")
 
+    data_cmd = commands.add_parser(
+        "data", help="print the data folder (presets, rules, mocks, sessions); --open shows it in Finder")
+    data_cmd.add_argument("--open", action="store_true", help="open the data folder in Finder")
+    import_cmd = commands.add_parser(
+        "import-data", help="copy presets, rules, mocks and the port, and move sessions, from an older "
+                            "Wiretrace folder; never overwrites")
+    import_cmd.add_argument("folder", type=Path, help="the older Wiretrace folder, for example ~/wiretrace-old")
+
     args = parser.parse_args(argv)
     if args.command == "doctor":
         return doctor.main()
+    try:
+        summary = datadir.prepare()
+        data = datadir.data_dir()
+    except datadir.DataDirError as e:
+        print(e, file=sys.stderr)
+        return 1
+    if summary:
+        # Wiretrace.app reads the standard output of `app` commands.
+        print(summary, file=sys.stderr if args.command == "app" else sys.stdout)
     if args.command == "start":
         return start.run(args.preset, args.target, args.mode, ui=start.NO_UI if args.no_ui else args.ui,
                          proxy_port=args.port, clients=tuple(args.client), no_menu_bar=args.no_menu_bar,
@@ -65,9 +85,25 @@ def main(argv: list[str] | None = None) -> int:
         if args.app_command == "state":
             print("\n".join(app.state()))
             return 0
+        if args.app_command == "data-dir":
+            print(data)
+            return 0
         return app.start(args.project, args.device)
     if args.command == "report":
         return report.run(args.session, session.SESSIONS_DIR, PRESETS_DIR)
+    if args.command == "data":
+        print(data)
+        if not args.open:
+            return 0
+        try:
+            return subprocess.run(["open", str(data)]).returncode
+        except OSError as e:
+            print(f"Could not open the data folder: {e.strerror or e}", file=sys.stderr)
+            return 1
+    if args.command == "import-data":
+        code, text = datadir.import_data(args.folder, data)
+        print(text, file=sys.stderr if code else sys.stdout)
+        return code
     return 2
 
 

@@ -109,7 +109,7 @@ def test_022_b_the_firewall_advice_names_the_port_in_use(monkeypatch):
     block_all = fake_run({"--getglobalstate": on, "--getblockall": "Firewall has block all state set to enabled."})
     for run in (unknown, block_all):
         assert "(UDP 51820, TCP 9100)" in doctor.check_firewall(run=run, python="/p/python3.12", proxy_port=9100)[0].detail
-    monkeypatch.setattr(doctor, "saved_proxy_port", lambda wiretrace_dir=doctor.WIRETRACE_DIR: 8890)
+    monkeypatch.setattr(doctor, "saved_proxy_port", lambda data_dir=None: 8890)
     assert "(UDP 51820, TCP 8890)" in doctor.check_firewall(run=unknown, python="/p/python3.12")[0].detail
 
 
@@ -121,7 +121,7 @@ def test_022_b_doctor_checks_the_saved_port_else_8889(monkeypatch, tmp_path):
     assert doctor.saved_proxy_port(tmp_path) == 8890
     checked = []
     monkeypatch.setattr(doctor, "check_port", lambda proto, host, port, label: checked.append((port, label)))
-    monkeypatch.setattr(doctor, "saved_proxy_port", lambda wiretrace_dir=doctor.WIRETRACE_DIR: 8890)
+    monkeypatch.setattr(doctor, "saved_proxy_port", lambda data_dir=None: 8890)
     doctor.check_ports()
     assert checked == [(51820, "WireGuard"), (8890, "proxy"), (8081, "mitmweb UI")]
     assert doctor.PORTS[1] == ("tcp", "0.0.0.0", 8889, "proxy")

@@ -10,7 +10,7 @@
 # settings for later features.
 
 # Required. Must equal the file name without .yaml: presets/staging.yaml needs name: staging.
-name: example                       # CHANGE
+name: default                       # CHANGE
 
 # Required. Host names only: no https://, no port, no path, no wildcard.
 # Each host and all of its subdomains are decrypted, on any port; traffic to
@@ -24,7 +24,7 @@ api_hosts:                          # CHANGE: replace both lines with your hosts
 # Examples: "~c 500", "~m POST", "~u /api/v1/orders", "!~t image". Default: no filter.
 # default_filter: "!~t image"
 
-# Optional. Folder of mock files, relative to the wiretrace folder (no absolute path, no "..").
+# Optional. Folder of mock files, relative to the Wiretrace data folder (no absolute path, no "..").
 # A file mocks/<name>/<METHOD>/<path>.json answers that request instead of the backend,
 # for example mocks/example/GET/api/v1/profile.json answers GET /api/v1/profile.
 # Default: mocks/<name>, which follows the preset's name.

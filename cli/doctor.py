@@ -22,17 +22,19 @@ from dataclasses import dataclass
 from importlib import metadata
 from pathlib import Path
 
+from . import datadir
+
 OK, WARN, FAIL, INFO = "OK", "WARN", "FAIL", "INFO"
 
 TIMEOUT_S = 10
 SOCKETFILTERFW = "/usr/libexec/ApplicationFirewall/socketfilterfw"
-WIRETRACE_DIR = Path(__file__).resolve().parent.parent
+WIRETRACE_DIR = datadir.INSTALL_DIR
 # Spec 022, slice B: 8888 is Charles's port on the same Mac.
 PROXY_PORT = 8889
 WIREGUARD_PORT = 51820
 UI_PORT = 8081
-# The port the window chose last, one integer; `start --port` never writes it.
-PROXY_PORT_FILE = ".proxy-port"
+# The port the window chose last, one integer, in the data folder; `start --port` never writes it.
+PROXY_PORT_FILE = datadir.PROXY_PORT_FILE
 MIN_PORT, MAX_PORT = 1024, 65535
 MAX_PORT_FILE_BYTES = 16
 
@@ -61,19 +63,25 @@ def port_problem(port: object, ui_port: int = UI_PORT) -> str | None:
     return None
 
 
-def saved_proxy_port(wiretrace_dir: Path = WIRETRACE_DIR) -> int:
+def port_from_bytes(raw: bytes) -> int | None:
+    """The port a `.proxy-port` file holds, or None when it is not one valid port."""
+    text = raw.decode("ascii", "replace").strip()
+    if len(raw) > MAX_PORT_FILE_BYTES or not text.isdigit() or not text.isascii():
+        return None
+    port = int(text)
+    return port if port_problem(port) is None else None
+
+
+def saved_proxy_port(data_dir: Path | None = None) -> int:
     """The port in `.proxy-port`, or PROXY_PORT when the file is missing, unreadable or not a valid port."""
     try:
-        fd = os.open(wiretrace_dir / PROXY_PORT_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open((data_dir or datadir.DATA_DIR) / PROXY_PORT_FILE, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, "rb") as f:
             raw = f.read(MAX_PORT_FILE_BYTES + 1)
     except OSError:
         return PROXY_PORT
-    text = raw.decode("ascii", "replace").strip()
-    if len(raw) > MAX_PORT_FILE_BYTES or not text.isdigit() or not text.isascii():
-        return PROXY_PORT
-    port = int(text)
-    return port if port_problem(port) is None else PROXY_PORT
+    port = port_from_bytes(raw)
+    return PROXY_PORT if port is None else port
 PACKAGES = ["pyyaml", "pymobiledevice3", "httpx", "keyring"]
 
 Run = Callable[[list[str]], str]
@@ -139,6 +147,35 @@ def check_packages(names: list[str] = PACKAGES) -> list[Result]:
     if missing:
         return [Result(FAIL, "Python packages", f"missing: {', '.join(missing)}. Run scripts/setup-mac.sh")]
     return [Result(OK, "Python packages", ", ".join(found))]
+
+
+# 3b. Data folder (spec 023)
+
+# Folders 0.10.0 and older kept in the install folder, and what the tester checks before deleting one.
+LEGACY_FOLDERS = {"presets": "presets", "rules": "rules", "mocks": "mock files", "sessions": "sessions"}
+
+
+def check_data(data: Path | None = None, install: Path = WIRETRACE_DIR,
+               out: Callable[[str], None] = print) -> list[Result]:
+    """Create the data folder and migrate into it (the summary goes to `out`), then warn about old folders."""
+    name = "Data folder"
+    try:
+        summary = datadir.prepare(data, install)
+        data = data or datadir.data_dir()
+    except datadir.DataDirError as e:
+        return [Result(FAIL, name, str(e))]
+    if summary:
+        out(summary)
+    results = [Result(OK, name, datadir.shown(data))]
+    if datadir.same(data, install):
+        return results
+    for folder, what in LEGACY_FOLDERS.items():
+        if os.path.lexists(install / folder):
+            results.append(Result(
+                WARN, "Old data",
+                f"The install folder still has {folder}/ from an older version; Wiretrace now reads "
+                f"{datadir.shown(data)}. Delete {folder}/ there once you have checked your {what}."))
+    return results
 
 
 # 4b. Menu bar (PyObjC). INFO only: capture does not need it.
@@ -347,6 +384,7 @@ def run_all() -> list[Result]:
         ("Python", check_python),
         ("mitmproxy", check_mitmproxy),
         ("Python packages", check_packages),
+        ("Data folder", check_data),
         ("Menu bar", check_menu_bar),
         ("adb", lambda: check_adb(adb)),
         ("Ports", check_ports),

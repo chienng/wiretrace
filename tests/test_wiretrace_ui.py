@@ -34,7 +34,7 @@ from mitmproxy.log import MitmFormatter
 from mitmproxy.test import taddons, tflow
 
 from addons import wiretrace_ui, qa_tools
-from cli import report, screenshot, session, start
+from cli import datadir, report, screenshot, session, start
 from cli import preset as presetfile
 from cli.preset import Preset
 from test_tunnels import bare_client, client_hello, connect_flow, decided
@@ -498,7 +498,7 @@ def test_detail_of_a_json_flow():
         assert detail["comment"] == "request-id: r1"
         assert detail["mock_path"] == "mocks/staging/POST/api/v1/orders.json"
 
-    scenario(body, qa_mocks_dir=str(ROOT / "mocks" / "staging"))
+    scenario(body, qa_mocks_dir=str(datadir.DATA_DIR / "mocks" / "staging"))
 
 
 def test_detail_without_a_response():
@@ -645,7 +645,7 @@ def test_mock_path_matches_where_the_qa_addon_looks(path, expected):
 
 
 def test_mock_path_is_a_file_the_qa_addon_would_serve(tmp_path, monkeypatch):
-    monkeypatch.setattr(qa_tools, "WIRETRACE", tmp_path)
+    monkeypatch.setattr(qa_tools, "default_data_dir", lambda: tmp_path)
     root = tmp_path / "mocks"
     for path in ("/api/v1/profile?x=1", "/", "/a/b/"):
         relative = wiretrace_ui.mock_path("", "GET", path)
@@ -906,7 +906,7 @@ def test_state_comes_from_the_session_and_options(tmp_path):
         session.update_meta(folder, device_logs=None)
         assert (await client.json("/api/state"))["device_logs"] is None
 
-    scenario(body, folder=folder, qa_ui_default_filter="!~t image", qa_mocks_dir=str(ROOT / "mocks" / "staging"))
+    scenario(body, folder=folder, qa_ui_default_filter="!~t image", qa_mocks_dir=str(datadir.DATA_DIR / "mocks" / "staging"))
 
 
 def test_state_without_a_readable_meta_has_defaults(tmp_path):
@@ -4766,7 +4766,7 @@ def test_022_e_changes_from_a_file_are_checked_before_they_are_shown():
 # Map local (spec 022, slice F)
 
 def map_local_scenario(body, tmp_path):
-    rules_scenario(body, tmp_path, qa_mocks_dir=str(tmp_path / "mocks" / "staging"), qa_wiretrace_dir=str(tmp_path))
+    rules_scenario(body, tmp_path, qa_mocks_dir=str(tmp_path / "mocks" / "staging"), qa_data_dir=str(tmp_path))
 
 
 def listed(ui, flow):

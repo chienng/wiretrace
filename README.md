@@ -166,12 +166,17 @@ cd ~/wiretrace
 ### Your own preset (optional)
 
 A preset tells Wiretrace which hosts to decrypt: only the hosts under its `api_hosts:` are
-decrypted. The steps above use the `default` preset (`presets/default.yaml`). In the
+decrypted. The steps above use the `default` preset (`presets/default.yaml`). Presets, rules,
+mock files and sessions are kept in the data folder, `~/Library/Application Support/Wiretrace`,
+so an update never touches them; `./wiretrace data --open` shows it in Finder, and **Show data
+folder** in the **Wiretrace** menu does too. Upgrading from 0.9.1 or older: `./install` takes
+them from the old `~/wiretrace` folder by itself; for a folder you moved aside, run
+`./wiretrace import-data ~/wiretrace-old`. In the
 Wiretrace window, **Preset → Edit presets…** changes its hosts and **New preset…** creates
 another. Or, in Terminal, for another project or environment:
 
 ```bash
-cd ~/wiretrace
+cd ~/"Library/Application Support/Wiretrace"
 cp presets/example.yaml presets/staging.yaml
 open -e presets/staging.yaml
 ```
@@ -242,7 +247,7 @@ illustrative. The mockups of every screen, with their source and notes, are in
   server (UDP 51820) at the same time, in one session. `--mode proxy` or `--mode wireguard`
   starts one of the two only; `--port N` picks another proxy port for one run. `--target` is `android`, `ios`,
   `android-emu`, `ios-sim` or `device`. Each session is saved in its own folder under
-  `sessions/`, as it happens.
+  `sessions/` of the data folder, as it happens.
 - **Presets.** One YAML file per project and environment. Only the listed API hosts are
   decrypted; all other traffic passes through untouched. A preset also sets the starting
   filter, the mocks folder, the request ID header, the app to collect logs from, and extra

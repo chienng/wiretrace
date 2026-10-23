@@ -44,6 +44,7 @@ from pathlib import Path
 from typing import NamedTuple
 
 from . import __version__, doctor, redact, session
+from .datadir import DATA_DIR
 from .preset import PRESETS_DIR, Preset, PresetError, allow_hosts_regexes, load_preset
 
 TARGETS = ("android", "ios", "android-emu", "ios-sim", "device")
@@ -62,7 +63,7 @@ MENU_CLOSED = "Menu bar: closed; capture continues (Ctrl+C here to stop)"
 MENU_CLOSED_APP = "Menu bar closed; stopping the session (started from Wiretrace.app)."
 APP_NEEDS_MENU = "--from-app needs --ui wiretrace and the menu bar item."
 WIRETRACE_DIR = Path(__file__).resolve().parent.parent
-# Always the addon shipped with this checkout; `wiretrace_dir` only decides where mocks are read.
+# Always the addon shipped with this checkout; `data_dir` only decides where mocks and rules are read.
 QA_ADDON = WIRETRACE_DIR / "addons" / "qa_tools.py"
 APP_LOGS_ADDON = WIRETRACE_DIR / "addons" / "app_logs.py"
 UI_ADDON = WIRETRACE_DIR / "addons" / "wiretrace_ui.py"
@@ -153,14 +154,14 @@ def client_problem(addresses: Sequence[str]) -> str | None:
     return None
 
 
-def resolve_proxy_port(wiretrace_dir: Path, override: int | None = None) -> int:
+def resolve_proxy_port(data_dir: Path, override: int | None = None) -> int:
     """`--port`, else the port saved in `.proxy-port`, else PROXY_PORT."""
-    return override if override is not None else doctor.saved_proxy_port(wiretrace_dir)
+    return override if override is not None else doctor.saved_proxy_port(data_dir)
 
 
-def save_proxy_port(wiretrace_dir: Path, port: int) -> None:
+def save_proxy_port(data_dir: Path, port: int) -> None:
     """`.proxy-port`: one integer, 0600 from the start, replaced whole."""
-    path = wiretrace_dir / doctor.PROXY_PORT_FILE
+    path = data_dir / doctor.PROXY_PORT_FILE
     tmp = path.with_name(f"{path.name}.{secrets.token_hex(4)}.tmp")
     try:
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -196,7 +197,7 @@ def allow_hosts_args(preset: Preset) -> list[str]:
 
 
 def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_dir: Path,
-                  proxy_port: int = PROXY_PORT, wiretrace_dir: Path = WIRETRACE_DIR,
+                  proxy_port: int = PROXY_PORT, data_dir: Path = DATA_DIR,
                   ui_port: int = UI_PORT, clients: Sequence[str] = (), from_app: bool = False,
                   pinned: str | None = None) -> list[str]:
     kind = ui_kind(ui)
@@ -217,9 +218,9 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
         cmd += ["-s", str(UI_ADDON)]
     for host in preset.api_hosts:
         cmd += ["--set", f"qa_api_hosts={host}"]
-    cmd += ["--set", f"qa_mocks_dir={(wiretrace_dir / preset.mocks_dir).absolute()}"]
-    cmd += ["--set", f"qa_wiretrace_dir={Path(wiretrace_dir).resolve()}"]
-    cmd += ["--set", f"qa_rules_file={rules_file(preset, wiretrace_dir).absolute()}"]
+    cmd += ["--set", f"qa_mocks_dir={(data_dir / preset.mocks_dir).absolute()}"]
+    cmd += ["--set", f"qa_data_dir={Path(data_dir).resolve()}"]
+    cmd += ["--set", f"qa_rules_file={rules_file(preset, data_dir).absolute()}"]
     cmd += ["--set", f"qa_request_id_header={preset.request_id_header}"]
     cmd += ["--set", f"qa_app_log_file={flows.parent / session.APP_LOG}"]
     # Receiver and certificate-page flows stay visible in mitmweb but are not saved: the first would
@@ -248,9 +249,9 @@ def build_command(preset: Preset, mode: str, ui: bool | str, flows: Path, bin_di
     return cmd
 
 
-def rules_file(preset: Preset, wiretrace_dir: Path = WIRETRACE_DIR) -> Path:
-    """`rules/<preset>.json`; it need not exist yet. The Wiretrace window writes it."""
-    return wiretrace_dir / RULES_DIR / f"{preset.name}.json"
+def rules_file(preset: Preset, data_dir: Path = DATA_DIR) -> Path:
+    """`rules/<preset>.json` in the data folder; it need not exist yet. The Wiretrace window writes it."""
+    return data_dir / RULES_DIR / f"{preset.name}.json"
 
 
 def har_command(bin_dir: Path, flows: Path, har: Path) -> list[str]:
@@ -398,10 +399,13 @@ def _menu_problem() -> str | None:
 def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: bool | str = True, *,
         presets_dir: Path = PRESETS_DIR, sessions_dir: Path = session.SESSIONS_DIR,
         bin_dir: Path | None = None, proxy_port: int | None = None, wiretrace_dir: Path = WIRETRACE_DIR,
-        ui_port: int = UI_PORT, clients: Sequence[str] = (), no_menu_bar: bool = False,
+        data_dir: Path = DATA_DIR, ui_port: int = UI_PORT, clients: Sequence[str] = (), no_menu_bar: bool = False,
         collector_for: Callable[..., tuple[list[str] | None, str]] = collector_command,
         menu_available: Callable[[], str | None] | None = None, from_app: bool = False) -> int:
-    """`proxy_port`: `--port`, for this run only; None reads `.proxy-port`."""
+    """`proxy_port`: `--port`, for this run only; None reads `.proxy-port`.
+
+    `data_dir` holds the port, the mocks and the rules; `wiretrace_dir`, the install folder, only `.app-last`.
+    """
     problem = client_problem(clients)
     if problem:
         say(problem, err=True)
@@ -411,7 +415,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
         if problem:
             say(f"--port: {problem} Not started.", err=True)
             return 1
-    proxy_port = resolve_proxy_port(wiretrace_dir, proxy_port)
+    proxy_port = resolve_proxy_port(data_dir, proxy_port)
     kind = ui_kind(ui)
     if from_app and (kind != WIRETRACE or no_menu_bar):
         say(APP_NEEDS_MENU, err=True)
@@ -464,7 +468,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
             if folder is None:
                 return 1
             flows = folder / session.FLOWS
-            mock_count = count_mocks(wiretrace_dir / preset.mocks_dir)
+            mock_count = count_mocks(data_dir / preset.mocks_dir)
             collector_cmd, problem = collector_for(preset, target, bin_dir, folder / session.DEVICE_LOG)
             source = DEVICE_LOGS.get(target) if collector_cmd else None
             if source:
@@ -491,7 +495,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 return code
             say(banner(preset, target, mode, kind, folder, proxy_port, mock_count, device_logs,
                        menu_bar_text(kind, no_menu_bar, menu_problem)))
-            child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, wiretrace_dir, ui_port, clients,
+            child_cmd = build_command(preset, mode, kind, flows, bin_dir, proxy_port, data_dir, ui_port, clients,
                                       from_app=from_app, pinned=pinned)
             har_cmd = har_command(bin_dir, flows, folder / session.HAR_TMP)
             # Checked again as late as possible: a signal during the banner must not start the child.
@@ -552,7 +556,7 @@ def run(preset_name: str, target: str = "device", mode: str = "wireguard", ui: b
                 # Spec 022, slice B, invariant 3: saved only once both checks passed.
                 proxy_port = next_port
                 try:
-                    save_proxy_port(wiretrace_dir, proxy_port)
+                    save_proxy_port(data_dir, proxy_port)
                 except OSError:
                     say(PORT_NOT_SAVED, err=True)
             if from_app:

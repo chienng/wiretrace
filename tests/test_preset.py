@@ -282,8 +282,8 @@ def test_unknown_top_level_keys_stay_ignored_next_to_redact(tmp_path):
     assert p.redact_headers == ("X-Id",)
 
 
-def test_a_mocks_dir_symlink_outside_the_wiretrace_folder_is_refused(tmp_path):
-    root = tmp_path / "wiretrace"
+def test_a_mocks_dir_symlink_outside_the_data_folder_is_refused(tmp_path):
+    root = tmp_path / "data"
     presets = root / "presets"
     presets.mkdir(parents=True)
     (root / "mocks").mkdir()
@@ -293,7 +293,7 @@ def test_a_mocks_dir_symlink_outside_the_wiretrace_folder_is_refused(tmp_path):
     with pytest.raises(PresetError) as info:
         preset.load_preset("staging", presets)
     message = str(info.value)
-    assert "mocks_dir" in message and "must be a folder inside the wiretrace folder" in message
+    assert "mocks_dir" in message and "must be a folder inside the Wiretrace data folder" in message
 
 
 # Editing and creating presets from the window (spec 013, extension A). The number is the spec's test number.

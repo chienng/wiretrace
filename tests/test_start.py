@@ -41,7 +41,7 @@ def collector_for(preset, target, bin_dir, out):
 
 sys.exit(start.run("staging", "android", "proxy", ui=a["ui"], presets_dir=Path(a["presets"]),
                    sessions_dir=Path(a["sessions"]), bin_dir=Path(a["bin"]), proxy_port=a["port"],
-                   wiretrace_dir=Path(a["wiretrace"]), collector_for=collector_for, ui_port=a["ui_port"],
+                   wiretrace_dir=Path(a["wiretrace"]), data_dir=Path(a["wiretrace"]), collector_for=collector_for, ui_port=a["ui_port"],
                    no_menu_bar=True))
 """
 
@@ -380,7 +380,7 @@ def test_port_in_use_starts_nothing(tmp_path, capsys, family, mode):
         port = holder.getsockname()[1]
         code = start.run("staging", "android", mode, ui=False, presets_dir=tmp_path / "presets",
                          sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=port,
-                         wiretrace_dir=tmp_path / "wiretrace")
+                         wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace")
 
     assert code == 1
     err = capsys.readouterr().err
@@ -391,7 +391,7 @@ def test_port_in_use_starts_nothing(tmp_path, capsys, family, mode):
 def test_unknown_preset_starts_nothing(tmp_path, capsys):
     (tmp_path / "presets").mkdir()
     code = start.run("nope", presets_dir=tmp_path / "presets", sessions_dir=tmp_path / "sessions",
-                     wiretrace_dir=tmp_path / "wiretrace")
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace")
     assert code == 1
     assert "Unknown preset 'nope'" in capsys.readouterr().err
     assert not (tmp_path / "sessions").exists()
@@ -402,7 +402,7 @@ def test_missing_mitmproxy_binary_leaves_no_folder(tmp_path, capsys):
     (tmp_path / "presets" / "staging.yaml").write_text(PRESET.format(host="api.example.com"))
     code = start.run("staging", "android", "proxy", ui=False, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "no-bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace")
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace")
     assert code == 1
     assert "Could not start mitmdump" in capsys.readouterr().err
     assert list((tmp_path / "sessions").iterdir()) == []
@@ -472,7 +472,7 @@ def test_no_filter_no_filter_option():
 
 def test_command_loads_the_qa_addon():
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
-                              wiretrace_dir=Path("/d"))
+                              data_dir=Path("/d"))
     assert cmd[cmd.index("-s") + 1] == str(start.QA_ADDON)
     assert start.QA_ADDON.is_file()
     assert [a for a in cmd if a.startswith("qa_api_hosts=")] == [
@@ -488,7 +488,7 @@ def test_command_uses_the_preset_mocks_dir_and_header():
     custom = Preset(name="staging", api_hosts=("a.example.com",), mocks_dir="fixtures/api",
                     request_id_header="X-Trace-Id")
     cmd = start.build_command(custom, "proxy", True, Path("/s/flows.mitm"), Path("/v/bin"),
-                              wiretrace_dir=Path("/d"))
+                              data_dir=Path("/d"))
     assert "qa_mocks_dir=/d/fixtures/api" in cmd
     assert "qa_request_id_header=X-Trace-Id" in cmd
 
@@ -496,7 +496,7 @@ def test_command_uses_the_preset_mocks_dir_and_header():
 @pytest.mark.parametrize("ui", ["mitmweb", "wiretrace", "none"])
 def test_command_passes_the_preset_rules_file_for_every_ui(ui):
     cmd = start.build_command(PRESET_WITH_FILTER, "proxy", ui, Path("/s/flows.mitm"), Path("/v/bin"),
-                              wiretrace_dir=Path("/d"))
+                              data_dir=Path("/d"))
     assert [a for a in cmd if a.startswith("qa_rules_file=")] == ["qa_rules_file=/d/rules/staging.json"]
     assert cmd[cmd.index("qa_rules_file=/d/rules/staging.json") - 1] == "--set"
     assert start.rules_file(PRESET_WITH_FILTER, Path("/d")) == Path("/d/rules/staging.json")
@@ -565,19 +565,19 @@ def test_proxy_and_wireguard_commands_are_unchanged():
     ]
     options = [
         "--set", "qa_api_hosts=a.example.com", "--set", "qa_api_hosts=b.example.com",
-        "--set", "qa_mocks_dir=/d/mocks/staging", "--set", f"qa_wiretrace_dir={Path('/d').resolve()}",
+        "--set", "qa_mocks_dir=/d/mocks/staging", "--set", f"qa_data_dir={Path('/d').resolve()}",
         "--set", "qa_rules_file=/d/rules/staging.json", "--set", "qa_request_id_header=X-Request-ID",
         "--set", "qa_app_log_file=/s/app.log.jsonl", "--set", f"save_stream_filter={start.SAVE_FILTER}",
     ]
     proxy = start.build_command(PRESET_WITH_FILTER, "proxy", False, Path("/s/flows.mitm"), Path("/v/bin"),
-                                wiretrace_dir=Path("/d"))
+                                data_dir=Path("/d"))
     assert proxy == [
         "/v/bin/mitmdump", "--mode", "regular", "--listen-port", "8889", *base, "-s", str(start.PROXY_GUARD),
         *options, "--set", "qa_proxy_clients=127.0.0.0/8", "--set", "qa_proxy_clients=::1",
         "--set", "qa_proxy_pin=true", "--set", "dumper_filter=!~t image",
     ]
     wireguard = start.build_command(PRESET_WITH_FILTER, "wireguard", True, Path("/s/flows.mitm"), Path("/v/bin"),
-                                    wiretrace_dir=Path("/d"))
+                                    data_dir=Path("/d"))
     assert wireguard == [
         "/v/bin/mitmweb", "--mode", "wireguard", *base, *options, "--set", "view_filter=!~t image",
     ]
@@ -1130,7 +1130,7 @@ def wiretrace_command(preset=PRESET_WITH_FILTER, mode="wireguard", **kwargs):
 
 
 def test_wiretrace_command_is_mitmdump_with_the_ui_addon_after_the_other_two():
-    cmd = wiretrace_command(wiretrace_dir=Path("/d"))
+    cmd = wiretrace_command(data_dir=Path("/d"))
     assert cmd[:3] == ["/v/bin/mitmdump", "--mode", "wireguard"]
     scripts = [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "-s"]
     assert scripts == [str(start.QA_ADDON), str(start.APP_LOGS_ADDON), str(start.UI_ADDON)]
@@ -1210,7 +1210,7 @@ def run_wiretrace(tmp_path, monkeypatch, **kwargs):
     menu_available = kwargs.pop("menu_available", lambda: "PyObjC not installed (run scripts/setup-mac.sh)")
     code = start.run("staging", "android", "proxy", "wiretrace", presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
                      menu_available=menu_available, **kwargs)
     return code, seen
 
@@ -1235,7 +1235,7 @@ def test_run_records_the_other_uis_as_before(tmp_path, monkeypatch):
         monkeypatch.setattr(start, "supervise", lambda cmd, har_cmd, folder, *a, **k: metas.update({ui: folder}) or 0)
         start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
                   sessions_dir=tmp_path / f"sessions-{ui}", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                  wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                  wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
                   ui_port=free_port())
     assert {ui: session.read_meta(folder)["ui"] for ui, folder in metas.items()} == {
         True: "mitmweb", False: "mitmdump", "mitmweb": "mitmweb", "none": "mitmdump"}
@@ -1329,7 +1329,7 @@ def test_other_windows_start_no_menu_and_print_no_menu_line(tmp_path, monkeypatc
     monkeypatch.setattr(start, "_menu_problem", lambda: pytest.fail("must not probe"))
     code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace", collector_for=lambda *a: (None, "off (test)"),
                      ui_port=free_port(), no_menu_bar=no_menu_bar)
     assert code == 0 and seen["kw"]["menu_cmd"] is None and seen["kw"]["child_env"] is None
     assert "Menu bar:" not in capsys.readouterr().out
@@ -1806,7 +1806,7 @@ def switching_run(tmp_path, monkeypatch, outcomes, ui="wiretrace", mode="proxy",
     monkeypatch.setattr(start, "busy_ports", kwargs.pop("busy_ports", lambda ports: []))
     code = start.run("staging", "android", mode, ui, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", ui_port=kwargs.pop("ui_port", None) or free_port(),
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace", ui_port=kwargs.pop("ui_port", None) or free_port(),
                      collector_for=kwargs.pop("collector_for", lambda *a: (None, "off (test)")),
                      menu_available=lambda: None, **kwargs)
     return code, calls
@@ -2167,7 +2167,7 @@ def test_022_b_a_stop_signal_after_a_port_switch_was_decided_starts_nothing(tmp_
 def test_022_b_a_bad_port_flag_starts_nothing(tmp_path, monkeypatch, capsys, port):
     monkeypatch.setattr(start, "supervise", lambda *a, **k: pytest.fail("must not start"))
     code = start.run("staging", "android", "proxy", "wiretrace", presets_dir=tmp_path / "presets",
-                     sessions_dir=tmp_path / "sessions", proxy_port=port, wiretrace_dir=tmp_path)
+                     sessions_dir=tmp_path / "sessions", proxy_port=port, wiretrace_dir=tmp_path, data_dir=tmp_path)
     assert code == 1
     assert capsys.readouterr().err.startswith("--port: ")
     assert not (tmp_path / "sessions").exists()
@@ -2190,7 +2190,7 @@ def test_022_b_without_the_flag_run_listens_on_the_saved_port(tmp_path, monkeypa
     monkeypatch.setattr(start, "supervise", lambda cmd, *a, **k: calls.append(cmd) or 0)
     monkeypatch.setattr(start, "busy_ports", lambda ports: [])
     code = start.run("staging", "android", "proxy", "none", presets_dir=tmp_path / "presets",
-                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", wiretrace_dir=tmp_path / "wiretrace",
+                     sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace",
                      collector_for=lambda *a: (None, "off (test)"))
     assert code == 0 and listen_port(calls[0]) == 9127
 
@@ -2205,7 +2205,7 @@ def test_from_app_without_the_wiretrace_window_and_its_menu_starts_nothing(tmp_p
     monkeypatch.setattr(start, "supervise", lambda *a, **k: pytest.fail("must not start"))
     code = start.run("staging", "android", "proxy", ui, presets_dir=tmp_path / "presets",
                      sessions_dir=tmp_path / "sessions", bin_dir=tmp_path / "bin", proxy_port=free_port(),
-                     wiretrace_dir=tmp_path / "wiretrace", ui_port=free_port(), no_menu_bar=no_menu_bar,
+                     wiretrace_dir=tmp_path / "wiretrace", data_dir=tmp_path / "wiretrace", ui_port=free_port(), no_menu_bar=no_menu_bar,
                      menu_available=lambda: None, from_app=True)
     assert code == 1
     assert start.APP_NEEDS_MENU in capsys.readouterr().err

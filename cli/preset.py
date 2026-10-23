@@ -1,4 +1,4 @@
-"""Presets: one YAML file per project and environment, in presets/.
+"""Presets: one YAML file per project and environment, in presets/ of the data folder.
 
 A preset names the API hosts Wiretrace decrypts; traffic to every other host passes
 through undecrypted. Unknown top-level keys are ignored, so presets written for later
@@ -19,7 +19,9 @@ from dataclasses import dataclass, field
 from pathlib import Path, PureWindowsPath
 from urllib.parse import urlsplit
 
-PRESETS_DIR = Path(__file__).resolve().parent.parent / "presets"
+from .datadir import DATA_DIR, PRESETS
+
+PRESETS_DIR = DATA_DIR / PRESETS
 
 # Also part of the session folder name, so no path separators or dots.
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]*")
@@ -44,7 +46,7 @@ class Preset:
     api_hosts: tuple[str, ...]
     default_filter: str | None = None
     app: dict = field(default_factory=dict)
-    # Relative to the wiretrace folder; empty means mocks/<name>.
+    # Relative to the data folder; empty means mocks/<name>.
     mocks_dir: str = ""
     request_id_header: str = DEFAULT_REQUEST_ID_HEADER
     # Added to the default masking rules in cli/redact.py; they can never remove one.
@@ -111,9 +113,8 @@ def parse_preset(text: str, path: Path) -> Preset:
         raise PresetError(f"{where}: {problem}")
 
     mocks_dir = data.get("mocks_dir")
-    wiretrace = path.parent.parent
     checked = mocks_dir if mocks_dir is not None else f"mocks/{name}"
-    problem = mocks_dir_problem(checked, wiretrace)
+    problem = mocks_dir_problem(checked, path.parent.parent)
     if problem:
         raise PresetError(f"{where}: 'mocks_dir' {problem}")
 
@@ -171,24 +172,24 @@ def app_problem(app: dict) -> str | None:
 
 
 def mocks_dir_problem(value: object, root: Path | None = None) -> str | None:
-    """Why `value` is not a folder inside the wiretrace folder, or None if it is one.
+    """Why `value` is not a folder inside the Wiretrace data folder, or None if it is one.
 
-    `root` is the wiretrace folder. A path that is relative and free of `..` can still
+    `root` is the data folder. A path that is relative and free of `..` can still
     leave that folder through a symlink, so the resolved path is checked too.
     """
     if not isinstance(value, str) or not value:
         return "must be a folder path such as mocks/staging"
     if value.startswith(("/", "\\")) or PureWindowsPath(value).is_absolute():
-        return "must be relative to the wiretrace folder, not an absolute path"
+        return "must be relative to the Wiretrace data folder, not an absolute path"
     if ".." in re.split(r"[/\\]", value):
         return "must not contain '..'"
-    base = (root if root is not None else PRESETS_DIR.parent).resolve()
+    base = (root if root is not None else DATA_DIR).resolve()
     try:
         resolved = (base / value).resolve()
     except OSError:
-        return "must be a folder inside the wiretrace folder"
+        return "must be a folder inside the Wiretrace data folder"
     if not resolved.is_relative_to(base):
-        return "must be a folder inside the wiretrace folder"
+        return "must be a folder inside the Wiretrace data folder"
     return None
 
 

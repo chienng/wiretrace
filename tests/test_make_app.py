@@ -151,7 +151,7 @@ def test_020_02_the_applet_watches_the_session_and_quits_when_none_is_left():
     # Every path without a session quits: giveUp quits, and so does "No project yet".
     assert "quit" in handler(source, "giveUp(message)")
     run = handler(source, "run")
-    assert run.count("giveUp(") == 4
+    assert run.count("giveUp(") == 5
     no_project = run[run.index('if projectName is "" then'):run.index("set progress total steps to -1")]
     assert "\t\tquit\n" in no_project
     # The progress bar is cleared on both outcomes of the start.

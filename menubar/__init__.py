@@ -142,6 +142,7 @@ def _render(status: dict | None, now: float, seen: bool) -> MenuView:
             Row("separator", ""),
             _action("Open Wiretrace", "open", shortcut="o"),
             _action("Show last error", "last_error", enabled=errors > 0, shortcut="r"),
+            _action("Show data folder", "data_folder"),
             Row("separator", ""),
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
@@ -152,6 +153,7 @@ def _render(status: dict | None, now: float, seen: bool) -> MenuView:
         rows = (
             Row("note", "No status from Wiretrace", enabled=False),
             _action("Open Wiretrace", "open", shortcut="o"),
+            _action("Show data folder", "data_folder"),
             _action("Stop session", "stop"),
             _action("Quit", "quit"),
         )
@@ -160,6 +162,7 @@ def _render(status: dict | None, now: float, seen: bool) -> MenuView:
     rows = (
         Row("note", "Starting…", enabled=False),
         _action("Open Wiretrace", "open", shortcut="o"),
+        _action("Show data folder", "data_folder"),
         _action("Quit", "quit"),
     )
     return MenuView(STARTING, "Wiretrace", rows)

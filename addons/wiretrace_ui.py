@@ -51,7 +51,7 @@ from addons import rewrite as rewritelib  # noqa: E402
 from addons.client_stats import ClientStats  # noqa: E402
 from addons.tunnels import Tunnels as TunnelList  # noqa: E402
 from cli import __version__, report, report_text, screenshot, session  # noqa: E402
-from cli import bodies  # noqa: E402
+from cli import bodies, datadir  # noqa: E402
 from cli import doctor as doctorlib  # noqa: E402
 from cli import preset as presetfile  # noqa: E402
 from cli.preset import PRESETS_DIR, Preset, PresetError, list_presets, load_preset  # noqa: E402
@@ -760,14 +760,14 @@ def qa_rules_document(rules: list) -> dict:
     return {"version": 1, "rules": list(rules)}
 
 
-def display_dir(path: str) -> str:
-    """The folder relative to the wiretrace folder when it is inside it, else as given."""
+def display_dir(path: str, data_dir: str = "") -> str:
+    """The path relative to the data folder when it is inside it, else as given.
+
+    `data_dir` is the launcher's `qa_data_dir`; empty means the data folder this process resolves.
+    """
     if not path:
         return ""
-    try:
-        return Path(path).resolve().relative_to(ROOT.resolve()).as_posix()
-    except (ValueError, OSError):
-        return path
+    return datadir.inside(path, Path(data_dir) if data_dir else None)
 
 
 # Log files
@@ -1132,7 +1132,7 @@ class FlowDetail(Guarded):
             return self.fail(404, "Unknown request: it was never listed or has been dropped from memory.")
         live = store.flows is self.addon.hub.flows
         held = self.addon.breakpoints.get(flow_id) if live else None
-        shown = detail(flow, display_dir(self.addon.mocks_dir()), self.addon.hub.paused.get(flow_id) if live else None)
+        shown = detail(flow, display_dir(self.addon.mocks_dir(), self.addon.data_dir()), self.addon.hub.paused.get(flow_id) if live else None)
         shown["breakpoint"] = breakpoint_view(held) if held is not None else None
         self.write(shown)
 
@@ -2048,6 +2048,9 @@ class WiretraceUI:
     def mocks_dir(self) -> str:
         return ctx.options.qa_mocks_dir if "qa_mocks_dir" in ctx.options else ""
 
+    def data_dir(self) -> str:
+        return ctx.options.qa_data_dir if "qa_data_dir" in ctx.options else ""
+
     def faults(self) -> dict:
         o = ctx.options
         if FAULT_OPTIONS["filter"] not in o:
@@ -2109,7 +2112,7 @@ class WiretraceUI:
             "mac_ip": mac_ip,
             "faults": faults,
             "faults_on": self.faults_on(faults),
-            "mocks_dir": display_dir(self.mocks_dir()),
+            "mocks_dir": display_dir(self.mocks_dir(), self.data_dir()),
             "flow_count": len(self.hub.flows),
             "paused_count": len(self.breakpoints),
             "paused_max": MAX_PAUSED,
@@ -2745,7 +2748,8 @@ class WiretraceUI:
             return {"revision": "", "rules": [], "stats": {}, "legacy_faults_on": legacy, "file": "",
                     "error": NO_QA, "api_hosts": []}
         return {"revision": live.rules.revision, "rules": [r.data for r in live.rules.rules],
-                "stats": live.rule_stats(), "legacy_faults_on": legacy, "file": display_dir(live.rules_file),
+                "stats": live.rule_stats(), "legacy_faults_on": legacy,
+                "file": display_dir(live.rules_file, self.data_dir()),
                 "error": live.rules_error or None, "api_hosts": list(live.api_hosts)}
 
     def save_rules(self, revision: str, rules: list) -> tuple[int, dict]:

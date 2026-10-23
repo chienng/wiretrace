@@ -1,4 +1,4 @@
-"""Session folders: sessions/<YYYY-MM-DD_HHMMSS>_<preset>_<target>/ in the wiretrace folder.
+"""Session folders: sessions/<YYYY-MM-DD_HHMMSS>_<preset>_<target>/ in the data folder.
 
 meta.json says what the run was (preset, target, mode, times, versions, log line
 counts). It never holds device identifiers, user names or host names, and no absolute paths, which
@@ -14,7 +14,9 @@ import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 
-SESSIONS_DIR = Path(__file__).resolve().parent.parent / "sessions"
+from .datadir import DATA_DIR, SESSIONS
+
+SESSIONS_DIR = DATA_DIR / SESSIONS
 FLOWS = "flows.mitm"
 HAR = "flows.har"
 DEVICE_LOG = "device.log.jsonl"

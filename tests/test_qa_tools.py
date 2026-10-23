@@ -21,6 +21,7 @@ from mitmproxy import http as mhttp
 from mitmproxy.test import taddons, tflow
 
 from addons import qa_tools
+from cli import datadir
 
 ROOT = Path(__file__).resolve().parent.parent
 VENV_BIN = Path(sys.prefix) / "bin"
@@ -53,9 +54,9 @@ def scenario(body, **options):
 
 
 @pytest.fixture(autouse=True)
-def _wiretrace_root_is_the_test_folder(monkeypatch, tmp_path):
-    """Mock files in these tests live under tmp. Production still requires the checkout."""
-    monkeypatch.setattr(qa_tools, "WIRETRACE", tmp_path)
+def _data_folder_is_the_test_folder(monkeypatch, tmp_path):
+    """Mock files in these tests live under tmp. Production still requires the data folder."""
+    monkeypatch.setattr(qa_tools, "default_data_dir", lambda: tmp_path)
 
 
 @pytest.fixture
@@ -1231,8 +1232,8 @@ class Proxy:
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.port = free_port()
         self.log = tmp_path / "mitmdump.log"
-        # The real process uses the checkout as the wiretrace folder, so the mocks must live inside it.
-        self.mocks_dir = Path(tempfile.mkdtemp(prefix=".test-mocks-", dir=ROOT))
+        # The real process names no qa_data_dir, so the mocks must live inside the data folder it resolves.
+        self.mocks_dir = Path(tempfile.mkdtemp(prefix=".test-mocks-", dir=datadir.DATA_DIR / datadir.MOCKS))
         shutil.copytree(mocks, self.mocks_dir, dirs_exist_ok=True)
         args = [str(VENV_BIN / "mitmdump"), "--mode", "regular", "--listen-port", str(self.port),
                 "--set", f"confdir={tmp_path / 'confdir'}", "-s", str(ROOT / "addons" / "qa_tools.py"),
