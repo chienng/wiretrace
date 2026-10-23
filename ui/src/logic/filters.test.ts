@@ -3,6 +3,7 @@ import {
   activeChips,
   applyFilters,
   clientCounts,
+  encryptedHostCounts,
   flowUrl,
   hostCounts,
   isBodySearch,
@@ -181,6 +182,25 @@ describe('hosts and URLs', () => {
     expect(hostCounts(flows)).toEqual([
       { host: 'b.example.com', count: 2 },
       { host: 'a.example.com', count: 1 },
+    ]);
+  });
+  it('counts encrypted hosts, busiest first, without those the API hosts decrypt now', () => {
+    const tunnels = [
+      tunnel({ host: 'cdn.example.net' }),
+      tunnel({ host: 'ads.example.org' }),
+      tunnel({ host: 'cdn.example.net' }),
+      tunnel({ host: 'join.safemeet.me' }),
+      tunnel({ host: 'Max30.SafeMeet.me' }),
+    ];
+    expect(encryptedHostCounts(tunnels, ['safemeet.me'])).toEqual([
+      { host: 'cdn.example.net', count: 2 },
+      { host: 'ads.example.org', count: 1 },
+    ]);
+    expect(encryptedHostCounts(tunnels, []).map((h) => h.host)).toEqual([
+      'cdn.example.net',
+      'ads.example.org',
+      'join.safemeet.me',
+      'Max30.SafeMeet.me',
     ]);
   });
   it('omits default ports from the URL', () => {

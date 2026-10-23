@@ -18,11 +18,12 @@ interface Props {
   selectedTunnel: TunnelRow | null;
   counts: Record<QuickFilter, number>;
   hosts: HostCount[];
+  encryptedHosts: HostCount[];
   clients: ReadonlyMap<string, number>;
   filterError: string | null;
 }
 
-export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, clients, filterError }: Props) {
+export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, encryptedHosts, clients, filterError }: Props) {
   const { ui, appState, view } = useStore();
   const dispatch = useDispatch();
   const [decrypting, setDecrypting] = useState<{ host: string; choice: string } | null>(null);
@@ -43,7 +44,13 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, cli
   return (
     <>
       <div className="main-body">
-        <Sidebar counts={counts} hosts={hosts} clients={clients} />
+        <Sidebar
+          counts={counts}
+          hosts={hosts}
+          encryptedHosts={encryptedHosts}
+          clients={clients}
+          onDecrypt={(host, choice) => setDecrypting({ host, choice })}
+        />
         <div className="traffic">
           <div className="filterbar">
             <div className="search">

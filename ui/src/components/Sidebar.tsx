@@ -6,7 +6,8 @@ import { addSaved, cleanName, loadSaved, removeSaved, renameSaved, storeSaved, t
 import { useDispatch, useStore } from '../store';
 import { backToLive } from '../viewing';
 import { ChangePortDialog } from './ChangePortDialog';
-import { ContextMenu, type MenuAt } from './ContextMenu';
+import { decryptChoices, decryptMenuLabel, decryptOff } from '../logic/hosts';
+import { ContextMenu, type MenuAt, type MenuItem } from './ContextMenu';
 import { RemoveDeviceDialog } from './RemoveDeviceDialog';
 import { SessionsList, usePreviousSessions } from './SessionsList';
 
@@ -15,8 +16,11 @@ const HOST_COLORS = ['var(--blue)', 'var(--purple)', 'var(--green)', 'var(--oran
 interface Props {
   counts: Record<QuickFilter, number>;
   hosts: HostCount[];
+  /** Hosts of encrypted connections the preset does not decrypt now. */
+  encryptedHosts: HostCount[];
   /** Listed requests per device, by the summary's `client`. */
   clients: ReadonlyMap<string, number>;
+  onDecrypt: (host: string, choice: string) => void;
 }
 
 function storage(): Storage | null {
@@ -199,10 +203,12 @@ function ProxyDevices({ total, clients }: { total: number; clients: ReadonlyMap<
   );
 }
 
-export function Sidebar({ counts, hosts, clients }: Props) {
+export function Sidebar({ counts, hosts, encryptedHosts, clients, onDecrypt }: Props) {
   const { ui, appState, view } = useStore();
   const dispatch = useDispatch();
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
+  const [hostMenu, setHostMenu] = useState<{ host: string; at: MenuAt } | null>(null);
+  const onEncryptedHost = ui.quick === 'encrypted' && encryptedHosts.some((h) => h.host === ui.host);
   const [open, setOpen] = useState(false);
   const previous = usePreviousSessions();
 
@@ -231,18 +237,33 @@ export function Sidebar({ counts, hosts, clients }: Props) {
         <button
           key={q.id}
           type="button"
-          className={`side-i${ui.quick === q.id ? ' active' : ''}`}
-          onClick={() => patch({ quick: q.id })}
+          className={`side-i${ui.quick === q.id && !onEncryptedHost ? ' active' : ''}`}
+          onClick={() => patch(onEncryptedHost ? { quick: q.id, host: null } : { quick: q.id })}
         >
-          {q.id === 'encrypted' && (
-            <span className="lock" aria-hidden="true">
-              🔒
-            </span>
-          )}
           <span className="h">{q.label}</span>
           <span className={`n${q.id === 'errors' && counts.errors > 0 ? ' red' : ''}`}>{counts[q.id]}</span>
         </button>
       ))}
+      {!view &&
+        encryptedHosts.map((h) => {
+          const active = ui.quick === 'encrypted' && ui.host === h.host;
+          return (
+            <button
+              key={h.host}
+              type="button"
+              className={`side-i nested${active ? ' active' : ''}`}
+              title={h.host}
+              onClick={() => patch(active ? { host: null } : { quick: 'encrypted', host: h.host })}
+              onContextMenu={(e) => {
+                e.preventDefault();
+                setHostMenu({ host: h.host, at: { x: e.clientX, y: e.clientY } });
+              }}
+            >
+              <span className="h">{h.host}</span>
+              <span className="n">{h.count}</span>
+            </button>
+          );
+        })}
 
       <div className="side-h">Hosts</div>
       {hosts.length === 0 && <div className="side-i muted">No hosts yet</div>}
@@ -261,6 +282,17 @@ export function Sidebar({ counts, hosts, clients }: Props) {
       ))}
 
       {appState && <SavedFilters key={appState.preset} preset={appState.preset} />}
+      {hostMenu && (
+        <ContextMenu
+          at={hostMenu.at}
+          label="Encrypted host"
+          items={decryptChoices(hostMenu.host).map((choice): MenuItem => {
+            const off = decryptOff(appState, choice, view?.name ?? null);
+            return { label: decryptMenuLabel(choice), onSelect: () => onDecrypt(hostMenu.host, choice), ...(off ? { disabledReason: off } : {}) };
+          })}
+          onClose={() => setHostMenu(null)}
+        />
+      )}
     </nav>
   );
 }

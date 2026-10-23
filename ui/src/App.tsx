@@ -11,7 +11,7 @@ import { Toast } from './components/Toast';
 import { TrafficView } from './components/TrafficView';
 import { Connection } from './connection';
 import { useServerFilter } from './hooks';
-import { applyFilters, clientCounts, hostCounts, mergeRows, quickCounts } from './logic/filters';
+import { applyFilters, clientCounts, encryptedHostCounts, hostCounts, mergeRows, quickCounts } from './logic/filters';
 import { APP_HINT, loadDismissed, showAppHint, storeDismissed } from './logic/appHint';
 import { flowLinkChoice } from './logic/flowLink';
 import { takeResume } from './logic/setup';
@@ -118,7 +118,7 @@ function useSetupResume(): boolean {
 }
 
 export function App() {
-  const { phase, loaded, ui, view, switching } = useStore();
+  const { phase, loaded, ui, view, switching, appState } = useStore();
   useConnection(switching);
   useFlowLink();
   const resumed = useSetupResume();
@@ -139,6 +139,8 @@ export function App() {
   );
   const counts = useMemo(() => quickCounts(listed, listedTunnels, ui.showEncrypted), [listed, listedTunnels, ui.showEncrypted]);
   const hosts = useMemo(() => hostCounts(listed), [listed]);
+  const apiHosts = appState?.api_hosts;
+  const encryptedHosts = useMemo(() => encryptedHostCounts(listedTunnels, apiHosts ?? []), [listedTunnels, apiHosts]);
   const clients = useMemo(() => clientCounts(listed), [listed]);
   const server = useServerFilter(ui.search, flows, viewing);
   const filtered = useMemo(
@@ -203,6 +205,7 @@ export function App() {
             selectedTunnel={selectedTunnel}
             counts={counts}
             hosts={hosts}
+            encryptedHosts={encryptedHosts}
             clients={clients}
             filterError={server.error}
           />

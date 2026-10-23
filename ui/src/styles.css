@@ -141,7 +141,7 @@ button:disabled { cursor: default; opacity: .5; }
 .side-i.active { background: #dcdce1; font-weight: 500; }
 .side-i.muted { color: var(--faint); }
 .side-i .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
-.side-i .lock { width: 12px; flex: none; text-align: center; font-size: 11px; }
+.side-i.nested { padding-left: 22px; font-size: 12px; }
 .side-i .n.red { color: var(--red); font-weight: 600; }
 .side-i .caret { width: 8px; flex: none; color: var(--muted); font-size: 10px; }
 .side-i.add { font-size: 12px; }

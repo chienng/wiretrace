@@ -799,7 +799,11 @@ connections Wiretrace lets through without reading them because their host is no
 preset's API hosts: a third-party image server, an analytics SDK, a host you forgot in the
 preset. A row shows the device, the host and port, when the connection opened and how long it
 stayed open; there are no requests or sizes, because nothing was decrypted. *Encrypted* in the
-sidebar's quick filters counts them; *Show encrypted* in the filter bar hides them. Select a row
+sidebar's quick filters counts them, and lists under it each host still passed through, with its
+connections: click one to show only that host, again to show them all; right-click it to decrypt
+it or its parent domain. A host you decrypt leaves
+that list; its requests are listed under *Hosts*. *Show encrypted* in the filter bar hides the
+rows. Select a row
 and click **Decrypt this host…**, or right-click it → *Decrypt <host>…* (or its parent domain),
 to add the host to the preset in use: new connections to it and its subdomains are decrypted
 in the same session within a second, and rules apply to them. Connections already open stay

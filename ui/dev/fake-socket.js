@@ -61,5 +61,9 @@ window.WebSocket.OPEN = 1;
 window.WebSocket.CLOSING = 2;
 window.WebSocket.CLOSED = 3;
 
-// Console helper to try the reconnect path: __wiretraceFake.drop()
-window.__wiretraceFake = { drop: () => [...sockets].forEach((s) => s.close()) };
+// Console helpers: __wiretraceFake.drop() tries the reconnect path; __wiretraceFake.state() sends the
+// fixture's state as the server does after a change such as a decrypted host.
+window.__wiretraceFake = {
+  drop: () => [...sockets].forEach((s) => s.close()),
+  state: async () => broadcast({ type: 'state', state: await (await fetch('/api/state')).json() }),
+};

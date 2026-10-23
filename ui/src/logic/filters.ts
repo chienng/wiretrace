@@ -1,5 +1,5 @@
 import type { FlowSummary, TrafficRow, TunnelRow } from '../types';
-import { hostPort, isTunnel } from './hosts';
+import { covered, hostPort, isTunnel } from './hosts';
 
 export type QuickFilter = 'all' | 'errors' | 'slow' | 'mocked' | 'faulted' | 'websocket' | 'encrypted';
 
@@ -74,13 +74,24 @@ export interface HostCount {
   count: number;
 }
 
+function busiestFirst(map: ReadonlyMap<string, number>): HostCount[] {
+  return [...map.entries()]
+    .map(([host, count]) => ({ host, count }))
+    .sort((a, b) => b.count - a.count || a.host.localeCompare(b.host));
+}
+
 /** Hosts by flow count, busiest first; ties alphabetical. */
 export function hostCounts(flows: readonly FlowSummary[]): HostCount[] {
   const map = new Map<string, number>();
   for (const f of flows) map.set(f.host, (map.get(f.host) ?? 0) + 1);
-  return [...map.entries()]
-    .map(([host, count]) => ({ host, count }))
-    .sort((a, b) => b.count - a.count || a.host.localeCompare(b.host));
+  return busiestFirst(map);
+}
+
+/** Hosts of encrypted connections by connection count, without those the API hosts decrypt now. */
+export function encryptedHostCounts(tunnels: readonly TunnelRow[], apiHosts: readonly string[]): HostCount[] {
+  const map = new Map<string, number>();
+  for (const t of tunnels) if (!covered(apiHosts, t.host)) map.set(t.host, (map.get(t.host) ?? 0) + 1);
+  return busiestFirst(map);
 }
 
 const DEFAULT_PORTS: Record<string, number> = { http: 80, https: 443, ws: 80, wss: 443 };
