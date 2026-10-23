@@ -933,6 +933,17 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   - a crash's stack trace folded after four lines (*Show N more lines*);
   - the line detail: *Copy line*, *Copy ±50 lines*, the linked request with *Open in Traffic*,
     the requests within 5 seconds of the line, and *Show only this tag*.
+- **Pane widths.** Drag the border between the sidebar and the list, or between the list and
+  the detail panel, to resize them; in the Logs view, the border between the list and the line
+  detail. The border turns blue under the pointer. The detail panel starts at 40 % of the
+  window (576 px in a 1440 px window); the sidebar at 220 px. The sidebar goes from 160 to
+  360 px, the detail panel from 360 to 720 px, and the list always keeps at least 480 px: in a
+  narrow window the detail panel gives way first, then the sidebar. A narrow list hides the
+  *Size* column, then *Duration*, then *Device* (both still in the detail header); the path is
+  shortened with `…`, and pointing at it shows the full URL. Your browser remembers each width for the next
+  window, like saved filters. **Double-click** a border to go back to the default width.
+  From the keyboard, Tab to a border, then ← and → move it by 16 px (64 px with Shift),
+  Home and End take it to its limits, and Enter goes back to the default.
 - **Setup.** A wizard in five steps, each of which you can open from the list on the left:
   *Choose device* (iPhone, Android, iOS Simulator or Android emulator, picked from `--target`;
   another card offers *Use <device> for this session*),

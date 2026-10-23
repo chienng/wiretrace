@@ -128,7 +128,16 @@ button:disabled { cursor: default; opacity: .5; }
 .kbd.big { font-size: 15px; padding: 4px 10px; }
 
 /* ---------- main window ---------- */
-.main-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 220px minmax(0, 1fr) 470px; }
+.main-body { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--sidebar-w, 220px) minmax(0, 1fr) var(--detail-w, 470px); position: relative; }
+
+/* Drag handles sit over the 1 px borders between panes, outside the grid tracks (spec 024). */
+.splitter { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 5; cursor: col-resize; touch-action: none; }
+.splitter.start { left: calc(var(--sidebar-w, 220px) - 3px); }
+.splitter.end { right: calc(var(--detail-w, 470px) - 3px); }
+.splitter::after { content: ""; position: absolute; top: 0; bottom: 0; left: 2px; width: 2px; background: transparent; }
+.splitter:hover::after, .splitter.dragging::after, .splitter:focus-visible::after { background: var(--blue); }
+.splitter:focus-visible { outline: 0; }
+body.resizing, body.resizing * { cursor: col-resize !important; user-select: none !important; }
 .sidebar { background: var(--side); border-right: 1px solid var(--line); padding: 12px 8px; overflow-y: auto; }
 .side-h { font-size: 11px; font-weight: 600; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; padding: 10px 8px 4px; }
 .side-i {
@@ -199,10 +208,10 @@ button:disabled { cursor: default; opacity: .5; }
 .chip.search { max-width: 260px; overflow: hidden; text-overflow: ellipsis; }
 .chip.client { font-family: var(--mono); font-size: 11.5px; }
 
-.flows-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.flows-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; container-type: inline-size; overflow: hidden; }
 .flows-body { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .fhead, .frow {
-  display: grid; grid-template-columns: 96px 54px 56px minmax(0, 1fr) 76px 68px 100px;
+  display: grid; grid-template-columns: 96px 54px 56px minmax(120px, 1fr) 76px 68px 100px;
   gap: 8px; padding: 0 8px; align-items: center;
 }
 .fhead { text-align: left; font-weight: 500; color: var(--muted); font-size: 11.5px; padding-top: 6px; padding-bottom: 6px; border-bottom: 1px solid var(--line); background: #fafafa; }
@@ -218,7 +227,31 @@ button:disabled { cursor: default; opacity: .5; }
 .frow.sel { background: var(--blue); color: #fff; }
 .frow.sel * { color: #fff !important; background: transparent !important; }
 .frow.sel .tag, .frow.sel .st { outline: 1px solid rgba(255,255,255,.5); outline-offset: -1px; }
-.flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 92px 54px 56px minmax(0, 1fr) 76px 68px 100px; }
+.flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 92px 54px 56px minmax(120px, 1fr) 76px 68px 100px; }
+/*
+ * A narrow list drops Size, then Duration, then Device (both still in the detail header), so Path
+ * keeps its room and the badges stay on screen. The Device column moves each step 100 px wider.
+ */
+@container (max-width: 859px) {
+  .flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 92px 54px 56px minmax(120px, 1fr) 76px 100px; }
+  .flows-wrap.dev .c-size { display: none; }
+}
+@container (max-width: 759px) {
+  .fhead, .frow { grid-template-columns: 96px 54px 56px minmax(120px, 1fr) 76px 100px; }
+  .fhead .c-size, .frow .c-size { display: none; }
+}
+@container (max-width: 739px) {
+  .flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 92px 54px 56px minmax(120px, 1fr) 100px; }
+  .flows-wrap.dev .c-dur { display: none; }
+}
+@container (max-width: 639px) {
+  .fhead, .frow { grid-template-columns: 96px 54px 56px minmax(120px, 1fr) 100px; }
+  .fhead .c-dur, .frow .c-dur { display: none; }
+}
+@container (max-width: 579px) {
+  .flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 54px 56px minmax(120px, 1fr) 100px; }
+  .flows-wrap.dev .h-dev, .flows-wrap.dev .c-dev { display: none; }
+}
 .c-dev { font: 11.5px var(--mono); color: var(--muted); }
 .c-dev.mac { font-family: -apple-system, sans-serif; font-size: 12px; }
 
@@ -317,7 +350,7 @@ button:disabled { cursor: default; opacity: .5; }
 .lvchip.on.W { background: var(--orange-soft); color: var(--orange); }
 .lvchip.on.E { background: var(--red-soft); color: var(--red); }
 .lvchip.on.F { background: #5c0011; color: #fff; }
-.lg-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 430px; }
+.lg-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--detail-w, 430px); position: relative; }
 .lg-list { min-height: 0; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
 .lhead { font: 500 11.5px/1 -apple-system, sans-serif; color: var(--muted); padding-top: 7px; padding-bottom: 7px; background: #fafafa; border-bottom: 1px solid var(--line); }
 .lg-rows { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }

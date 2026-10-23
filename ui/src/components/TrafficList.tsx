@@ -35,7 +35,7 @@ function PausedFor({ since }: { since: number | null }) {
   const now = useNow(1000);
   const hint = giveUpHint(since, now);
   return (
-    <span className={`c-num${hint ? ' late' : ''}`} title={hint ?? undefined}>
+    <span className={`c-num c-dur${hint ? ' late' : ''}`} title={hint ?? undefined}>
       {hint && <span aria-label={GIVE_UP}>⚠ </span>}
       {waited(since, now)}
     </span>
@@ -75,8 +75,8 @@ const FlowRow = memo(function FlowRow({ flow, selected, onSelect, showDevice, on
       <span className="c-path" title={flow.host + flow.path}>
         {flow.path}
       </span>
-      {flow.paused ? <PausedFor since={flow.paused_since} /> : <span className="c-num">{formatDuration(flow.duration_ms)}</span>}
-      <span className="c-num">{formatSize(flow.size)}</span>
+      {flow.paused ? <PausedFor since={flow.paused_since} /> : <span className="c-num c-dur">{formatDuration(flow.duration_ms)}</span>}
+      <span className="c-num c-size">{formatSize(flow.size)}</span>
       <span className="c-badges">
         {flow.paused && <span className="tag paused">Paused</span>}
         {!flow.paused && flow.edited && <span className="tag edited">Edited</span>}
@@ -133,8 +133,8 @@ const TunnelLine = memo(function TunnelLine({ row, selected, onSelect, showDevic
       <span className="c-path" title={hostPort(row)}>
         {hostPort(row)}
       </span>
-      <span className="c-num">{openFor(row)}</span>
-      <span className="c-num">—</span>
+      <span className="c-num c-dur">{openFor(row)}</span>
+      <span className="c-num c-size">—</span>
       <span className="c-badges">
         <span className="tag enc">{tunnelTag(row)}</span>
       </span>
@@ -247,12 +247,12 @@ export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, sho
     <div className={`flows-wrap${showDevice ? ' dev' : ''}`}>
       <div className="fhead">
         <span>Time</span>
-        {showDevice && <span>Device</span>}
+        {showDevice && <span className="h-dev">Device</span>}
         <span>Method</span>
         <span>Status</span>
         <span>Path</span>
-        <span className="c-num">Duration</span>
-        <span className="c-num">Size</span>
+        <span className="c-num c-dur">Duration</span>
+        <span className="c-num c-size">Size</span>
         <span />
       </div>
       <div className="flows-body">
