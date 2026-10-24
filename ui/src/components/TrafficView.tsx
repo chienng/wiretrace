@@ -1,8 +1,8 @@
-import { useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useRef, useState, type CSSProperties } from 'react';
 import { activeChips, type ChipKind, type HostCount, type QuickFilter } from '../logic/filters';
 import { storeShowEncrypted } from '../logic/hosts';
 import { LIST_MIN, LIST_MIN_DEFAULT, TRAFFIC_DETAIL, TRAFFIC_SIDEBAR, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
-import { loadSidebarHidden, storeSidebarHidden } from '../logic/viewPrefs';
+import { loadLayout, loadSidebarHidden, storeLayout, storeSidebarHidden, type TrafficLayout } from '../logic/viewPrefs';
 import { browserStorage } from '../storage';
 import { useDispatch, useStore } from '../store';
 import type { FlowSummary, TrafficRow, TunnelRow } from '../types';
@@ -14,6 +14,12 @@ import { Toggle } from './RuleEditor';
 import { Sidebar } from './Sidebar';
 import { Splitter } from './Splitter';
 import { TrafficList } from './TrafficList';
+import { TrafficTree } from './TrafficTree';
+
+const LAYOUTS: { id: TrafficLayout; label: string }[] = [
+  { id: 'list', label: 'List' },
+  { id: 'tree', label: 'Tree' },
+];
 
 interface Props {
   rows: TrafficRow[];
@@ -55,6 +61,18 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
   const showEncrypted = (show: boolean) => {
     storeShowEncrypted(browserStorage(), show);
     patch(show || ui.quick !== 'encrypted' ? { showEncrypted: show } : { showEncrypted: show, quick: 'all' });
+  };
+  const [layout, setLayout] = useState(() => loadLayout(browserStorage()));
+  const chooseLayout = (next: TrafficLayout) => {
+    setLayout(next);
+    storeLayout(browserStorage(), next);
+  };
+  const [follow, setFollow] = useState(true);
+  const select = useCallback((id: string) => dispatch({ type: 'ui', patch: { selectedFlowId: id } }), [dispatch]);
+  const menuActions = {
+    onDecrypt: (host: string, choice: string) => setDecrypting({ host, choice }),
+    onHideEncrypted: () => showEncrypted(false),
+    onMapLocal: setMapping,
   };
 
   return (
@@ -110,23 +128,34 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
                 Show encrypted
               </label>
             )}
+            <div className="seg layout-seg" role="group" aria-label="Traffic layout">
+              {LAYOUTS.map((l) => (
+                <button key={l.id} type="button" className={layout === l.id ? 'on' : ''} aria-pressed={layout === l.id} onClick={() => chooseLayout(l.id)}>
+                  {l.label}
+                </button>
+              ))}
+            </div>
           </div>
           {filterError && (
             <div className="search-error" role="alert">
               {filterError}
             </div>
           )}
-          <TrafficList
-            rows={rows}
-            selectedId={ui.selectedFlowId}
-            onSelect={(id) => patch({ selectedFlowId: id })}
-            revealKey={ui.selectedFlowId}
-            paused={ui.frozen !== null && !view}
-            showDevice={appState?.mode === 'proxy' || appState?.mode === 'both'}
-            onDecrypt={(host, choice) => setDecrypting({ host, choice })}
-            onHideEncrypted={() => showEncrypted(false)}
-            onMapLocal={setMapping}
-          />
+          {layout === 'tree' ? (
+            <TrafficTree rows={rows} selectedId={ui.selectedFlowId} onSelect={select} {...menuActions} />
+          ) : (
+            <TrafficList
+              rows={rows}
+              selectedId={ui.selectedFlowId}
+              onSelect={select}
+              revealKey={ui.selectedFlowId}
+              paused={ui.frozen !== null && !view}
+              follow={follow}
+              onFollowChange={setFollow}
+              showDevice={appState?.mode === 'proxy' || appState?.mode === 'both'}
+              {...menuActions}
+            />
+          )}
         </div>
         {selectedTunnel ? (
           <TunnelDetail tunnel={selectedTunnel} onDecrypt={(host) => setDecrypting({ host, choice: host })} />

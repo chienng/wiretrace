@@ -42,3 +42,15 @@ export function loadBodyView(storage: Reader): BodyViewChoice {
 export function storeBodyView(storage: Writer, view: BodyViewChoice): void {
   storeChoice(storage, BODY_KEY, 'text', view === 'text');
 }
+
+export type TrafficLayout = 'list' | 'tree';
+const LAYOUT_KEY = 'wiretrace.pane.traffic.layout';
+
+/** Traffic as the flat list unless stored as tree. */
+export function loadLayout(storage: Reader): TrafficLayout {
+  return isStored(storage, LAYOUT_KEY, 'tree') ? 'tree' : 'list';
+}
+
+export function storeLayout(storage: Writer, layout: TrafficLayout): void {
+  storeChoice(storage, LAYOUT_KEY, 'tree', layout === 'tree');
+}

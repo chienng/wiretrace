@@ -331,6 +331,21 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .c-dev { font: 11.5px var(--mono); color: var(--muted); }
 .c-dev.mac { font-family: -apple-system, sans-serif; font-size: 12px; }
+/* Tree (spec 028): the depth indent is inline padding; leaves are List rows without Time and
+   Device, dropping Size and Duration at the List's widths. */
+.frow.tnode { display: flex; gap: 6px; }
+.tnode .tw { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
+.tnode .tn { min-width: 0; font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.tnode .tc { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 76px 68px 100px; }
+.frow.cur:not(.sel) { background: var(--blue-soft); }
+@container (max-width: 759px) {
+  .frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 76px 100px; }
+}
+@container (max-width: 639px) {
+  .frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 100px; }
+}
+.layout-seg { flex: none; margin-left: auto; }
 
 .vlist { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; position: relative; }
 .empty { padding: 28px 16px; text-align: center; color: var(--faint); position: absolute; left: 0; right: 0; pointer-events: none; }

@@ -50,6 +50,10 @@ export interface UiState {
   toast: { id: number; text: string } | null;
   /** A request to pre-fill a new rule from (Traffic > New rule). */
   ruleSeed: FlowSummary | null;
+  /** Traffic Tree nodes open now, kept while the window is open (spec 028, slice C). */
+  treeOpen: ReadonlySet<string>;
+  /** Hosts the tree has listed: a host is opened once, when first seen. */
+  treeSeen: ReadonlySet<string>;
 }
 
 export interface Store {
@@ -96,7 +100,8 @@ export type Action =
   | { type: 'viewOpened'; view: ViewedSession }
   | { type: 'viewClosed' }
   | { type: 'switching'; to: string }
-  | { type: 'toast'; text: string };
+  | { type: 'toast'; text: string }
+  | { type: 'treeHostsSeen'; keys: string[] };
 
 export const initialStore: Store = {
   phase: 'connecting',
@@ -138,6 +143,8 @@ export const initialStore: Store = {
     reportFlow: null,
     toast: null,
     ruleSeed: null,
+    treeOpen: new Set(),
+    treeSeen: new Set(),
   },
 };
 
@@ -262,6 +269,14 @@ export function reducer(store: Store, action: Action): Store {
     }
     case 'toast':
       return { ...store, ui: { ...store.ui, toast: { id: ++toastId, text: action.text } } };
+    case 'treeHostsSeen': {
+      const fresh = action.keys.filter((k) => !store.ui.treeSeen.has(k));
+      if (fresh.length === 0) return store;
+      return {
+        ...store,
+        ui: { ...store.ui, treeSeen: new Set([...store.ui.treeSeen, ...fresh]), treeOpen: new Set([...store.ui.treeOpen, ...fresh]) },
+      };
+    }
   }
 }
 

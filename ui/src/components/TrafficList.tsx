@@ -43,12 +43,62 @@ function PausedFor({ since }: { since: number | null }) {
   );
 }
 
+/** Classes a request row carries in List and Tree. */
+export function flowRowClass(flow: FlowSummary, selected: boolean): string {
+  return `frow${selected ? ' sel' : ''}${isError(flow) ? ' err' : ''}${flow.paused ? ' paused' : ''}`;
+}
+
+export function FlowStatus({ flow }: { flow: FlowSummary }) {
+  return (
+    <span>
+      {flow.status !== null ? (
+        <span className={`st ${statusClass(flow.status)}`}>{flow.status}</span>
+      ) : flow.error !== null ? (
+        <span className="st s5" title={flow.error}>
+          ERR
+        </span>
+      ) : (
+        <span className="st s3">…</span>
+      )}
+    </span>
+  );
+}
+
+export function FlowDuration({ flow }: { flow: FlowSummary }) {
+  return flow.paused ? <PausedFor since={flow.paused_since} /> : <span className="c-num c-dur">{formatDuration(flow.duration_ms)}</span>;
+}
+
+export function FlowSize({ flow }: { flow: FlowSummary }) {
+  return <span className="c-num c-size">{trafficSize(flow.websocket, flow.ws_messages, flow.size)}</span>;
+}
+
+export function FlowBadges({ flow }: { flow: FlowSummary }) {
+  return (
+    <span className="c-badges">
+      {flow.paused && <span className="tag paused">Paused</span>}
+      {!flow.paused && flow.edited && <span className="tag edited">Edited</span>}
+      {flow.mapped && (
+        <span className="tag mapped" title={flow.sent_to ? `Sent to ${flow.sent_to}` : undefined}>
+          Mapped
+        </span>
+      )}
+      {flow.rewritten && <span className="tag rewritten">Rewritten</span>}
+      {flow.replay_of && <span className="tag replay">Replay</span>}
+      {flow.mock && <span className="tag mock">Mock</span>}
+      {flow.fault && (
+        <span className="tag fault" title={flow.fault}>
+          Fault
+        </span>
+      )}
+      {isSlow(flow) && <span className="tag slow">Slow</span>}
+    </span>
+  );
+}
+
 const FlowRow = memo(function FlowRow({ flow, selected, onSelect, showDevice, onMenu }: RowProps) {
-  const sc = statusClass(flow.status);
-  const err = isError(flow);
   return (
     <div
-      className={`frow${selected ? ' sel' : ''}${err ? ' err' : ''}${flow.paused ? ' paused' : ''}`}
+      className={flowRowClass(flow, selected)}
       style={{ height: TRAFFIC_ROW_HEIGHT }}
       role="option"
       aria-selected={selected}
@@ -62,40 +112,13 @@ const FlowRow = memo(function FlowRow({ flow, selected, onSelect, showDevice, on
       <span className="c-time">{formatTime(flow.ts)}</span>
       {showDevice && <DeviceCell client={flow.client} />}
       <span className={`m ${methodClass(flow.method)}`}>{methodLabel(flow.method)}</span>
-      <span>
-        {flow.status !== null ? (
-          <span className={`st ${sc}`}>{flow.status}</span>
-        ) : flow.error !== null ? (
-          <span className="st s5" title={flow.error}>
-            ERR
-          </span>
-        ) : (
-          <span className="st s3">…</span>
-        )}
-      </span>
+      <FlowStatus flow={flow} />
       <span className="c-path" title={flow.host + flow.path}>
         {flow.path}
       </span>
-      {flow.paused ? <PausedFor since={flow.paused_since} /> : <span className="c-num c-dur">{formatDuration(flow.duration_ms)}</span>}
-      <span className="c-num c-size">{trafficSize(flow.websocket, flow.ws_messages, flow.size)}</span>
-      <span className="c-badges">
-        {flow.paused && <span className="tag paused">Paused</span>}
-        {!flow.paused && flow.edited && <span className="tag edited">Edited</span>}
-        {flow.mapped && (
-          <span className="tag mapped" title={flow.sent_to ? `Sent to ${flow.sent_to}` : undefined}>
-            Mapped
-          </span>
-        )}
-        {flow.rewritten && <span className="tag rewritten">Rewritten</span>}
-        {flow.replay_of && <span className="tag replay">Replay</span>}
-        {flow.mock && <span className="tag mock">Mock</span>}
-        {flow.fault && (
-          <span className="tag fault" title={flow.fault}>
-            Fault
-          </span>
-        )}
-        {isSlow(flow) && <span className="tag slow">Slow</span>}
-      </span>
+      <FlowDuration flow={flow} />
+      <FlowSize flow={flow} />
+      <FlowBadges flow={flow} />
     </div>
   );
 });
@@ -143,43 +166,22 @@ const TunnelLine = memo(function TunnelLine({ row, selected, onSelect, showDevic
   );
 });
 
-interface Props {
-  rows: TrafficRow[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  /** Changes when something outside the list selects a flow, so the row is scrolled into view. */
-  revealKey: unknown;
-  paused: boolean;
-  /** Modes that take Wi-Fi devices show who sent each request. */
-  showDevice: boolean;
+export interface MenuActions {
   /** Decrypt `host`, offering `choice` first (the host or its parent domain). */
   onDecrypt: (host: string, choice: string) => void;
   onHideEncrypted: () => void;
   onMapLocal: (flow: FlowSummary) => void;
 }
 
-export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, showDevice, onDecrypt, onHideEncrypted, onMapLocal }: Props) {
+/** The request and encrypted-connection menus, and Replay's confirmation, shared by List and Tree. */
+export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: MenuActions) {
   const { appState } = useStore();
   const { viewing } = useData();
   const dispatch = useDispatch();
-  const [follow, setFollow] = useState(true);
   const [menu, setMenu] = useState<{ row: TunnelRow; at: MenuAt } | null>(null);
   const [flowMenu, setFlowMenu] = useState<{ flow: FlowSummary; at: MenuAt } | null>(null);
   const [confirmReplay, setConfirmReplay] = useState<FlowSummary | null>(null);
-  const selectedIndex = useMemo(
-    () => (selectedId === null ? -1 : rows.findIndex((f) => f.id === selectedId)),
-    [rows, selectedId],
-  );
 
-  const step = useCallback(
-    (delta: number) => {
-      if (rows.length === 0) return;
-      const from = selectedIndex < 0 ? (delta > 0 ? -1 : rows.length) : selectedIndex;
-      const next = Math.min(rows.length - 1, Math.max(0, from + delta));
-      onSelect((rows[next] as TrafficRow).id);
-    },
-    [rows, selectedIndex, onSelect],
-  );
   const openMenu = useCallback((row: TunnelRow, at: MenuAt) => setMenu({ row, at }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
   const openFlowMenu = useCallback((flow: FlowSummary, at: MenuAt) => setFlowMenu({ flow, at }), []);
@@ -244,6 +246,59 @@ export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, sho
     ];
   };
 
+  const menus = (
+    <>
+      {menu && <ContextMenu at={menu.at} label="Encrypted connection" items={menuItems(menu.row)} onClose={closeMenu} />}
+      {flowMenu && <ContextMenu at={flowMenu.at} label="Request" items={flowMenuItems(flowMenu.flow)} onClose={closeFlowMenu} />}
+      {confirmReplay && (
+        <Modal title={`Replay ${confirmReplay.method} ${confirmReplay.path}?`} lead="It repeats its effect on the backend." onClose={() => setConfirmReplay(null)}>
+          <div className="sheet-foot">
+            <span className="spacer" />
+            <button type="button" className="btn" onClick={() => setConfirmReplay(null)}>
+              Cancel
+            </button>
+            <button type="button" className="btn danger" onClick={() => void replay(confirmReplay)}>
+              Replay
+            </button>
+          </div>
+        </Modal>
+      )}
+    </>
+  );
+  return { openFlowMenu, openTunnelMenu: openMenu, menus };
+}
+
+interface Props extends MenuActions {
+  rows: TrafficRow[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+  /** Changes when something outside the list selects a flow, so the row is scrolled into view. */
+  revealKey: unknown;
+  paused: boolean;
+  /** Keep the newest row in view; kept by the Traffic view so it survives a switch to Tree. */
+  follow: boolean;
+  onFollowChange: (follow: boolean) => void;
+  /** Modes that take Wi-Fi devices show who sent each request. */
+  showDevice: boolean;
+}
+
+export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, follow, onFollowChange, showDevice, ...actions }: Props) {
+  const { openFlowMenu, openTunnelMenu, menus } = useTrafficMenus(actions);
+  const selectedIndex = useMemo(
+    () => (selectedId === null ? -1 : rows.findIndex((f) => f.id === selectedId)),
+    [rows, selectedId],
+  );
+
+  const step = useCallback(
+    (delta: number) => {
+      if (rows.length === 0) return;
+      const from = selectedIndex < 0 ? (delta > 0 ? -1 : rows.length) : selectedIndex;
+      const next = Math.min(rows.length - 1, Math.max(0, from + delta));
+      onSelect((rows[next] as TrafficRow).id);
+    },
+    [rows, selectedIndex, onSelect],
+  );
+
   return (
     <div className={`flows-wrap${showDevice ? ' dev' : ''}`}>
       <div className="fhead">
@@ -263,35 +318,21 @@ export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, sho
           count={rows.length}
           rowHeight={TRAFFIC_ROW_HEIGHT}
           follow={follow && !paused}
-          onFollowChange={setFollow}
+          onFollowChange={onFollowChange}
           revealIndex={selectedIndex}
           revealKey={revealKey}
           onStep={step}
           renderRow={(i) => {
             const r = rows[i] as TrafficRow;
             return isTunnel(r) ? (
-              <TunnelLine key={r.id} row={r} selected={r.id === selectedId} onSelect={onSelect} showDevice={showDevice} onMenu={openMenu} />
+              <TunnelLine key={r.id} row={r} selected={r.id === selectedId} onSelect={onSelect} showDevice={showDevice} onMenu={openTunnelMenu} />
             ) : (
               <FlowRow key={r.id} flow={r} selected={r.id === selectedId} onSelect={onSelect} showDevice={showDevice} onMenu={openFlowMenu} />
             );
           }}
         />
       </div>
-      {menu && <ContextMenu at={menu.at} label="Encrypted connection" items={menuItems(menu.row)} onClose={closeMenu} />}
-      {flowMenu && <ContextMenu at={flowMenu.at} label="Request" items={flowMenuItems(flowMenu.flow)} onClose={closeFlowMenu} />}
-      {confirmReplay && (
-        <Modal title={`Replay ${confirmReplay.method} ${confirmReplay.path}?`} lead="It repeats its effect on the backend." onClose={() => setConfirmReplay(null)}>
-          <div className="sheet-foot">
-            <span className="spacer" />
-            <button type="button" className="btn" onClick={() => setConfirmReplay(null)}>
-              Cancel
-            </button>
-            <button type="button" className="btn danger" onClick={() => void replay(confirmReplay)}>
-              Replay
-            </button>
-          </div>
-        </Modal>
-      )}
+      {menus}
     </div>
   );
 }

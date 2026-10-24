@@ -14,6 +14,8 @@ interface Props {
   revealKey?: unknown;
   /** Arrow keys move the selection: -1 or +1. */
   onStep?: (delta: number) => void;
+  /** Any other key while the list has focus. */
+  onKey?: (e: KeyboardEvent) => void;
   /** The first and last row on screen, whenever they change; -1, -1 when there are none. */
   onRange?: (first: number, last: number) => void;
   className?: string;
@@ -30,6 +32,7 @@ export function VirtualList({
   revealIndex = null,
   revealKey,
   onStep,
+  onKey,
   onRange,
   className,
   label,
@@ -80,13 +83,14 @@ export function VirtualList({
   for (let i = win.start; i < win.end; i++) rows.push(renderRow(i));
 
   const onKeyDown = (e: KeyboardEvent) => {
-    if (!onStep) return;
-    if (e.key === 'ArrowDown') {
+    if (onStep && e.key === 'ArrowDown') {
       e.preventDefault();
       onStep(1);
-    } else if (e.key === 'ArrowUp') {
+    } else if (onStep && e.key === 'ArrowUp') {
       e.preventDefault();
       onStep(-1);
+    } else {
+      onKey?.(e);
     }
   };
 

@@ -919,6 +919,14 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   mock*, *New rule from this request*, *Replay* and *Copy cURL*. The log receiver
   `qa-logs.internal` is not listed. The window keeps the newest 10,000 requests; older ones
   are only in `flows.mitm`.
+  **List** | **Tree**, at the right end of the filter bar, shows the same requests grouped by
+  host and then by folder of the path: `/v1/users/42` is the row `42` under `v1` › `users`.
+  Host and folder rows show how many requests are below them; click one to open or close it,
+  or right-click it for *Expand all below*, *Collapse all below* and, on a host, *Show only
+  this host*. New hosts start open and new folders closed. ↑ and ↓ move through the rows,
+  → opens a row or goes into it, ← closes it or goes up, Enter or Space opens or closes it;
+  moving onto a request selects it. The tree does not scroll to new requests. Your browser
+  remembers the choice.
 - **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
   that carry this request's ID, with their number). A WebSocket row opens on *Messages*

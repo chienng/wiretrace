@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadBodyView, loadSidebarHidden, storeBodyView, storeSidebarHidden } from './viewPrefs';
+import { loadBodyView, loadLayout, loadSidebarHidden, storeBodyView, storeLayout, storeSidebarHidden } from './viewPrefs';
 
 function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -71,5 +71,30 @@ describe('body view choice', () => {
   it('survives a browser that refuses to store', () => {
     expect(() => storeBodyView(refusing, 'text')).not.toThrow();
     expect(() => storeBodyView(null, 'text')).not.toThrow();
+  });
+});
+
+describe('traffic layout choice', () => {
+  const key = 'wiretrace.pane.traffic.layout';
+
+  it('is Tree only when stored as tree', () => {
+    expect(loadLayout(memory({ [key]: 'tree' }))).toBe('tree');
+    for (const raw of ['', 'list', 'TREE', 'structure']) expect(loadLayout(memory({ [key]: raw }))).toBe('list');
+    expect(loadLayout(memory())).toBe('list');
+    expect(loadLayout(null)).toBe('list');
+    expect(loadLayout(refusing)).toBe('list');
+  });
+
+  it('removes the key when set back to List', () => {
+    const s = memory();
+    storeLayout(s, 'tree');
+    expect(s.data.get(key)).toBe('tree');
+    storeLayout(s, 'list');
+    expect(s.data.has(key)).toBe(false);
+  });
+
+  it('survives a browser that refuses to store', () => {
+    expect(() => storeLayout(refusing, 'tree')).not.toThrow();
+    expect(() => storeLayout(null, 'tree')).not.toThrow();
   });
 });
