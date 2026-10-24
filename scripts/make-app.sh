@@ -60,8 +60,11 @@ printf '%s\n' "$ROOT" > "$app/Contents/Resources/wiretrace-root"
 # The bytes only, not a copy: a downloaded folder's quarantine flag must not come along.
 cat "$ROOT/app/Wiretrace.icns" > "$app/Contents/Resources/applet.icns" || not_created "app/Wiretrace.icns unreadable"
 # Without CFBundleIconName, macOS shows CFBundleIconFile (applet.icns), not the default
-# script icon in Assets.car.
-run plutil -remove CFBundleIconName "$plist"
+# script icon in Assets.car. Older macOS templates have no such key, and removing a missing
+# key fails.
+if plutil -extract CFBundleIconName xml1 -o /dev/null "$plist" >/dev/null 2>&1; then
+    run plutil -remove CFBundleIconName "$plist"
+fi
 run plutil -replace CFBundleIdentifier -string "$BUNDLE_ID" "$plist"
 run plutil -replace CFBundleName -string Wiretrace "$plist"
 run plutil -replace CFBundleShortVersionString -string "$VERSION" "$plist"

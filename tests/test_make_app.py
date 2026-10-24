@@ -61,6 +61,26 @@ def test_the_app_shows_the_wiretrace_icon(tmp_path):
     assert missing.returncode != 0
 
 
+def test_an_applet_template_without_an_icon_name_still_builds(tmp_path):
+    # Older macOS: osacompile's template has no CFBundleIconName.
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "osacompile"
+    fake.write_text(f'#!/bin/bash\nset -e\n{shutil.which("osacompile")} "$@"\n'
+                    'while [ "$1" != "-o" ]; do shift; done\n'
+                    'plutil -remove CFBundleIconName "$2/Contents/Info.plist"\n')
+    fake.chmod(0o755)
+    home = tmp_path / "home"
+    home.mkdir()
+    result = subprocess.run([str(SCRIPT)], env={**os.environ, "HOME": str(home), "PATH": f"{bin_dir}:{os.environ['PATH']}"},
+                            capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stderr
+    app = home / "Applications" / "Wiretrace.app"
+    assert plist_value(app, "CFBundleIdentifier") == "com.safemeet.wiretrace"
+    verify = subprocess.run(["codesign", "--verify", "--deep", "--strict", str(app)], capture_output=True, text=True)
+    assert verify.returncode == 0, verify.stderr
+
+
 def test_a_quarantined_download_does_not_pass_its_flag_to_the_app(tmp_path):
     # A copy of the folder, as if it came out of a downloaded .dmg.
     root = tmp_path / "wiretrace"
