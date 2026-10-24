@@ -50,6 +50,9 @@ interface Props {
   testTargetLabel: string;
   onSave: (rule: Rule) => Promise<SaveProblem | null>;
   onDelete: () => void;
+  /** Discards a new rule; `cancelHint` says where it goes back to. */
+  onCancel: () => void;
+  cancelHint: string;
   onRearm: () => void;
   onTest: (rule: Rule) => Promise<RuleTestResult | string>;
 }
@@ -521,6 +524,11 @@ export function RuleEditor(props: Props) {
         <button type="button" className="btn" onClick={runTest} disabled={testing || testTarget === null} title={testTarget ? `${testTarget.method} ${testTarget.path}` : 'No request captured yet'}>
           {testing ? 'Testing…' : testTargetLabel}
         </button>
+        {isNew && (
+          <button type="button" className="btn" onClick={props.onCancel} disabled={busy} title={props.cancelHint}>
+            Cancel
+          </button>
+        )}
         <button type="button" className="btn primary" onClick={save} disabled={busy}>
           {busy ? 'Saving…' : 'Save rule'}
         </button>

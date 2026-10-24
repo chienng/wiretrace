@@ -356,16 +356,45 @@ export function changeParts(c: ChangeEntry): { label: string; target: string; va
 
 export const sideText = (on: string) => REWRITE_SIDES.find((s) => s.id === on)?.label ?? '';
 
-/** A new rule matching a captured request's method, host and path (query left out). */
-export function ruleFromFlow(flow: Pick<FlowSummary, 'method' | 'host' | 'path'>, apiHosts: readonly string[], id: string): Rule {
+export type RequestMatch = Pick<Rule['match'], 'method' | 'host' | 'path'>;
+
+/** A captured request's method, API host ('' off the preset's hosts) and path, query left out. */
+export function requestMatch(flow: Pick<FlowSummary, 'method' | 'host' | 'path'>, apiHosts: readonly string[]): RequestMatch {
   const method = flow.method.toUpperCase();
   const path = flow.path.split('?', 1)[0] || '/';
+  return { method: (METHODS as readonly string[]).includes(method) ? method : 'ANY', host: apiHostFor(flow.host, apiHosts), path: path.slice(0, LIMITS.path) };
+}
+
+/** A new rule matching a captured request's method, host and path (query left out). */
+export function ruleFromFlow(flow: Pick<FlowSummary, 'method' | 'host' | 'path'>, apiHosts: readonly string[], id: string): Rule {
   const rule = emptyRule(id);
+  const match = requestMatch(flow, apiHosts);
+  return { ...rule, name: `${flow.method.toUpperCase()} ${match.path}`.slice(0, LIMITS.name), match: { ...rule.match, ...match } };
+}
+
+/** A rule that holds every request `match` takes at the request (spec 028, slice D). */
+export function breakpointRule(match: RequestMatch, id: string): Rule {
+  const rule = emptyRule(id);
+  const what = match.path === '/*' ? match.host : match.method === 'ANY' ? match.path : `${match.method} ${match.path}`;
   return {
     ...rule,
-    name: `${method} ${path}`.slice(0, LIMITS.name),
-    match: { ...rule.match, method: (METHODS as readonly string[]).includes(method) ? method : 'ANY', host: apiHostFor(flow.host, apiHosts), path: path.slice(0, LIMITS.path) },
+    name: `Breakpoint: ${what}`.slice(0, LIMITS.name),
+    match: { ...rule.match, ...match },
+    action: switchAction(rule.action, 'pause', rule.action.status),
   };
+}
+
+/** The enabled pause rule on exactly `match`, without body text, that Remove breakpoint deletes. */
+export function findBreakpoint(rules: readonly Rule[], match: RequestMatch): Rule | undefined {
+  return rules.find(
+    (r) =>
+      r.enabled &&
+      r.action.type === 'pause' &&
+      r.match.body_contains === '' &&
+      r.match.method === match.method &&
+      r.match.host.toLowerCase() === match.host.toLowerCase() &&
+      r.match.path === match.path,
+  );
 }
 
 function utf8Length(text: string): number {

@@ -1,6 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { tryParseJson } from '../logic/json';
+import { formatJsonText } from '../logic/jsonText';
 import { formatSize } from '../logic/format';
+import { loadBodyView, storeBodyView, type BodyViewChoice } from '../logic/viewPrefs';
+import { browserStorage } from '../storage';
 import type { Body } from '../types';
 
 const MAX_TEXT_CHARS = 300_000;
@@ -111,8 +114,33 @@ function JsonNode({ name, value, depth, last }: { name: string | null; value: un
   );
 }
 
+const VIEWS: { id: BodyViewChoice; label: string }[] = [
+  { id: 'json', label: 'JSON' },
+  { id: 'text', label: 'JSON Text' },
+];
+
+function PlainText({ text }: { text: string }) {
+  return (
+    <>
+      {text.length > MAX_TEXT_CHARS && (
+        <div className="note warn">Showing the first {MAX_TEXT_CHARS.toLocaleString('en-US')} characters.</div>
+      )}
+      <pre className="plain">{text.slice(0, MAX_TEXT_CHARS)}</pre>
+    </>
+  );
+}
+
 export function BodyView({ body, label }: { body: Body; label: string }) {
   const parsed = useMemo(() => (body.text !== null ? tryParseJson(body.text) : null), [body.text]);
+  const [view, setView] = useState(() => loadBodyView(browserStorage()));
+  const jsonText = useMemo(
+    () => (parsed?.ok && view === 'text' && body.text !== null ? formatJsonText(body.text) : null),
+    [parsed, view, body.text],
+  );
+  const choose = (next: BodyViewChoice) => {
+    setView(next);
+    storeBodyView(browserStorage(), next);
+  };
 
   if (body.binary || body.text === null) {
     return <div className="note">Binary {label.toLowerCase()} body, {formatSize(body.size)}. Not shown.</div>;
@@ -125,21 +153,28 @@ export function BodyView({ body, label }: { body: Body; label: string }) {
 
   if (parsed?.ok) {
     return (
-      <div className="code">
-        {truncatedNote}
-        <JsonNode name={null} value={parsed.value} depth={0} last />
-      </div>
+      <>
+        <div className="body-views">
+          <div className="seg" role="group" aria-label={`${label} body view`}>
+            {VIEWS.map((v) => (
+              <button key={v.id} type="button" className={view === v.id ? 'on' : ''} aria-pressed={view === v.id} onClick={() => choose(v.id)}>
+                {v.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="code" key={view}>
+          {truncatedNote}
+          {jsonText !== null ? <PlainText text={jsonText} /> : <JsonNode name={null} value={parsed.value} depth={0} last />}
+        </div>
+      </>
     );
   }
 
-  const text = body.text.length > MAX_TEXT_CHARS ? body.text.slice(0, MAX_TEXT_CHARS) : body.text;
   return (
     <div className="code">
       {truncatedNote}
-      {text.length < body.text.length && (
-        <div className="note warn">Showing the first {MAX_TEXT_CHARS.toLocaleString('en-US')} characters.</div>
-      )}
-      <pre className="plain">{text}</pre>
+      <PlainText text={body.text} />
     </div>
   );
 }

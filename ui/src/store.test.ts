@@ -108,6 +108,43 @@ describe('store', () => {
     s = reducer(reducer(s, { type: 'viewOpened', view: old }), { type: 'message', message: { type: 'state', state: { ...appState, viewing: null } } });
     expect(s.view).toBeNull();
   });
+
+  describe('a replay sent (spec 028, slice E)', () => {
+    const arrives = (s: Store, id: string) => reducer(s, { type: 'message', message: { type: 'flows', flows: [flow({ id, replay_of: 'b' })] } });
+    const original = () => reducer(loaded(), { type: 'ui', patch: { selectedFlowId: 'b' } });
+
+    it('is selected at once when already listed', () => {
+      const s = reducer(original(), { type: 'replaySent', id: 'c', from: 'b' });
+      expect(s.ui.selectedFlowId).toBe('c');
+      expect(s.ui.pendingReplay).toBeNull();
+    });
+
+    it('is selected when it arrives, and other messages before it change nothing', () => {
+      let s = reducer(original(), { type: 'replaySent', id: 'r1', from: 'b' });
+      expect(s.ui.selectedFlowId).toBe('b');
+      s = arrives(s, 'other');
+      expect(s.ui).toMatchObject({ selectedFlowId: 'b', pendingReplay: { id: 'r1', from: 'b' } });
+      s = arrives(s, 'r1');
+      expect(s.ui).toMatchObject({ selectedFlowId: 'r1', pendingReplay: null });
+    });
+
+    it('is not selected when the tester selects another request first', () => {
+      let s = reducer(original(), { type: 'replaySent', id: 'r1', from: 'b' });
+      s = reducer(s, { type: 'ui', patch: { selectedFlowId: 'a' } });
+      expect(s.ui.pendingReplay).toBeNull();
+      expect(arrives(s, 'r1').ui.selectedFlowId).toBe('a');
+      const movedWhileSending = reducer(reducer(original(), { type: 'ui', patch: { selectedFlowId: 'a' } }), { type: 'replaySent', id: 'c', from: 'b' });
+      expect(movedWhileSending.ui).toMatchObject({ selectedFlowId: 'a', pendingReplay: null });
+    });
+
+    it('is listed while Pause is on', () => {
+      let s = reducer(reducer(original(), { type: 'pause' }), { type: 'replaySent', id: 'r1', from: 'b' });
+      expect(s.ui.frozen?.has('r1')).toBe(true);
+      s = arrives(s, 'r1');
+      expect(s.ui.selectedFlowId).toBe('r1');
+      expect(s.ui.frozen?.has('other')).toBe(false);
+    });
+  });
 });
 
 const old = { name: '20261015-080000-myapp', flows: [], logs: { device: [], app: [] }, cutOff: false };

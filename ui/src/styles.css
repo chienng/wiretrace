@@ -196,6 +196,9 @@ button:disabled { cursor: default; opacity: .5; }
 
 /* ---------- main window ---------- */
 .main-body { flex: 1; min-height: 0; display: grid; grid-template-columns: var(--sidebar-w, 220px) minmax(0, 1fr) var(--detail-w, 470px); position: relative; }
+.main-body.no-sidebar { grid-template-columns: minmax(0, 1fr) var(--detail-w, 470px); }
+.side-wrap { display: flex; min-width: 0; min-height: 0; }
+.side-wrap > .sidebar { flex: 1; min-width: 0; }
 
 /* Drag handles sit over the 1 px borders between panes, outside the grid tracks (spec 024). */
 .splitter { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 5; cursor: col-resize; touch-action: none; }
@@ -258,6 +261,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 .traffic { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-right: 1px solid var(--line); }
 .filterbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+.side-toggle { flex: none; width: 30px; height: 30px; padding: 0; justify-content: center; border-radius: 8px; color: var(--muted); font-size: 15px; }
 .search {
   flex: 1; display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
   border: 1px solid var(--line-strong); border-radius: 8px; background: #fff; color: var(--faint); min-width: 0;
@@ -327,6 +331,21 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .c-dev { font: 11.5px var(--mono); color: var(--muted); }
 .c-dev.mac { font-family: -apple-system, sans-serif; font-size: 12px; }
+/* Tree (spec 028): the depth indent is inline padding; leaves are List rows without Time and
+   Device, dropping Size and Duration at the List's widths. */
+.frow.tnode { display: flex; gap: 6px; }
+.tnode .tw { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
+.tnode .tn { min-width: 0; font-family: var(--mono); font-size: 12px; font-weight: 500; }
+.tnode .tc { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 76px 68px 100px; }
+.frow.cur:not(.sel) { background: var(--blue-soft); }
+@container (max-width: 759px) {
+  .frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 76px 100px; }
+}
+@container (max-width: 639px) {
+  .frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 100px; }
+}
+.layout-seg { flex: none; margin-left: auto; }
 
 .vlist { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; outline: none; position: relative; }
 .empty { padding: 28px 16px; text-align: center; color: var(--faint); position: absolute; left: 0; right: 0; pointer-events: none; }
@@ -351,6 +370,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .detail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .detail-body .scroll { overflow: auto; flex: 1; }
 .codehead { padding: 8px 14px 0; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; background: #fbfbfc; }
+.body-views { flex: none; padding: 8px 14px 0; background: #fbfbfc; }
 .code { flex: 1; min-height: 0; margin: 0; padding: 12px 14px; font: 12px/1.6 var(--mono); background: #fbfbfc; overflow: auto; }
 .code .k { color: #9b2393; }
 .code .s { color: #c41a16; overflow-wrap: anywhere; white-space: pre-wrap; }
@@ -549,6 +569,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 }
 .sheet.wide { width: 860px; padding: 0; }
 .sheet.wide > h3 { padding: 18px 26px 0; }
+/* A wide sheet has no padding of its own: its lead and its content pad themselves. */
+.sheet.wide > .lead { padding: 0 26px; }
 .sheet h3 { margin: 0 0 4px; font-size: 16px; font-weight: 600; }
 .sheet .lead { color: var(--muted); margin: 0 0 16px; font-size: 12.5px; }
 .sheet-foot { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }
@@ -802,6 +824,9 @@ ul.plain li { margin-bottom: 5px; }
 .tag.paused { color: #fff; background: var(--orange); }
 .tag.edited { color: var(--orange); background: var(--orange-soft); }
 .frow.paused { background: var(--orange-soft); }
+/* A replay's stripe (spec 028): an inset shadow, so it adds no width and shows over any background. */
+.frow.replay { box-shadow: inset 3px 0 0 var(--blue); }
+.frow.replay.sel { box-shadow: inset 3px 0 0 rgba(255,255,255,.6); }
 .frow.paused .c-num.late { color: var(--orange); font-weight: 600; }
 .paused-chip { display: inline-flex; align-items: center; gap: 6px; padding: 2px 3px 2px 9px; border-radius: 8px; background: #fff; color: var(--orange); font-size: 12px; font-weight: 600; }
 .bp { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -853,6 +878,7 @@ ul.plain li { margin-bottom: 5px; }
 .pathin { display: flex; align-items: center; }
 .pathin .pre { height: 30px; display: flex; align-items: center; padding: 0 8px; border: 1px solid var(--line-strong); border-right: 0; border-radius: 7px 0 0 7px; background: #f5f5f7; color: var(--muted); font: 12px var(--mono); white-space: nowrap; }
 .pathin .textin { border-radius: 0 7px 7px 0; height: 30px; flex: 1; min-width: 0; }
+.ml-form { padding: 2px 26px 18px; }
 .ml-row { display: flex; gap: 14px; margin-top: 12px; align-items: flex-end; }
 .ml-type { color: var(--muted); font-size: 12px; padding-bottom: 6px; }
 .sheet .ml-body { height: 220px; margin-top: 4px; }

@@ -5,6 +5,23 @@ app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac 
 
 Current version: **0.10.2**.
 
+## At a glance
+
+- **Traffic and logs on one screen.** Each request your app makes, next to the app's own log
+  lines, linked by request ID, with crashes folded and the device's status on a timeline.
+- **At home if you come from Charles.** Group requests by host and path with **List** |
+  **Tree**, hide the sidebar with **«** when you need the room, read a JSON body as a foldable
+  tree or as **JSON Text** you can select and search with ⌘F, and right-click a request →
+  **Breakpoint** to hold the next one and edit it.
+- **Change what the app receives.** Mock a response, make a request fail or slow, drop the
+  connection, rewrite headers and JSON fields, or send it to another server. No backend change.
+- **Replay and compare.** Send a request again: the replay is selected, scrolled into view and
+  marked with a blue stripe. Compare two requests side by side: status, headers, and the JSON
+  keys that changed.
+- **Bug tickets in a minute.** A masked HAR, the logs around the failure and a title and
+  description ready to paste into YouTrack or Jira. Nothing is sent: you copy and download.
+- **No admin account.** Download, drag to your home folder, double-click **install**.
+
 **Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
 the steps below do not work for them. Follow the guide of your version instead:
 
@@ -204,7 +221,7 @@ illustrative. The mockups of every screen, with their source and notes, are in
 
 | Screen | Status |
 |---|---|
-| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset menu (layers icon) lists the presets: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). Next to it, the device menu (phone icon): another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
+| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. **List** \| **Tree** groups requests by host and path folder; **«** hides the sidebar; a JSON body reads as a tree or as **JSON Text**; right-click → **Breakpoint** holds the next matching request; a replay is selected once listed and has a blue stripe. The title bar's preset menu (layers icon) lists the presets: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). Next to it, the device menu (phone icon): another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
@@ -257,7 +274,8 @@ illustrative. The mockups of every screen, with their source and notes, are in
 - **Rules.** Per request: answer with a mock or a status code, wait a number of
   milliseconds, drop the connection, pause at a breakpoint to edit the request or response,
   rewrite headers and JSON fields, or send it to another server (Map remote), always, once, or
-  every Nth call. *Map local…* saves a response as a mock file and a rule. Edited in the
+  every Nth call. *Map local…* saves a response as a mock file and a rule, and right-click →
+  *Breakpoint* adds a pause rule for that request in one click. Edited in the
   Wiretrace window's *Rules* view and saved in `rules/<preset>.json`. The older
   `qa_fault_*` options still work in mitmweb.
 - **Device logs.** The app's own process log, collected next to the traffic: `adb logcat`
@@ -277,7 +295,9 @@ illustrative. The mockups of every screen, with their source and notes, are in
   Simulator screenshots. You copy and download; nothing is sent anywhere.
 - **Wiretrace window (preview).** `--ui wiretrace` opens Wiretrace's own window, with traffic
   and logs on one screen, a log timeline with the device's status, earlier sessions, search in
-  headers and bodies, the messages of a WebSocket connection, replay and compare, the setup wizard and the Rules view. It also lists
+  headers and bodies, the messages of a WebSocket connection, replay and compare, the setup wizard and the Rules view.
+  Requests show as a flat list or as a tree of hosts and path folders, a JSON body as a
+  foldable tree or as indented text, and the sidebar folds away with **«**. It also lists
   the connections it does not decrypt, and decrypts one more host on request. It is only
   reachable from the same Mac, with a new
   token at every start. While it runs, the menu bar shows that Wiretrace is recording and how

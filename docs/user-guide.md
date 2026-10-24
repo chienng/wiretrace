@@ -898,6 +898,10 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   name to use it again, or *Rename* and *Delete* next to it. Saved filters belong to the
   preset and are kept by your browser, not in a file: another browser, a private window or
   clearing the browser's data starts with none.
+  **«**, at the left end of the bar above the list, hides the sidebar so the list and the
+  detail panel get its width; **»** brings it back at the width it had. The filters you chose
+  in it stay on while it is hidden, and their chips stay above the list. Your browser
+  remembers the choice.
 - **Search box.** Plain text matches the method, the URL and the status. From three
   characters, it also looks in header names and values and in the request and response
   bodies, ignoring case; those matches appear a moment later. Text that starts with `~` or `!`
@@ -912,9 +916,22 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   updating while the connection is open; once it closes, the duration is how long it was open.
   A row can carry the badges *MOCK*, *FAULT*, *SLOW*, *REPLAY*, *PAUSED*,
   *EDITED*, *REWRITTEN* and *MAPPED* (see *Rules*). Right-click a row for *Map local…*, *Copy as
-  mock*, *New rule from this request*, *Replay* and *Copy cURL*. The log receiver
+  mock*, *New rule from this request*, *Breakpoint*, *Replay* and *Copy cURL*. *Breakpoint*
+  adds, at the top of the rules, a rule that holds that method, host and path (the query does
+  not count) at the request; the next one waits, orange and *PAUSED*, until you let it go. In
+  Rules you can switch it to the response or both. When that breakpoint exists the item reads
+  *Remove breakpoint* and deletes it. The log receiver
   `qa-logs.internal` is not listed. The window keeps the newest 10,000 requests; older ones
   are only in `flows.mitm`.
+  **List** | **Tree**, at the right end of the filter bar, shows the same requests grouped by
+  host and then by folder of the path: `/v1/users/42` is the row `42` under `v1` › `users`.
+  Host and folder rows show how many requests are below them; click one to open or close it,
+  or right-click it for *Breakpoint on this host* or *on this folder* (any method, every path
+  below it), *Expand all below*, *Collapse all below* and, on a host, *Show only this host*.
+  New hosts start open and new folders closed. ↑ and ↓ move through the rows,
+  → opens a row or goes into it, ← closes it or goes up, Enter or Space opens or closes it;
+  moving onto a request selects it. The tree does not scroll to new requests. Your browser
+  remembers the choice.
 - **Detail panel.** Click a row. The tabs are *Request*, *Response* (JSON is shown folded and
   easy to read, a binary body only as a size), *Headers*, *Timing* and *Logs* (the log lines
   that carry this request's ID, with their number). A WebSocket row opens on *Messages*
@@ -927,19 +944,27 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   the list, and the count reads how many match, such as *12 of 128*. The line above the list
   says *Open* or who closed the connection, with the code and the reason. The same tab works
   on a session opened from *Previous sessions*. A very busy connection keeps the newest
-  messages and loads older ones as you scroll up. *Copy cURL* copies the request as a `curl`
+  messages and loads older ones as you scroll up. Above a JSON body, **JSON** | **JSON Text**
+  switches between the foldable tree and the whole body as indented text, which you can select
+  in one piece and search with ⌘F, folded parts included. Numbers and string escapes are shown
+  exactly as sent (a 20-digit ID keeps every digit). The choice applies to every body
+  (*Request*, *Response*, a breakpoint's *Original*, a WebSocket message) and your browser
+  remembers it. *Copy cURL* copies the request as a `curl`
   command. *Copy as mock* copies the response body and shows the file to create under
   `mocks/<preset>/` (see *Mock a response*). *Map local…* writes that file for you (see *Map
   local* under *Rules*). A request changed by a Rewrite or Map remote rule has a *Changes* tab
   listing each change, applied or skipped and why; a mapped request's header says *Sent to*
   and the server it went to, while *Host* stays the one the app asked for.
   *Replay* sends the request to the backend again; it appears as a new row with the *REPLAY*
-  badge and a link back to the original. Any method other than GET, HEAD and OPTIONS asks you
+  badge, a blue stripe at its left edge and a link back to the original. As soon as it is
+  listed, the window selects it and scrolls to it (also while Pause is on), unless you have
+  selected another request in the meantime. Any method other than GET, HEAD and OPTIONS asks you
   to confirm first, because the backend does the action again (another order, another
   payment). *Compare…* shows this request next to another one, by default the previous request
   with the same method and path: status and headers side by side, and the body as a list of
   changed JSON keys, or line by line when it is not JSON. *New rule* opens the Rules view with
-  a rule for this request's method, host and path. *Report* opens *Report bug* for this
+  a rule for this request's method, host and path; *Cancel*, next to *Save rule*, drops that
+  rule and brings you back to the request in Traffic. *Report* opens *Report bug* for this
   request.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter

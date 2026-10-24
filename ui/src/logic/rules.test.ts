@@ -7,18 +7,21 @@ import {
   switchScheme,
   targetUrl,
   applySummary,
+  breakpointRule,
   changeGroups,
   changeGroupTitle,
   changeParts,
   emptyRule,
   exportJson,
   filterRules,
+  findBreakpoint,
   mergeImport,
   newOp,
   newRuleId,
   opOfKind,
   parseImport,
   parsePath,
+  requestMatch,
   ruleFromFlow,
   ruleKind,
   ruleSummary,
@@ -281,5 +284,35 @@ describe('Map remote rules (spec 022, slice G)', () => {
     expect('target' in switchAction(remote().action, 'status', 500)).toBe(false);
     expect(ruleKind(remote())).toBe('Changes');
     expect(ruleSummary(remote())).toBe('Map remote → staging-api.example.com · always');
+  });
+});
+
+describe('breakpoints (spec 028, slice D)', () => {
+  const request = requestMatch({ method: 'get', host: 'v2.api.example.com', path: '/api/v1/users/42?expand=1' }, HOSTS);
+
+  it('matches a request like New rule from this request does, query left out', () => {
+    expect(request).toEqual({ method: 'GET', host: 'api.example.com', path: '/api/v1/users/42' });
+    expect(requestMatch({ method: 'GET', host: 'other.org', path: '/x' }, HOSTS).host).toBe('');
+  });
+
+  it('pauses at the request only, and names what it holds', () => {
+    const r = breakpointRule(request, 'bp00001');
+    expect(r).toMatchObject({ id: 'bp00001', name: 'Breakpoint: GET /api/v1/users/42', enabled: true, apply: { mode: 'always', n: 0 } });
+    expect(r.match).toEqual({ ...request, body_contains: '' });
+    expect(r.action).toMatchObject({ type: 'pause', pause_at: 'request', delay_ms: 0 });
+    expect(validateRule(r, HOSTS, null)).toEqual({});
+    expect(breakpointRule({ method: 'ANY', host: 'api.example.com', path: '/*' }, 'bp00002').name).toBe('Breakpoint: api.example.com');
+    expect(breakpointRule({ method: 'ANY', host: 'api.example.com', path: '/api/v1/*' }, 'bp00003').name).toBe('Breakpoint: /api/v1/*');
+  });
+
+  it('finds only an enabled pause rule on exactly that method, host and path, without body text', () => {
+    const bp = breakpointRule(request, 'bp00001');
+    expect(findBreakpoint([rule(), bp], request)).toBe(bp);
+    expect(findBreakpoint([{ ...bp, match: { ...bp.match, host: 'API.example.com' } }], request)).toBeDefined();
+    expect(findBreakpoint([{ ...bp, enabled: false }], request)).toBeUndefined();
+    expect(findBreakpoint([{ ...bp, match: { ...bp.match, body_contains: 'x' } }], request)).toBeUndefined();
+    expect(findBreakpoint([{ ...bp, match: { ...bp.match, method: 'ANY' } }], request)).toBeUndefined();
+    expect(findBreakpoint([{ ...bp, match: { ...bp.match, path: '/api/v1/users/*' } }], request)).toBeUndefined();
+    expect(findBreakpoint([{ ...bp, action: { ...bp.action, type: 'delay', delay_ms: 100 } }], request)).toBeUndefined();
   });
 });
