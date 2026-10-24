@@ -101,9 +101,9 @@ the project `default`, which comes with Wiretrace, on an iPhone. The Wiretrace w
 in your browser, and the **Wiretrace** menu (the W icon at the top right of the screen)
 appears.
 
-Change either from the window's title bar: *Preset: …* switches to
-[a preset you created](#your-own-preset-optional), and the device menu (*iPhone · Proxy +
-WireGuard*) switches to an Android phone, the iOS Simulator or Android emulator on this Mac,
+Change either from the window's title bar: the preset menu (layers icon, *default*) switches to
+[a preset you created](#your-own-preset-optional), and the device menu (phone icon, *iPhone ·
+Proxy + WireGuard*) switches to an Android phone, the iOS Simulator or Android emulator on this Mac,
 or another device with a Wi-Fi proxy. Each switch saves the session and starts a new one.
 Every device accepts both ways to connect: the phone's Wi-Fi proxy (this Mac's IP address,
 port 8889), or the WireGuard tunnel for an app that ignores the proxy. The setup wizard
@@ -190,13 +190,13 @@ In the file that opens, change the lines marked `CHANGE`, then save (Cmd+S):
 | `android_package:` | for Android, the app's package name, such as `com.mycompany.myapp` |
 | `ios_process:` | for iOS, the app's process name, such as `MyApp` |
 
-Then start with `--preset staging`, or choose `staging` from *Preset: …* in the window. If
+Then start with `--preset staging`, or choose `staging` from the preset menu (layers icon) in the window. If
 `./wiretrace start` says *name is 'example', but must equal the file name*, the file was not
 changed or not saved.
 
 ## Design
 
-Screens 1 to 4 and 5a below are **screenshots of Wiretrace 0.10.0** with the sample data in
+Screens 1 to 4 and 5a below are **screenshots of Wiretrace 0.10.1** with the sample data in
 [`ui/dev/fixtures/`](ui/dev/fixtures/); every host, token and device in them is fake.
 Screens 5 and 6 are **design mockups**: they show where Wiretrace is going, and their data is
 illustrative. The mockups of every screen, with their source and notes, are in
@@ -204,36 +204,36 @@ illustrative. The mockups of every screen, with their source and notes, are in
 
 | Screen | Status |
 |---|---|
-| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset label is a menu: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). The target pill is a device menu too: another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
+| 1. Main window | Built: previous sessions (read-only), saved filters, search in headers and bodies, filter chips, replay, compare. The title bar's preset menu (layers icon) lists the presets: another preset saves this session and starts a new one, and the phone stays connected; *Edit presets…* and *New preset…* open the preset form (screen 7). Next to it, the device menu (phone icon): another device saves this session and starts one for that device, with the same preset and mode. Differences: saved filters are kept by the browser, per preset, not on disk; replaying anything but GET, HEAD and OPTIONS asks for confirmation. |
 | 2. Device and app logs | Built: device status pill and picker, timeline, crash folding, tag and linked-request filters, line detail. Difference: the picker shows the other log sources and the `--target` to use; it does not switch the collector while Wiretrace runs. |
 | 3. Device setup wizard | Built: five steps for iPhone, Android, iOS Simulator and Android emulator, each turning green when Wiretrace sees it work. |
 | 4. Mock and fault rules editor | Built: rule list, editor, test against a request, live counters, import and export. Differences: *Once per app launch* is *Once* (until *Re-arm*); rules are saved in `rules/<preset>.json`, not in the preset; the `qa_fault_*` options stay for mitmweb and `--no-ui`. |
 | 5. Send a bug report to YouTrack or Jira | Built: form to copy into YouTrack or Jira (screen 5a): title and description in Markdown or Jira wiki, masked HAR and log downloads, Android and Simulator screenshots. Not built: sending directly, signing in to the tracker, iPhone screenshots. |
 | 6. Menu-bar app | Built: status item while `./wiretrace start --ui wiretrace` runs (`--no-menu-bar` turns it off). Differences: no *Pause recording* (the window's Pause only freezes its list); *Show last error* instead of *Report last error*; the device line is target, mode and model. |
 
-**1. Main window** (screenshot, 0.10.0)
+**1. Main window** (screenshot, 0.10.1)
 
-![Wiretrace 0.10.0 main window with sample data](docs/images/traffic.png)
+![Wiretrace 0.10.1 main window with sample data](docs/images/traffic.png)
 
-**2. Device and app logs** (screenshot, 0.10.0)
+**2. Device and app logs** (screenshot, 0.10.1)
 
-![Wiretrace 0.10.0 device logs with a crash line selected](docs/images/logs.png)
+![Wiretrace 0.10.1 device logs with a crash line selected](docs/images/logs.png)
 
-**3. Device setup wizard** (screenshot, 0.10.0)
+**3. Device setup wizard** (screenshot, 0.10.1)
 
-![Wiretrace 0.10.0 setup wizard, connect step for an iPhone over the Wi-Fi proxy](docs/images/setup.png)
+![Wiretrace 0.10.1 setup wizard, connect step for an iPhone over the Wi-Fi proxy](docs/images/setup.png)
 
-**4. Mock and fault rules editor** (screenshot, 0.10.0)
+**4. Mock and fault rules editor** (screenshot, 0.10.1)
 
-![Wiretrace 0.10.0 rules view with a Rewrite rule open](docs/images/rules.png)
+![Wiretrace 0.10.1 rules view with a Rewrite rule open](docs/images/rules.png)
 
 **5. Bug report to YouTrack or Jira** (design mockup; sending directly is not built yet)
 
 ![Design mockup: bug report to YouTrack or Jira](mockups/screens/05-bug-report.png)
 
-**5a. Bug report form, copy and download** (screenshot, 0.10.0)
+**5a. Bug report form, copy and download** (screenshot, 0.10.1)
 
-![Wiretrace 0.10.0 bug report form to copy into YouTrack or Jira](docs/images/bug-report.png)
+![Wiretrace 0.10.1 bug report form to copy into YouTrack or Jira](docs/images/bug-report.png)
 
 **6. Menu-bar app** (design mockup)
 

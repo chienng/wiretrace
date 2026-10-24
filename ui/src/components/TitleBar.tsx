@@ -1,5 +1,5 @@
 import { api, ApiError } from '../api';
-import markUrl from '../assets/mark.svg';
+import markUrl from '../assets/mark-on-blue.svg';
 import { APP_STOP_TIP } from '../logic/appHint';
 import { devicePill } from '../logic/device';
 import { deviceLabel, deviceLogsLine, deviceMenuState, modeLabel } from '../logic/devices';
@@ -12,6 +12,7 @@ import { useNow } from '../hooks';
 import { useData, useDispatch, useStore } from '../store';
 import type { AppState, DeviceInfo, PresetInfo } from '../types';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from './Icon';
 import { PresetSheet } from './PresetSheet';
 import { SwitchDeviceDialog } from './SwitchDeviceDialog';
 import { SwitchPresetDialog } from './SwitchPresetDialog';
@@ -77,14 +78,16 @@ function PresetMenu({ current, target, viewing }: { current: string; target: str
     <div className="picker" ref={box}>
       <button
         type="button"
-        className="static-select picker-btn"
+        className="tb-pick"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Preset: ${current}`}
         disabled={menu.disabled}
-        title={menu.title}
+        title={`Preset: ${current}\n${menu.title}`}
         onClick={() => setOpen(!open)}
       >
-        Preset: {current}
+        <Icon name="preset" />
+        {current}
         <span className="caret">▾</span>
       </button>
       {open && (
@@ -173,13 +176,15 @@ function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; 
     <div className="picker" ref={box}>
       <button
         type="button"
-        className={`pill ${seen ? 'ok' : 'wait'} picker-btn`}
+        className="tb-pick"
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-label={`Device: ${deviceLabel(state.target)}, ${modeLabel(state.mode)}`}
         disabled={menu.disabled}
         title={deviceMenuTitle(menu.title, state, viewing)}
         onClick={() => setOpen(!open)}
       >
+        <Icon name="phone" className={seen ? 'seen' : undefined} />
         {deviceLabel(state.target)} · {modeLabel(state.mode)}
         <span className="caret">▾</span>
       </button>
@@ -219,17 +224,26 @@ function DeviceMenu({ state, seen, viewing }: { state: AppState; seen: boolean; 
 function Recording({ startedAt, reconnecting, paused, fromApp }: { startedAt: number; reconnecting: boolean; paused: boolean; fromApp: boolean }) {
   const now = useNow(1000);
   const pill = recordingPill(reconnecting, paused);
-  if (pill === 'reconnecting') return <span className="pill wait">Reconnecting…</span>;
+  if (pill === 'reconnecting') {
+    return (
+      <span className="rec wait">
+        <span className="dot" />
+        Reconnecting…
+      </span>
+    );
+  }
   if (pill === 'paused') {
     return (
-      <span className="pill wait" title={PAUSED_TIP}>
+      <span className="rec wait" title={PAUSED_TIP}>
+        <span className="dot" />
         {PAUSED_LABEL}
       </span>
     );
   }
   return (
-    <span className="rec" title={fromApp ? APP_STOP_TIP : undefined}>
-      Recording · {formatElapsed(now / 1000 - startedAt)}
+    <span className="rec live" title={fromApp ? APP_STOP_TIP : undefined}>
+      <span className="dot" />
+      Recording <span className="t">{formatElapsed(now / 1000 - startedAt)}</span>
     </span>
   );
 }
@@ -277,12 +291,16 @@ export function TitleBar({ newCount }: Props) {
   const seen = !!appState && (appState.flow_count > 0 || flows.length > 0);
   const pill = appState ? devicePill(appState) : null;
   const version = formatVersion(appState?.version);
+  const showPause = ui.view === 'traffic' && !viewing;
+  const showClear = ui.view !== 'rules' && !viewing;
+  const resumeLabel = newCount > 0 ? `Resume, ${newCount} new ${newCount === 1 ? 'request' : 'requests'}` : 'Resume';
+  const rulesTip = offWhileViewing ?? (rulesOn > 0 ? `${rulesOn} ${rulesOn === 1 ? 'rule' : 'rules'} on` : undefined);
 
   return (
     <header className="titlebar">
       <div className="tb-group">
         <span className="title">
-          <img className="mark" src={markUrl} alt="" width={36} height={36} />
+          <img className="mark" src={markUrl} alt="" width={34} height={34} />
           <span className="name">
             Wiretrace
             {/* Always rendered, so the name does not move up once /api/state arrives. */}
@@ -291,7 +309,7 @@ export function TitleBar({ newCount }: Props) {
             </span>
           </span>
         </span>
-        <div className="seg sm" role="tablist" aria-label="View">
+        <div className="tb-tabs" role="tablist" aria-label="View">
           <button type="button" role="tab" aria-selected={ui.view === 'traffic'} className={ui.view === 'traffic' ? 'on' : ''} onClick={() => patch({ view: 'traffic' })}>
             Traffic
           </button>
@@ -307,49 +325,69 @@ export function TitleBar({ newCount }: Props) {
             fromApp={appState.from_app}
           />
         )}
-        {ui.view === 'traffic' && !viewing && (
-          <>
-            <button
-              type="button"
-              className={`btn small${paused ? ' toggled' : ''}`}
-              onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })}
-              aria-pressed={paused}
-            >
-              {paused ? `Resume${newCount > 0 ? ` · ${newCount} new` : ''}` : 'Pause'}
-            </button>
-          </>
-        )}
-        {ui.view !== 'rules' && !viewing && (
-          <button type="button" className="btn small" onClick={() => dispatch({ type: 'clear' })} title="Hide what is listed now">
-            Clear
-          </button>
+        {(showPause || showClear) && (
+          <span className="tb-join">
+            {showPause && (
+              <button
+                type="button"
+                className={`tb-btn${paused && newCount > 0 ? '' : ' icon'}${paused ? ' toggled' : ''}`}
+                onClick={() => dispatch({ type: paused ? 'resume' : 'pause' })}
+                aria-pressed={paused}
+                aria-label={paused ? resumeLabel : 'Pause'}
+                title={paused ? 'Resume the list' : 'Pause the list'}
+              >
+                <Icon name={paused ? 'play' : 'pause'} />
+                {paused && newCount > 0 && <span className="new">{newCount} new</span>}
+              </button>
+            )}
+            {showClear && (
+              <button
+                type="button"
+                className="tb-btn icon"
+                onClick={() => dispatch({ type: 'clear' })}
+                aria-label="Clear"
+                title="Clear: hide what is listed now"
+              >
+                <Icon name="clear" />
+              </button>
+            )}
+          </span>
         )}
         {(appState?.paused_count ?? 0) > 0 && <PausedChip count={appState?.paused_count ?? 0} />}
       </div>
       <div className="tb-group end">
         {appState && pill && (
-          <>
+          <div className="tb-session">
             <PresetMenu current={appState.preset} target={appState.target} viewing={viewing} />
             <DeviceMenu state={appState} seen={seen} viewing={viewing} />
-            <span className={`pill ${pill.tone}`} title={pill.title}>
+            <span className={`tb-status ${pill.tone}`} title={pill.title}>
               {pill.text}
             </span>
-          </>
+          </div>
         )}
         <button
           type="button"
-          className={`btn${ui.view === 'rules' ? ' toggled' : ''}`}
+          className={`tb-btn${ui.view === 'rules' ? ' toggled' : ''}`}
           aria-pressed={ui.view === 'rules'}
           disabled={!!viewing}
-          title={offWhileViewing}
+          title={rulesTip}
           onClick={() => patch({ view: ui.view === 'rules' ? 'traffic' : 'rules' })}
         >
-          Rules{rulesOn > 0 && <span className="count">{rulesOn} active</span>}
+          <Icon name="rules" />
+          Rules
+          {rulesOn > 0 && (
+            <>
+              {' '}
+              <span className="count">{rulesOn}</span>
+            </>
+          )}
         </button>
-        <button type="button" className="btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
+        <button type="button" className="tb-btn" disabled={!!viewing} title={offWhileViewing} onClick={() => patch({ dialog: 'setup' })}>
+          <Icon name="setup" />
           Setup
         </button>
-        <button type="button" className="btn primary" onClick={() => dispatch({ type: 'openReport' })}>
+        <button type="button" className="tb-btn" onClick={() => dispatch({ type: 'openReport' })}>
+          <Icon name="bug" />
           Report bug
         </button>
       </div>
