@@ -217,7 +217,7 @@ A preset tells Wiretrace which API hosts to decrypt: only the hosts under its `a
 are decrypted. It is one file per project and environment in `presets/` of the data folder
 (see *Your data folder*). Wiretrace comes with the `default` preset (`presets/default.yaml`), so you can skip this step
 and start with `--preset default`. With `--ui wiretrace` you can also do this in the window:
-**Preset → Edit presets…** to put your app's hosts into `default`, or **New preset…** (see
+the preset menu (layers icon) → **Edit presets…** to put your app's hosts into `default`, or **New preset…** (see
 *Editing and creating presets* under the Wiretrace window). In Terminal, start from the
 example:
 

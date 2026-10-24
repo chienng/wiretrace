@@ -172,7 +172,7 @@ so an update never touches them; `./wiretrace data --open` shows it in Finder, a
 folder** in the **Wiretrace** menu does too. Upgrading from 0.9.1 or older: `./install` takes
 them from the old `~/wiretrace` folder by itself; for a folder you moved aside, run
 `./wiretrace import-data ~/wiretrace-old`. In the
-Wiretrace window, **Preset → Edit presets…** changes its hosts and **New preset…** creates
+Wiretrace window, the preset menu (layers icon) → **Edit presets…** changes its hosts and **New preset…** creates
 another. Or, in Terminal, for another project or environment:
 
 ```bash
