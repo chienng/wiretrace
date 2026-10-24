@@ -20,7 +20,9 @@ local*) or send requests to another server (*Map remote*); and a data folder,
 `~/Library/Application Support/Wiretrace`, for your presets, rules, mocks and sessions, so an
 update is unpack and `./install` (*Your data folder*, Part 1). New in 0.10.1: the detail panel
 can be dragged much wider (the list may shrink to 380 px), and the log strip under Traffic can
-be hidden (*Pane widths* and *Logs*, under *Wiretrace window*). Resizable panes and the
+be hidden (*Pane widths* and *Logs*, under *Wiretrace window*); and a blue title bar that fits
+one row, with icon buttons for Pause and Clear and the preset, device and device-logs status in
+one box (*Title bar*, under *Wiretrace window*). Resizable panes and the
 *Messages* tab for WebSocket rows came with 0.10.0 (*Detail panel*).
 
 **Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
