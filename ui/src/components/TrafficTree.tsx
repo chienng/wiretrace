@@ -12,7 +12,7 @@ import { VirtualList } from './VirtualList';
 const PAD = 8;
 const INDENT = 16;
 /** A leaf's method lines up with its parent's name, past the fold triangle. */
-const TOGGLE = 16;
+const TOGGLE = 22;
 
 interface RowProps {
   row: VisibleRow;
@@ -35,7 +35,9 @@ const TreeRow = memo(function TreeRow({ row, cursor, selected, onClick, onMenu }
     return (
       <div className={`frow tnode${cur}`} style={{ height: TRAFFIC_ROW_HEIGHT, paddingLeft: PAD + depth * INDENT }} aria-selected={false} {...common}>
         <span className="tw" aria-hidden="true">
-          {row.open ? '▾' : '▸'}
+          <svg width="12" height="12" viewBox="0 0 16 16">
+            <path d={row.open ? 'M3 6l5 5 5-5' : 'M6 3l5 5-5 5'} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </span>
         <span className="tn" title={node.name}>
           {node.name}
