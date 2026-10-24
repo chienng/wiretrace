@@ -40,6 +40,19 @@ describe('TrafficTree', () => {
     expect(rows[5]).toMatch(/^[^"]* tleaf".*>logo\.png</);
   });
 
+  it('draws the fold arrow as a 12 px chevron, down when open and right when closed', () => {
+    const rows = rowsOf(null);
+    expect(rows[0]).toMatch(/<span class="tw"[^>]*><svg width="12" height="12"[^>]*><path d="M3 6l5 5 5-5"/);
+    expect(rows[1]).toMatch(/<span class="tw"[^>]*><svg width="12" height="12"[^>]*><path d="M6 3l5 5-5 5"/);
+    expect(rows.join('')).not.toMatch(/[▸▾]/);
+  });
+
+  it('lines a leaf up with the name of its parent, past the fold arrow', () => {
+    const rows = rowsOf(null);
+    expect(rows[0]).toContain('padding-left:8px');
+    expect(rows[2]).toContain('padding-left:46px');
+  });
+
   it('marks a replay leaf, and no other row', () => {
     const marked = rowsOf(null).filter((r) => /^[^"]*\breplay\b/.test(r));
     expect(marked).toHaveLength(1);

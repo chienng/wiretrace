@@ -334,7 +334,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 /* Tree (spec 028): the depth indent is inline padding; leaves are List rows without Time and
    Device, dropping Size and Duration at the List's widths. */
 .frow.tnode { display: flex; gap: 6px; }
-.tnode .tw { flex: none; width: 10px; color: var(--muted); font-size: 10px; }
+.tnode .tw { flex: none; display: flex; align-items: center; justify-content: center; width: 16px; color: var(--muted); }
+.tnode:hover .tw { color: var(--text); }
 .tnode .tn { min-width: 0; font-family: var(--mono); font-size: 12px; font-weight: 500; }
 .tnode .tc { flex: none; margin-left: auto; color: var(--muted); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .frow.tleaf { grid-template-columns: 54px 56px minmax(80px, 1fr) 76px 68px 100px; }
