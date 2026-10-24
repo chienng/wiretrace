@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadSidebarHidden, storeSidebarHidden } from './viewPrefs';
+import { loadBodyView, loadSidebarHidden, storeBodyView, storeSidebarHidden } from './viewPrefs';
 
 function memory(initial: Record<string, string> = {}) {
   const data = new Map(Object.entries(initial));
@@ -46,5 +46,30 @@ describe('sidebar choice', () => {
   it('survives a browser that refuses to store', () => {
     expect(() => storeSidebarHidden(refusing, true)).not.toThrow();
     expect(() => storeSidebarHidden(null, true)).not.toThrow();
+  });
+});
+
+describe('body view choice', () => {
+  const key = 'wiretrace.body.view';
+
+  it('is JSON Text only when stored as text', () => {
+    expect(loadBodyView(memory({ [key]: 'text' }))).toBe('text');
+    for (const raw of ['', 'json', 'TEXT', 'raw']) expect(loadBodyView(memory({ [key]: raw }))).toBe('json');
+    expect(loadBodyView(memory())).toBe('json');
+    expect(loadBodyView(null)).toBe('json');
+    expect(loadBodyView(refusing)).toBe('json');
+  });
+
+  it('removes the key when set back to JSON', () => {
+    const s = memory();
+    storeBodyView(s, 'text');
+    expect(s.data.get(key)).toBe('text');
+    storeBodyView(s, 'json');
+    expect(s.data.has(key)).toBe(false);
+  });
+
+  it('survives a browser that refuses to store', () => {
+    expect(() => storeBodyView(refusing, 'text')).not.toThrow();
+    expect(() => storeBodyView(null, 'text')).not.toThrow();
   });
 });

@@ -931,7 +931,12 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   the list, and the count reads how many match, such as *12 of 128*. The line above the list
   says *Open* or who closed the connection, with the code and the reason. The same tab works
   on a session opened from *Previous sessions*. A very busy connection keeps the newest
-  messages and loads older ones as you scroll up. *Copy cURL* copies the request as a `curl`
+  messages and loads older ones as you scroll up. Above a JSON body, **JSON** | **JSON Text**
+  switches between the foldable tree and the whole body as indented text, which you can select
+  in one piece and search with ⌘F, folded parts included. Numbers and string escapes are shown
+  exactly as sent (a 20-digit ID keeps every digit). The choice applies to every body
+  (*Request*, *Response*, a breakpoint's *Original*, a WebSocket message) and your browser
+  remembers it. *Copy cURL* copies the request as a `curl`
   command. *Copy as mock* copies the response body and shows the file to create under
   `mocks/<preset>/` (see *Mock a response*). *Map local…* writes that file for you (see *Map
   local* under *Rules*). A request changed by a Rewrite or Map remote rule has a *Changes* tab

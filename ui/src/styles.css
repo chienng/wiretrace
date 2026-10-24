@@ -355,6 +355,7 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .detail-body { flex: 1; min-height: 0; display: flex; flex-direction: column; position: relative; }
 .detail-body .scroll { overflow: auto; flex: 1; }
 .codehead { padding: 8px 14px 0; color: var(--muted); font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; background: #fbfbfc; }
+.body-views { flex: none; padding: 8px 14px 0; background: #fbfbfc; }
 .code { flex: 1; min-height: 0; margin: 0; padding: 12px 14px; font: 12px/1.6 var(--mono); background: #fbfbfc; overflow: auto; }
 .code .k { color: #9b2393; }
 .code .s { color: #c41a16; overflow-wrap: anywhere; white-space: pre-wrap; }

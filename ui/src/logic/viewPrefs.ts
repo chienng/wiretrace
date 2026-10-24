@@ -30,3 +30,15 @@ export function loadSidebarHidden(storage: Reader): boolean {
 export function storeSidebarHidden(storage: Writer, hidden: boolean): void {
   storeChoice(storage, SIDEBAR_KEY, 'hidden', hidden);
 }
+
+export type BodyViewChoice = 'json' | 'text';
+const BODY_KEY = 'wiretrace.body.view';
+
+/** How a JSON body is shown, in every body view: the foldable tree unless stored as text. */
+export function loadBodyView(storage: Reader): BodyViewChoice {
+  return isStored(storage, BODY_KEY, 'text') ? 'text' : 'json';
+}
+
+export function storeBodyView(storage: Writer, view: BodyViewChoice): void {
+  storeChoice(storage, BODY_KEY, 'text', view === 'text');
+}
