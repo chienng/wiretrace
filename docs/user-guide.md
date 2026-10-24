@@ -1,8 +1,8 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.10.2**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.10.3**, on Intel and Apple silicon Macs.
 
-What 0.10.2 gives you: a one-command install (`./install`) that needs no admin rights, a setup
+What 0.10.3 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
@@ -25,7 +25,11 @@ one row, with icon buttons for Pause and Clear and the preset, device and device
 one box (*Title bar*, under *Wiretrace window*). Resizable panes and the
 *Messages* tab for WebSocket rows came with 0.10.0 (*Detail panel*). New in 0.10.2: `./install`
 also creates the Wiretrace app on older macOS versions, where 0.10.1 warned *Wiretrace app not
-created*.
+created*. New in 0.10.3, for testers used to Charles: **«** hides the Traffic sidebar,
+**List** | **Tree** groups requests by host and path, **JSON** | **JSON Text** shows a JSON body
+as indented text, right-click → *Breakpoint* holds a request in one click, a replay is selected
+and marked with a blue stripe, and a new rule has *Cancel* (*Sidebar*, *Traffic list* and
+*Detail panel*, under *Wiretrace window*).
 
 **Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
 Wi-Fi proxy to `<Mac IP>:8889`, or change the port back to 8888 in the window (sidebar,
@@ -51,11 +55,11 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  [wiretrace-0.10.2-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.2/wiretrace-0.10.2-macos.tar.gz)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.2/wiretrace-0.10.2-macos.tar.gz.sha256)
+  [wiretrace-0.10.3-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.3/wiretrace-0.10.3-macos.tar.gz)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.3/wiretrace-0.10.3-macos.tar.gz.sha256)
   (the faster one), or
-  [wiretrace-0.10.2-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.2/wiretrace-0.10.2-macos.dmg)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.2/wiretrace-0.10.2-macos.dmg.sha256).
+  [wiretrace-0.10.3-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.3/wiretrace-0.10.3-macos.dmg)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.3/wiretrace-0.10.3-macos.dmg.sha256).
   Both contain the same files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -65,8 +69,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.10.2-macos.dmg.sha256
-shasum -a 256 -c wiretrace-0.10.2-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.10.3-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.10.3-macos.tar.gz.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -81,11 +85,11 @@ access that folder, and cleaning up Downloads would delete it. If Downloads alre
 `wiretrace`. In Terminal, the same in one step:
 
 ```bash
-tar -xzf ~/Downloads/wiretrace-0.10.2-macos.tar.gz -C ~
+tar -xzf ~/Downloads/wiretrace-0.10.3-macos.tar.gz -C ~
 ```
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.10.2**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.10.3**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
