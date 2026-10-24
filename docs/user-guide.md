@@ -18,10 +18,10 @@ it from the window); the hosts the app reaches without decryption, listed as *En
 breakpoints; and rules that rewrite requests and responses, save a response as a mock (*Map
 local*) or send requests to another server (*Map remote*); and a data folder,
 `~/Library/Application Support/Wiretrace`, for your presets, rules, mocks and sessions, so an
-update is unpack and `./install` (*Your data folder*, Part 1). New in 0.10.1: drag the borders
-between the sidebar, the list and the detail panel to resize them (the detail panel opens
-wider and can take most of the window), hide the log strip under Traffic, and a *Messages*
-tab for WebSocket rows (*Pane widths*, *Logs* and *Detail panel*, under *Wiretrace window*).
+update is unpack and `./install` (*Your data folder*, Part 1). New in 0.10.1: the detail panel
+can be dragged much wider (the list may shrink to 380 px), and the log strip under Traffic can
+be hidden (*Pane widths* and *Logs*, under *Wiretrace window*). Resizable panes and the
+*Messages* tab for WebSocket rows came with 0.10.0 (*Detail panel*).
 
 **Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
 Wi-Fi proxy to `<Mac IP>:8889`, or change the port back to 8888 in the window (sidebar,
