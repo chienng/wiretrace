@@ -15,8 +15,10 @@ export interface PaneRange {
   max: number;
 }
 
-/** The request or log list keeps this much; the panes beside it give way first. */
-export const LIST_MIN = 480;
+/** The request or log list keeps this much unless the tester drags a detail panel over it. */
+export const LIST_MIN_DEFAULT = 480;
+/** The narrowest list a detail panel the tester widened may leave (spec 026). */
+export const LIST_MIN = 380;
 export const KEY_STEP = 16;
 export const KEY_STEP_BIG = 64;
 
@@ -29,8 +31,8 @@ export function clamp(value: number, min: number, max: number): number {
 const detailInitial = (low: number) => (windowWidth: number) => Math.round(clamp(windowWidth * 0.4, low, 720));
 
 export const TRAFFIC_SIDEBAR: PaneSpec = { key: `${PREFIX}traffic.sidebar`, min: 160, max: 360, initial: () => 220 };
-export const TRAFFIC_DETAIL: PaneSpec = { key: `${PREFIX}traffic.detail`, min: 360, max: 720, initial: detailInitial(470) };
-export const LOGS_DETAIL: PaneSpec = { key: `${PREFIX}logs.detail`, min: 360, max: 720, initial: detailInitial(430) };
+export const TRAFFIC_DETAIL: PaneSpec = { key: `${PREFIX}traffic.detail`, min: 360, max: Infinity, initial: detailInitial(470) };
+export const LOGS_DETAIL: PaneSpec = { key: `${PREFIX}logs.detail`, min: 360, max: Infinity, initial: detailInitial(430) };
 
 /** Where a handle may move when `room` is all the pane can take. Too little room pins it there. */
 export function paneRange(spec: PaneSpec, room: number): PaneRange {
@@ -38,10 +40,13 @@ export function paneRange(spec: PaneSpec, room: number): PaneRange {
   return { min: Math.min(spec.min, max), max };
 }
 
-/** The width a pane renders at. The stored choice is not changed by a narrow window. */
-export function fitWidth(spec: PaneSpec, stored: number | null, windowWidth: number, room: number): number {
+/**
+ * The width a pane renders at: a chosen width within `room`, the default within `defaultRoom`.
+ * The stored choice is not changed by a narrow window.
+ */
+export function fitWidth(spec: PaneSpec, stored: number | null, windowWidth: number, room: number, defaultRoom = room): number {
   const wanted = clamp(stored ?? spec.initial(windowWidth), spec.min, spec.max);
-  return Math.max(0, Math.min(wanted, room));
+  return Math.max(0, Math.min(wanted, stored === null ? defaultRoom : room));
 }
 
 /** The remembered width; anything unreadable or out of range counts as none. */
@@ -70,6 +75,26 @@ export function clearWidth(storage: Pick<Storage, 'removeItem'> | null, spec: Pa
     storage?.removeItem(spec.key);
   } catch {
     // Nothing to clear.
+  }
+}
+
+const STRIP_KEY = `${PREFIX}traffic.logs`;
+
+/** Whether the tester collapsed the log strip under Traffic; shown unless stored as hidden. */
+export function loadStripHidden(storage: Pick<Storage, 'getItem'> | null): boolean {
+  try {
+    return storage?.getItem(STRIP_KEY) === 'hidden';
+  } catch {
+    return false;
+  }
+}
+
+export function storeStripHidden(storage: Pick<Storage, 'setItem' | 'removeItem'> | null, hidden: boolean): void {
+  try {
+    if (hidden) storage?.setItem(STRIP_KEY, 'hidden');
+    else storage?.removeItem(STRIP_KEY);
+  } catch {
+    // Storage full or off: the choice lasts until the window closes.
   }
 }
 
@@ -132,12 +157,13 @@ export interface Pane extends PaneRange {
   reset: () => void;
 }
 
-export function usePaneWidth(spec: PaneSpec, room: number, windowWidth: number): Pane {
+/** `room` bounds what the tester may choose; `defaultRoom` bounds the width before a choice. */
+export function usePaneWidth(spec: PaneSpec, room: number, windowWidth: number, defaultRoom = room): Pane {
   const [state, dispatch] = useReducer(paneState, spec, (s): PaneState => ({ stored: loadWidth(browserStorage(), s), live: null }));
   const range = paneRange(spec, room);
   return {
     ...range,
-    width: state.live === null ? fitWidth(spec, state.stored, windowWidth, room) : clamp(state.live, range.min, range.max),
+    width: state.live === null ? fitWidth(spec, state.stored, windowWidth, room, defaultRoom) : clamp(state.live, range.min, range.max),
     preview: (width) => dispatch({ type: 'preview', width: Math.round(width) }),
     choose: (width) => {
       const kept = Math.round(clamp(clamp(width, range.min, range.max), spec.min, spec.max));

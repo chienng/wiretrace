@@ -247,7 +247,7 @@ export function TrafficList({ rows, selectedId, onSelect, revealKey, paused, sho
   return (
     <div className={`flows-wrap${showDevice ? ' dev' : ''}`}>
       <div className="fhead">
-        <span>Time</span>
+        <span className="h-time">Time</span>
         {showDevice && <span className="h-dev">Device</span>}
         <span>Method</span>
         <span>Status</span>

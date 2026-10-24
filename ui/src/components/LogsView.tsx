@@ -28,7 +28,7 @@ import {
   type Level,
   type LogItem,
 } from '../logic/logs';
-import { LIST_MIN, LOGS_DETAIL, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
+import { LIST_MIN, LIST_MIN_DEFAULT, LOGS_DETAIL, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
 import type { Range } from '../logic/timeline';
 import { useData, useDispatch, useStore } from '../store';
 import type { FlowSummary, LogLine } from '../types';
@@ -136,7 +136,7 @@ function LogDetail({ line, context, flows }: { line: LogLine | null; context: re
 function MoreRow({ hidden, onShow }: { hidden: number; onShow: () => void }) {
   return (
     <div className="lrow more" style={{ height: LOG_ROW_HEIGHT }}>
-      <span />
+      <span className="t" />
       <span />
       <span />
       <button type="button" className="linkbtn" onClick={onShow}>
@@ -159,7 +159,7 @@ export function LogsView() {
   const onRange = useCallback((first: number, last: number) => setRows([first, last]), []);
   const bodyRef = useRef<HTMLDivElement>(null);
   const size = useBoxWidth(bodyRef);
-  const detail = usePaneWidth(LOGS_DETAIL, size.box - LIST_MIN, size.window);
+  const detail = usePaneWidth(LOGS_DETAIL, size.box - LIST_MIN, size.window, size.box - LIST_MIN_DEFAULT);
 
   // Pause and Clear act on the live session only.
   const frozen = viewing ? null : ui.logsFrozen;
@@ -344,7 +344,7 @@ export function LogsView() {
       <div className="lg-body" ref={bodyRef} style={{ '--detail-w': `${detail.width}px` } as CSSProperties}>
         <div className="lg-list">
           <div className="lhead">
-            <span>Time</span>
+            <span className="h-time">Time</span>
             <span>Lvl</span>
             <span>Tag</span>
             <span>Message</span>

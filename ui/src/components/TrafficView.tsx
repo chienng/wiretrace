@@ -1,7 +1,7 @@
 import { useRef, useState, type CSSProperties } from 'react';
 import { activeChips, type ChipKind, type HostCount, type QuickFilter } from '../logic/filters';
 import { storeShowEncrypted } from '../logic/hosts';
-import { LIST_MIN, TRAFFIC_DETAIL, TRAFFIC_SIDEBAR, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
+import { LIST_MIN, LIST_MIN_DEFAULT, TRAFFIC_DETAIL, TRAFFIC_SIDEBAR, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
 import { browserStorage } from '../storage';
 import { useDispatch, useStore } from '../store';
 import type { FlowSummary, TrafficRow, TunnelRow } from '../types';
@@ -32,9 +32,10 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
   const [mapping, setMapping] = useState<FlowSummary | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const size = useBoxWidth(bodyRef);
-  // The detail panel gives way before the sidebar when the window is too narrow for both.
-  const sidebar = usePaneWidth(TRAFFIC_SIDEBAR, size.box - LIST_MIN, size.window);
-  const detail = usePaneWidth(TRAFFIC_DETAIL, size.box - LIST_MIN - sidebar.width, size.window);
+  // The detail panel gives way before the sidebar when the window is too narrow for both. Only a
+  // detail width the tester chose may take the list below its default minimum.
+  const sidebar = usePaneWidth(TRAFFIC_SIDEBAR, size.box - LIST_MIN_DEFAULT, size.window);
+  const detail = usePaneWidth(TRAFFIC_DETAIL, size.box - LIST_MIN - sidebar.width, size.window, size.box - LIST_MIN_DEFAULT - sidebar.width);
   const widths = { '--sidebar-w': `${sidebar.width}px`, '--detail-w': `${detail.width}px` } as CSSProperties;
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
   const chips = activeChips({ quick: ui.quick, host: ui.host, client: ui.client, text: ui.search }, appState?.default_filter ?? '');

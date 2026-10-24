@@ -931,7 +931,12 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   request.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter
-  and auto-scroll. Lines that carry the selected request's ID are highlighted. The window keeps
+  and auto-scroll. Lines that carry the selected request's ID are highlighted. **Hide logs**,
+  at the right end of the strip, shrinks it to its bar so the list and the detail panel get its
+  height; **Show logs**, or a click on *Device logs* or *App logs*, opens it again with its
+  level and filter as they were. Your browser remembers the choice. Logs keep being received
+  while the strip is hidden, and the detail panel's *Logs* tab still shows a request's lines.
+  The window keeps
   the newest 50,000 lines of each log; the files in the session folder keep all of them. The
   full view adds:
   - the device picker: what is being collected now and its state, the other log sources with
@@ -948,12 +953,16 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 - **Pane widths.** Drag the border between the sidebar and the list, or between the list and
   the detail panel, to resize them; in the Logs view, the border between the list and the line
   detail. The border turns blue under the pointer. The detail panel starts at 40 % of the
-  window (576 px in a 1440 px window); the sidebar at 220 px. The sidebar goes from 160 to
-  360 px, the detail panel from 360 to 720 px, and the list always keeps at least 480 px: in a
-  narrow window the detail panel gives way first, then the sidebar. A narrow list hides the
-  *Size* column, then *Duration*, then *Device* (both still in the detail header); the path is
-  shortened with `…`, and pointing at it shows the full URL. Your browser remembers each width for the next
-  window, like saved filters. **Double-click** a border to go back to the default width.
+  window (576 px in a 1440 px window, at most 720 px); the sidebar at 220 px. The sidebar goes
+  from 160 to 360 px. The detail panel is at least 360 px and has no upper limit: drag it left
+  until the list is 380 px wide (in a 1440 px window that is an 840 px detail panel, 900 px
+  with the sidebar at 160 px). Until you widen it yourself, the detail panel leaves the list at
+  least 480 px, and so does the sidebar. In a narrow window the detail panel gives way first,
+  then the sidebar. A narrow list hides the *Size* column, then *Duration*, then *Device*
+  (both still in the detail header), and below 480 px *Time* (in the detail's *Timing* tab);
+  the path is shortened with `…`, and pointing at it shows the full URL. The Logs view's list
+  hides *Time* below 560 px (it stays in the line detail). Your browser remembers each width
+  for the next window, like saved filters. **Double-click** a border to go back to the default width.
   From the keyboard, Tab to a border, then ← and → move it by 16 px (64 px with Shift),
   Home and End take it to its limits, and Enter goes back to the default.
 - **Setup.** A wizard in five steps, each of which you can open from the list on the left:
