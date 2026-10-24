@@ -6,7 +6,8 @@
   as today's flat **List** or as a **Tree**: host, then path folders, then the requests.
 - **Date**: 2026-10-24
 - **Repo**: wiretrace
-- **Status**: approved (2026-10-24). Orchestrator choices: all three slices; JSON Text is the
+- **Status**: implemented (2026-10-24), merged to `main` for 0.10.3.
+  Approved 2026-10-24. Orchestrator choices: all three slices; JSON Text is the
   body re-indented with literals kept as sent (not the raw bytes); in Tree, hosts start open
   and folders closed. Added the same day by the Orchestrator, from QA: padding for the Map local
   form, and a way back from a new rule (Cancel, back to the request it came from); slices D
@@ -16,7 +17,7 @@
   network or log change; the choices stay in the browser). D n/a (one repo).
 - **Branch**: `feature/sidebar-json-text-tree`, from `main` (`4bb020c`). One commit per slice;
   slices A, B, C are independent and may merge in any order.
-- **Version**: the next minor release (0.11.0).
+- **Version**: 0.10.3 (Orchestrator's choice at merge; planned as 0.11.0).
 - **Builds on**: spec 024 (pane widths), spec 026 (log strip toggle and its storage pattern).
 
 ## Goal
