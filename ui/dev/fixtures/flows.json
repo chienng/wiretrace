@@ -308,5 +308,24 @@
   "mock": false,
   "fault": null,
   "websocket": false
+ },
+ {
+  "id": "fx-18",
+  "ts": 1791900009.8,
+  "method": "GET",
+  "scheme": "https",
+  "host": "api.example.com",
+  "port": 443,
+  "path": "/api/v1/cart",
+  "status": 200,
+  "error": null,
+  "duration_ms": 131,
+  "size": 3100,
+  "mime": "application/json",
+  "request_id": "req-0018",
+  "mock": false,
+  "fault": null,
+  "websocket": false,
+  "replay_of": "fx-08"
  }
 ]

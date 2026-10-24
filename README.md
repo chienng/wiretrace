@@ -22,6 +22,8 @@ Current version: **0.10.3**.
   description ready to paste into YouTrack or Jira. Nothing is sent: you copy and download.
 - **No admin account.** Download, drag to your home folder, double-click **install**.
 
+![Wiretrace 0.10.3: requests grouped by host and path in Tree, the sidebar hidden, and a failed response as JSON Text](docs/images/traffic-tree.png)
+
 **Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
 the steps below do not work for them. Follow the guide of your version instead:
 
@@ -213,7 +215,8 @@ changed or not saved.
 
 ## Design
 
-Screens 1 to 4 and 5a below are **screenshots of Wiretrace 0.10.1** with the sample data in
+Screens 1 and 1a are **screenshots of Wiretrace 0.10.3**, and screens 2 to 4 and 5a of
+**0.10.1** (those screens have not changed since), all with the sample data in
 [`ui/dev/fixtures/`](ui/dev/fixtures/); every host, token and device in them is fake.
 Screens 5 and 6 are **design mockups**: they show where Wiretrace is going, and their data is
 illustrative. The mockups of every screen, with their source and notes, are in
@@ -228,9 +231,15 @@ illustrative. The mockups of every screen, with their source and notes, are in
 | 5. Send a bug report to YouTrack or Jira | Built: form to copy into YouTrack or Jira (screen 5a): title and description in Markdown or Jira wiki, masked HAR and log downloads, Android and Simulator screenshots. Not built: sending directly, signing in to the tracker, iPhone screenshots. |
 | 6. Menu-bar app | Built: status item while `./wiretrace start --ui wiretrace` runs (`--no-menu-bar` turns it off). Differences: no *Pause recording* (the window's Pause only freezes its list); *Show last error* instead of *Report last error*; the device line is target, mode and model. |
 
-**1. Main window** (screenshot, 0.10.1)
+**1. Main window** (screenshot, 0.10.3): the List layout, a failed request open, and a replay
+marked by its blue stripe
 
-![Wiretrace 0.10.1 main window with sample data](docs/images/traffic.png)
+![Wiretrace 0.10.3 main window in List, with a failed request open and a replay row striped blue](docs/images/traffic.png)
+
+**1a. Tree and JSON Text** (screenshot, 0.10.3): the sidebar hidden with **«**, requests
+grouped by host and path folder, and the response read as indented text
+
+![Wiretrace 0.10.3 Traffic in Tree with the sidebar hidden and the response as JSON Text](docs/images/traffic-tree.png)
 
 **2. Device and app logs** (screenshot, 0.10.1)
 
