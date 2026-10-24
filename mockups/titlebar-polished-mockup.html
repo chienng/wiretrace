@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Wiretrace — polished title bar (spec 027)</title>
+<style>
+  :root {
+    --bg: #ececef;
+    --win: #ffffff;
+    --side: #f5f5f7;
+    --line: #e2e2e6;
+    --line-strong: #d1d1d6;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --faint: #a1a1a6;
+    --blue: #0a66d8;
+    --blue-soft: #e6f0fd;
+    --red: #d70015;
+    --red-soft: #fde8ea;
+    --orange: #c45a00;
+    --orange-soft: #fff1e0;
+    --green: #1a7f37;
+    --green-soft: #e3f5e8;
+    --mono: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+    /* new in spec 027 */
+    --accent: linear-gradient(90deg, #0a66d8 0%, #3d8bfd 55%, #6aa8ff 100%);
+    --bar: linear-gradient(180deg, #ffffff 0%, #f8f9fb 100%);
+    --raise: 0 1px 2px rgba(16, 24, 40, .08), 0 0 0 .5px rgba(16, 24, 40, .06);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px; background: var(--bg); color: var(--text);
+    font: 13px/1.4 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  }
+  h1 { font-size: 22px; font-weight: 600; margin: 0 0 6px; }
+  .intro { color: var(--muted); margin: 0 0 28px; max-width: 900px; }
+  .screen { margin: 0 0 40px; }
+  .screen > h2 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+  .screen > p { color: var(--muted); margin: 0 0 12px; max-width: 1000px; }
+  .frame { background: var(--win); border-radius: 10px; overflow: hidden; box-shadow: 0 8px 30px rgba(0,0,0,.12); }
+  .w1440 { width: 1440px; }
+  .w1024 { width: 1024px; }
+  .current { height: 112px; background: url(../docs/images/traffic.png) no-repeat 0 0 / 1440px 900px; }
+  .below { height: 40px; border-top: 1px solid var(--line); background: repeating-linear-gradient(180deg, #fff 0 20px, #fafafa 20px 40px); }
+
+  /* ---------- proposed title bar ---------- */
+  .tb {
+    position: relative; container-type: inline-size;
+    background: var(--bar); border-bottom: 1px solid var(--line);
+    box-shadow: 0 1px 3px rgba(16, 24, 40, .04);
+  }
+  .tb::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 2px; background: var(--accent); }
+  .tb-row {
+    min-height: 52px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px;
+    padding: 10px 14px 8px;
+  }
+  .tb-end { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .tb-start { display: flex; align-items: center; gap: 10px; }
+
+  .brand { display: flex; align-items: center; gap: 9px; margin-right: 4px; white-space: nowrap; }
+  .brand svg { width: 30px; height: 30px; filter: drop-shadow(0 1px 1.5px rgba(10, 102, 216, .35)); }
+  .brand .name { display: flex; flex-direction: column; line-height: 1.1; }
+  .brand b { font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+  .brand .ver { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .seg { display: inline-flex; padding: 2px; gap: 2px; border-radius: 8px; background: #e9e9ee; }
+  .seg button {
+    border: 0; background: transparent; border-radius: 6px; height: 24px; padding: 0 12px;
+    font: inherit; font-size: 12.5px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  }
+  .seg button { color: #3a3a3f; font-weight: 500; height: 26px; padding: 0 14px; font-size: 13px; }
+  .seg button.on {
+    background: linear-gradient(180deg, #1673e6 0%, #0a5cc7 100%); color: #fff; font-weight: 650;
+    box-shadow: 0 1px 2px rgba(10, 92, 199, .45), inset 0 1px 0 rgba(255, 255, 255, .2);
+  }
+  .seg button.on .c { box-shadow: 0 0 0 1.5px #fff; }
+  .seg .c { background: var(--red); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 10.5px; font-weight: 600; line-height: 16px; }
+
+  .rec {
+    display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px 0 10px;
+    border-radius: 14px; background: var(--red-soft); color: var(--red); font-weight: 600; font-size: 12.5px; white-space: nowrap;
+  }
+  .rec .t { font-weight: 500; font-variant-numeric: tabular-nums; }
+  .dot { position: relative; width: 8px; height: 8px; border-radius: 50%; background: currentColor; flex: none; }
+  .rec .dot::after {
+    content: ""; position: absolute; inset: 0; border-radius: 50%; background: currentColor;
+    animation: live 1.8s ease-out infinite;
+  }
+  @keyframes live { 0% { transform: scale(1); opacity: .55; } 100% { transform: scale(2.6); opacity: 0; } }
+  @media (prefers-reduced-motion: reduce) { .rec .dot::after { animation: none; } }
+  .rec.paused { background: var(--orange-soft); color: var(--orange); }
+  .rec.paused .dot::after { display: none; }
+
+  .group { display: inline-flex; border-radius: 7px; box-shadow: var(--raise); background: #fff; }
+  .group > * + * { border-left: 1px solid var(--line); }
+
+  .tbtn {
+    display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px;
+    border: 0; border-radius: 7px; background: #fff; font: inherit; font-size: 12.5px; color: var(--text);
+    white-space: nowrap; cursor: pointer; box-shadow: var(--raise);
+  }
+  .group .tbtn { box-shadow: none; border-radius: 0; }
+  .group .tbtn:first-child { border-radius: 7px 0 0 7px; }
+  .group .tbtn:last-child { border-radius: 0 7px 7px 0; }
+  .tbtn:hover { background: #f4f5f7; }
+  .tbtn svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+  .tbtn.toggled { background: var(--blue-soft); color: var(--blue); }
+  .tbtn.toggled svg { color: var(--blue); }
+  .tbtn.primary { color: var(--blue); font-weight: 600; }
+  .tbtn.primary svg { color: var(--blue); }
+  .count { background: var(--orange-soft); color: var(--orange); border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 600; }
+
+  .ctx { display: inline-flex; align-items: stretch; height: 28px; border-radius: 7px; background: #fff; box-shadow: var(--raise); }
+  .ctx > * { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px; border: 0; background: transparent; font: inherit; font-size: 12.5px; white-space: nowrap; color: var(--text); cursor: pointer; }
+  .ctx > * + * { border-left: 1px solid var(--line); }
+  .ctx > :first-child { border-radius: 7px 0 0 7px; }
+  .ctx > :last-child { border-radius: 0 7px 7px 0; }
+  .ctx button:hover { background: #f4f5f7; }
+  .ctx .k { color: var(--muted); }
+  .ctx .caret { color: var(--faint); font-size: 10px; }
+  .ctx .ok { color: var(--green); }
+  .ctx .wait { color: var(--orange); }
+  .ctx .st { cursor: default; font-weight: 500; }
+  .ctx .st.wait { background: var(--orange-soft); }
+  .ctx .st.ok { background: var(--green-soft); }
+
+  .ctx svg { width: 14px; height: 14px; flex: none; color: var(--muted); }
+  .ctx svg.ok { color: var(--green); }
+  .ctx svg.wait { color: var(--orange); }
+  .tbtn.icon { width: 30px; padding: 0; justify-content: center; }
+  .tbtn.icon svg { color: var(--text); }
+  .tbtn .new { background: var(--blue); color: #fff; border-radius: 8px; padding: 0 6px; font-size: 11px; font-weight: 600; line-height: 16px; }
+  .tbtn.resume { padding: 0 8px; }
+
+  /* ---------- variant A: tinted ---------- */
+  .v-tint .tb { background: linear-gradient(180deg, #f2f7ff 0%, #e8f0fc 100%); border-bottom-color: #d3e2f7; }
+  .v-tint .tb::before { height: 3px; background: linear-gradient(90deg, #0a4fb0 0%, #0a66d8 35%, #3d8bfd 70%, #8cc0ff 100%); }
+  .v-tint .brand svg { width: 34px; height: 34px; }
+  .v-tint .brand b { font-size: 17px; font-weight: 700; color: #0a4fb0; letter-spacing: -.015em; }
+  .v-tint .brand .ver { color: #5a7aa6; }
+  .v-tint .seg { background: #dbe6f6; }
+  .v-tint .tb-start { gap: 9px; }
+
+  /* ---------- backgrounds (on the variant A layout) ---------- */
+  .bg-aurora .tb {
+    background:
+      radial-gradient(420px 120px at 6% 0%, rgba(10, 102, 216, .16), transparent 70%),
+      radial-gradient(520px 140px at 48% 120%, rgba(123, 97, 255, .12), transparent 70%),
+      radial-gradient(480px 130px at 92% -10%, rgba(32, 201, 151, .12), transparent 70%),
+      linear-gradient(180deg, #ffffff, #f7f9fd);
+    border-bottom-color: #dfe6f2;
+  }
+  .bg-aurora .tb::before { background: linear-gradient(90deg, #0a66d8, #7b61ff 55%, #20c997); }
+
+  .bg-traces .tb {
+    background:
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='56' viewBox='0 0 240 56'%3E%3Cg fill='none' stroke='%230a66d8' stroke-width='1.2' stroke-linecap='round' stroke-linejoin='round' opacity='.13'%3E%3Cpath d='M0 40h22l9-22 12 26 10-16h26l8 12h30l10-24 14 30 9-18h28l8-10h54'/%3E%3Cpath d='M0 14h40l8 8h36l6-8h44l10 14h24l12-14h60' opacity='.6'/%3E%3C/g%3E%3Cg fill='%230a66d8' opacity='.16'%3E%3Ccircle cx='31' cy='18' r='2'/%3E%3Ccircle cx='79' cy='28' r='2'/%3E%3Ccircle cx='131' cy='20' r='2'/%3E%3Ccircle cx='182' cy='32' r='2'/%3E%3Ccircle cx='90' cy='22' r='1.6'/%3E%3Ccircle cx='168' cy='14' r='1.6'/%3E%3C/g%3E%3C/svg%3E") repeat-x 0 50% / 240px 56px,
+      linear-gradient(180deg, #f5f9ff 0%, #eaf2fd 100%);
+    border-bottom-color: #d3e2f7;
+  }
+
+  .bg-ocean .tb {
+    background:
+      radial-gradient(600px 160px at 85% -40%, rgba(140, 192, 255, .12), transparent 70%),
+      linear-gradient(100deg, #083f8f 0%, #0a4aa3 50%, #0a50ad 100%);
+    border-bottom-color: #073a84;
+  }
+  .bg-ocean .tb::before { background: linear-gradient(90deg, rgba(255,255,255,.0), rgba(255,255,255,.35), rgba(255,255,255,0)); height: 1px; }
+  .bg-ocean .brand svg { filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .3)); }
+  .bg-ocean .brand b { color: #fff; }
+  .bg-ocean .brand .ver { color: rgba(255, 255, 255, .72); }
+  .bg-ocean .seg { background: rgba(0, 20, 60, .28); }
+  .bg-ocean .seg button { color: #fff; }
+  .bg-ocean .seg button.on { background: #fff; color: #0a4fb0; box-shadow: 0 1px 3px rgba(0, 0, 0, .3); }
+  .bg-ocean .rec { background: #fff; }
+  .bg-ocean .rec.paused { background: #fff; }
+  .bg-ocean .group, .bg-ocean .ctx { background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
+  .bg-ocean .group > * + *, .bg-ocean .ctx > * + * { border-left-color: rgba(255, 255, 255, .22); }
+  .bg-ocean .tbtn, .bg-ocean .ctx > * { color: #fff; background: transparent; }
+  .bg-ocean .tbtn { background: rgba(255, 255, 255, .12); box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22); }
+  .bg-ocean .group .tbtn { background: transparent; box-shadow: none; }
+  .bg-ocean .tbtn svg, .bg-ocean .tbtn.icon svg, .bg-ocean .ctx svg { color: #fff; }
+  .bg-ocean .ctx svg.ok { color: #7ee2a0; }
+  .bg-ocean .ctx .caret { color: rgba(255, 255, 255, .6); }
+  .bg-ocean .tbtn:hover, .bg-ocean .ctx button:hover { background: rgba(255, 255, 255, .22); }
+  .bg-ocean .tbtn.toggled { background: #fff; color: #0a4fb0; }
+  .bg-ocean .tbtn.toggled svg { color: #0a4fb0; }
+  .bg-ocean .tbtn.primary { color: #fff; }
+  .bg-ocean .tbtn.primary svg { color: #fff; }
+  .bg-ocean .ctx .st.wait { background: #fff1e0; color: var(--orange); }
+  .bg-ocean .ctx .st.ok { background: #e3f5e8; color: var(--green); }
+
+  /* ---------- variant B: brand tile ---------- */
+  .v-tile .tb::before { display: none; }
+  .v-tile .tb-row { padding-left: 0; column-gap: 6px; }
+  .v-tile .brand {
+    align-self: stretch; margin: -10px 2px -8px 0; padding: 0 14px; gap: 9px;
+    background: linear-gradient(135deg, #0a4fb0 0%, #0a66d8 55%, #2f86f6 100%); color: #fff;
+    box-shadow: inset -1px 0 0 rgba(255, 255, 255, .15);
+  }
+  .v-tile .brand svg { width: 32px; height: 32px; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .25)); }
+  .v-tile .brand b { font-size: 17px; font-weight: 700; letter-spacing: -.015em; }
+  .v-tile .brand .ver { color: rgba(255, 255, 255, .75); }
+  .v-tile .tb { border-bottom: 1px solid var(--line); }
+  .v-tile .tb::after { content: ""; position: absolute; inset: auto 0 -1px 0; height: 2px; background: linear-gradient(90deg, #0a66d8 0%, rgba(10, 102, 216, .0) 60%); }
+  .v-tile .tb-start { gap: 9px; }
+  .v-tile .tb-end, .v-tint .tb-end { gap: 6px; }
+</style>
+</head>
+<body>
+<h1>Polished title bar — spec 027</h1>
+<p class="intro">Same controls, same order, same behaviour. One row at 1440 px instead of two; a thin brand-blue
+line on top; a raised Traffic | Logs switch; a live Recording dot; icons on the buttons; Preset, Device and the
+device-logs status joined into one session box, with icons for “Preset” and “Device”. Pause and Clear are icon
+buttons with tooltips; Resume keeps its “12 new” count. Narrower windows (and long preset or device names) wrap
+the right-hand group to a second row, as today.</p>
+
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="mark" viewBox="0 0 24 24">
+    <rect width="24" height="24" rx="5.5" fill="#0a66d8"/>
+    <path d="M4.2 7.4l3.6 9.4L12 9.6l4.2 7.2 3.6-9.4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="4.2" cy="7.4" r="1.7" fill="#fff"/><circle cx="19.8" cy="7.4" r="1.7" fill="#fff"/>
+  </symbol>
+  <symbol id="mark-inv" viewBox="0 0 24 24">
+    <rect width="24" height="24" rx="5.5" fill="#fff"/>
+    <path d="M4.2 7.4l3.6 9.4L12 9.6l4.2 7.2 3.6-9.4" fill="none" stroke="#0a66d8" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <circle cx="4.2" cy="7.4" r="1.7" fill="#0a66d8"/><circle cx="19.8" cy="7.4" r="1.7" fill="#0a66d8"/>
+  </symbol>
+  <symbol id="i-preset" viewBox="0 0 16 16"><path d="M8 2l6 3-6 3-6-3z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M2 8.2l6 3 6-3M2 11.2l6 3 6-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 16 16"><rect x="4.5" y="1.5" width="7" height="13" rx="1.8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M7 12.2h2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 16 16"><path d="M5.5 3.5v9M10.5 3.5v9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+  <symbol id="i-play" viewBox="0 0 16 16"><path d="M5 3.5l7 4.5-7 4.5z" fill="currentColor"/></symbol>
+  <symbol id="i-clear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4.2 11.8l7.6-7.6" stroke="currentColor" stroke-width="1.5"/></symbol>
+  <symbol id="i-rules" viewBox="0 0 16 16"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10.5" cy="4.5" r="1.6" fill="#fff" stroke="currentColor" stroke-width="1.4"/><circle cx="5.5" cy="8" r="1.6" fill="#fff" stroke="currentColor" stroke-width="1.4"/><circle cx="9" cy="11.5" r="1.6" fill="#fff" stroke="currentColor" stroke-width="1.4"/></symbol>
+  <symbol id="i-setup" viewBox="0 0 16 16"><path d="M2.5 4.2l1.3 1.3 2.2-2.5M2.5 10.2l1.3 1.3 2.2-2.5M8 4.5h5.5M8 10.5h5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+  <symbol id="i-bug" viewBox="0 0 16 16"><path d="M5.5 5.5a2.5 2.5 0 015 0" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="4.5" y="5.5" width="7" height="8" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 7.5v5M2.5 8.5h2M11.5 8.5h2M3 12.5l1.8-1M13 12.5l-1.8-1M3 4.5l1.8 1.2M13 4.5l-1.8 1.2" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+</svg>
+
+<template id="bar">
+  <header class="tb">
+    <div class="tb-row">
+      <div class="tb-start">
+        <span class="brand"><svg aria-hidden="true"><use href="#mark"/></svg><span class="name"><b>Wiretrace</b><span class="ver">v0.10.1</span></span></span>
+        <div class="seg" role="tablist" aria-label="View">
+          <button role="tab" aria-selected="true" class="on">Traffic</button>
+          <button role="tab" aria-selected="false">Logs <span class="c">1 crash</span></button>
+        </div>
+        <span class="rec"><span class="dot"></span>Recording <span class="t">00:02:07</span></span>
+        <div class="group">
+          <button class="tbtn icon pause" title="Pause the list" aria-label="Pause"><svg aria-hidden="true"><use href="#i-pause"/></svg></button>
+          <button class="tbtn icon" title="Clear: hide what is listed now" aria-label="Clear"><svg aria-hidden="true"><use href="#i-clear"/></svg></button>
+        </div>
+      </div>
+      <div class="tb-end">
+        <div class="ctx">
+          <button title="Preset" aria-label="Preset: staging-example"><svg aria-hidden="true"><use href="#i-preset"/></svg>staging-example<span class="caret">▾</span></button>
+          <button title="Device: requests seen" aria-label="Device: pixel-example, Proxy + WireGuard"><svg class="ok" aria-hidden="true"><use href="#i-phone"/></svg>pixel-example · Proxy + WireGuard<span class="caret">▾</span></button>
+          <span class="st wait" title="Device logs: starting">Android device · starting</span>
+        </div>
+        <button class="tbtn"><svg aria-hidden="true"><use href="#i-rules"/></svg>Rules</button>
+        <button class="tbtn"><svg aria-hidden="true"><use href="#i-setup"/></svg>Setup</button>
+        <button class="tbtn primary"><svg aria-hidden="true"><use href="#i-bug"/></svg>Report bug</button>
+      </div>
+    </div>
+  </header>
+</template>
+
+<section class="screen">
+  <h2>Now (0.10.1), 1440 px — two rows</h2>
+  <p>Cropped from <code>docs/images/traffic.png</code>.</p>
+  <div class="frame w1440"><div class="current"></div></div>
+</section>
+
+<section class="screen">
+  <h2>First proposal (subtle), 1440 px — recording</h2>
+  <div class="frame w1440" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Variant A — tinted bar, 1440 px — recording</h2>
+  <p>Light brand-blue bar, 3 px gradient line, 34 px mark, 17 px wordmark in brand blue.</p>
+  <div class="frame w1440 v-tint" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Variant A — tinted bar, 1440 px — paused with new requests, 2 rules on, device seen</h2>
+  <div class="frame w1440 v-tint" data-bar="paused"></div>
+</section>
+
+<section class="screen">
+  <h2>Background 1 — Aurora, 1440 px — recording</h2>
+  <p>Soft blue, lavender and mint glows over white; the top line runs blue → violet → mint.</p>
+  <div class="frame w1440 v-tint bg-aurora" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Background 2 — Wire traces, 1440 px — recording</h2>
+  <p>Light blue tint with a faint pattern of trace lines and nodes, echoing the mark’s zigzag.</p>
+  <div class="frame w1440 v-tint bg-traces" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Background 3 — Ocean, 1440 px — recording</h2>
+  <p>Deep brand-blue gradient with a light glow on the right; controls turn white and translucent; the selected Traffic | Logs tab is white.</p>
+  <div class="frame w1440 v-tint bg-ocean" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Background 3 — Ocean, 1440 px — paused with new requests, 2 rules on, device seen</h2>
+  <div class="frame w1440 v-tint bg-ocean" data-bar="paused"></div>
+</section>
+
+<section class="screen">
+  <h2>Variant B — brand tile, 1440 px — recording</h2>
+  <p>Blue gradient tile on the left edge with the white mark and 17 px name; a blue line under the bar fading to the right.</p>
+  <div class="frame w1440 v-tile" data-bar="recording"></div>
+</section>
+
+<section class="screen">
+  <h2>Variant B — brand tile, 1440 px — paused with new requests, 2 rules on, device seen</h2>
+  <div class="frame w1440 v-tile" data-bar="paused"></div>
+</section>
+
+<section class="screen">
+  <h2>Variant B — brand tile, 1024 px — two rows, as today</h2>
+  <div class="frame w1024 v-tile" data-bar="recording"></div>
+</section>
+
+<script>
+  const tpl = document.getElementById('bar');
+  for (const frame of document.querySelectorAll('[data-bar]')) {
+    const bar = tpl.content.cloneNode(true);
+    if (frame.dataset.bar === 'paused') {
+      const rec = bar.querySelector('.rec');
+      rec.classList.add('paused');
+      rec.innerHTML = '<span class="dot"></span>List paused';
+      const pause = bar.querySelector('.tbtn.pause');
+      pause.className = 'tbtn resume toggled';
+      pause.setAttribute('aria-label', 'Resume, 12 new requests');
+      pause.title = 'Resume the list';
+      pause.innerHTML = '<svg aria-hidden="true"><use href="#i-play"/></svg><span class="new">12 new</span>';
+      const rules = bar.querySelector('.tb-end .tbtn');
+      rules.title = '2 rules on';
+      rules.innerHTML = '<svg aria-hidden="true"><use href="#i-rules"/></svg>Rules <span class="count">2</span>';
+      const st = bar.querySelector('.ctx .st');
+      st.className = 'st ok';
+      st.textContent = 'Pixel 8 · Android 15 · USB';
+      bar.querySelector('.seg .c').remove();
+    }
+    if (frame.classList.contains('v-tile') || frame.classList.contains('bg-ocean')) bar.querySelector('.brand use').setAttribute('href', '#mark-inv');
+    frame.append(bar);
+    frame.insertAdjacentHTML('beforeend', '<div class="below"></div>');
+  }
+</script>
+</body>
+</html>

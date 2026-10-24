@@ -762,7 +762,8 @@ press Ctrl+C. If the menu cannot start (PyObjC is missing, or there is no logged
 such as an SSH session), the banner says `Menu bar: off (<reason>)` and capture runs as usual.
 `./wiretrace doctor` prints `Menu bar: available` or tells you to run `scripts/setup-mac.sh`.
 
-**Switching the preset.** Click *Preset: …* in the title bar to see every file in `presets/`;
+**Switching the preset.** Click the preset menu (layers icon, with the preset's name) in the
+title bar to see every file in `presets/`;
 the one in use is marked. Choose another and Wiretrace asks first: the dialog lists the hosts
 that preset decrypts and says whether device logs will be on. Click *Save and switch*: this
 session is saved as if you had pressed Ctrl+C (`flows.har`, then the session folder), and a new
@@ -773,7 +774,7 @@ Each session has one preset, so the new one gets its own session folder, rules
 (`rules/<preset>.json`) and mocks. The menu is off while a previous session is open. Ctrl+C,
 or *Stop session* in the menu bar, still ends Wiretrace and never starts the chosen preset.
 
-**Switching the device.** The label next to the preset, for example *iPhone · Proxy +
+**Switching the device.** The label next to the preset (phone icon), for example *iPhone · Proxy +
 WireGuard*, is a menu of the devices: iPhone, Android phone, Android emulator, iOS Simulator
 and Another device. Each row says whether device logs will be on with the preset in use (the
 app name) or why not. Choose another device and Wiretrace asks first, with what to do on the
@@ -871,15 +872,19 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
   (for example *v0.10.1*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
-  crashes. It shows how long the session has been recording. *Pause* freezes the list while
-  you read it and counts the new requests; meanwhile the title bar shows *List paused*
-  instead of the recording time. Wiretrace keeps recording; *Resume* lists what came in. *Clear* hides what is in the list now; everything is
-  still saved to the session folder. It also shows the preset (a menu, see *Switching the
-  preset* above), the device and mode (a menu, see *Switching the device*), and the
-  device pill: the phone's model, OS version and connection (for example *Pixel 8 · Android 15
-  · USB*), green while its logs stream in, or *Device logs off* with the reason when you point
-  at it. Then come the buttons *Rules* (with the number of rules that are on), *Setup* and
-  *Report bug*.
+  crashes. *Recording* shows how long the session has been recording. Next to it are two icon
+  buttons; point at one to see what it does. *Pause* (two bars) freezes the list while you
+  read it; meanwhile the title bar shows *List paused* instead of the recording time, and the
+  button becomes *Resume* (a play icon) with the number of new requests, for example *12 new*.
+  Wiretrace keeps recording; *Resume* lists what came in. *Clear* (a crossed-out circle) hides
+  what is in the list now; everything is still saved to the session folder. On the right, one
+  box holds the preset menu (layers icon and the preset's name, see *Switching the preset*
+  above), the device menu (phone icon, device and mode, see *Switching the device*; the icon
+  turns green once requests arrive), and the device-logs status: the phone's model, OS version
+  and connection (for example *Pixel 8 · Android 15 · USB*), green while its logs stream in, or
+  *Device logs off* with the reason when you point at it. Then come the buttons *Rules* (with
+  the number of rules that are on, for example *Rules 2*; pointing at it says *2 rules on*),
+  *Setup* and *Report bug*.
 - **Sidebar.** With the Wi-Fi proxy on, the *Wi-Fi proxy* box and *Devices* first (see *More
   devices on the Wi-Fi proxy* above). *Current session* and *Previous sessions* (see *Earlier
   sessions* below). Quick filters with live counts: *All*, *Errors* (status 400 or higher, or
