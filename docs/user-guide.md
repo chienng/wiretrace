@@ -916,14 +916,19 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   updating while the connection is open; once it closes, the duration is how long it was open.
   A row can carry the badges *MOCK*, *FAULT*, *SLOW*, *REPLAY*, *PAUSED*,
   *EDITED*, *REWRITTEN* and *MAPPED* (see *Rules*). Right-click a row for *Map local…*, *Copy as
-  mock*, *New rule from this request*, *Replay* and *Copy cURL*. The log receiver
+  mock*, *New rule from this request*, *Breakpoint*, *Replay* and *Copy cURL*. *Breakpoint*
+  adds, at the top of the rules, a rule that holds that method, host and path (the query does
+  not count) at the request; the next one waits, orange and *PAUSED*, until you let it go. In
+  Rules you can switch it to the response or both. When that breakpoint exists the item reads
+  *Remove breakpoint* and deletes it. The log receiver
   `qa-logs.internal` is not listed. The window keeps the newest 10,000 requests; older ones
   are only in `flows.mitm`.
   **List** | **Tree**, at the right end of the filter bar, shows the same requests grouped by
   host and then by folder of the path: `/v1/users/42` is the row `42` under `v1` › `users`.
   Host and folder rows show how many requests are below them; click one to open or close it,
-  or right-click it for *Expand all below*, *Collapse all below* and, on a host, *Show only
-  this host*. New hosts start open and new folders closed. ↑ and ↓ move through the rows,
+  or right-click it for *Breakpoint on this host* or *on this folder* (any method, every path
+  below it), *Expand all below*, *Collapse all below* and, on a host, *Show only this host*.
+  New hosts start open and new folders closed. ↑ and ↓ move through the rows,
   → opens a row or goes into it, ← closes it or goes up, Enter or Space opens or closes it;
   moving onto a request selects it. The tree does not scroll to new requests. Your browser
   remembers the choice.

@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from 'react';
 import { methodClass, methodLabel } from '../logic/format';
 import { hostPort, isTunnel, openFor, tunnelTag } from '../logic/hosts';
+import { apiHostFor, type RequestMatch } from '../logic/rules';
 import { ancestorsOf, branchKeys, buildTree, newHosts, pathTo, settleCursor, treeKey, visibleRows, type TreeBranch, type TreeMove, type VisibleRow } from '../logic/tree';
 import { useDispatch, useStore } from '../store';
 import { ContextMenu, type MenuAt, type MenuItem } from './ContextMenu';
@@ -92,9 +93,9 @@ interface Props extends MenuActions {
  * request it is the selected request, on a host or folder it leaves the selection alone.
  */
 export function TrafficTree({ rows, selectedId, onSelect, ...actions }: Props) {
-  const { ui } = useStore();
+  const { ui, appState } = useStore();
   const dispatch = useDispatch();
-  const { openFlowMenu, openTunnelMenu, menus } = useTrafficMenus(actions);
+  const { openFlowMenu, openTunnelMenu, menus, loadRules, breakpointItem } = useTrafficMenus(actions);
   const [nodeMenu, setNodeMenu] = useState<{ node: TreeBranch; at: MenuAt } | null>(null);
 
   const tree = useMemo(() => buildTree(rows), [rows]);
@@ -168,6 +169,7 @@ export function TrafficTree({ rows, selectedId, onSelect, ...actions }: Props) {
     setPath(pathTo(tree, node.key));
     if (node.kind !== 'leaf') {
       setNodeMenu({ node, at });
+      loadRules();
       return;
     }
     select(node.row.id);
@@ -182,8 +184,17 @@ export function TrafficTree({ rows, selectedId, onSelect, ...actions }: Props) {
     apply(move);
   };
 
+  /** Any method under the host (`/*`) or the folder (`/v1/users/*`). */
+  const nodeMatch = (node: TreeBranch): RequestMatch => {
+    const folders = pathTo(tree, node.key)
+      .slice(1)
+      .map((k) => tree.nodes.get(k)?.name ?? '');
+    return { method: 'ANY', host: apiHostFor(node.host, appState?.api_hosts ?? []), path: `/${folders.map((f) => `${f}/`).join('')}*` };
+  };
+
   const nodeItems = (node: TreeBranch): MenuItem[] => [
-    { label: 'Expand all below', onSelect: () => setOpen(new Set([...open, ...branchKeys(node)])) },
+    breakpointItem(nodeMatch(node), node.kind === 'host' ? 'Breakpoint on this host' : 'Breakpoint on this folder'),
+    { label: 'Expand all below', onSelect: () => setOpen(new Set([...open, ...branchKeys(node)])), divided: true },
     {
       label: 'Collapse all below',
       onSelect: () => {

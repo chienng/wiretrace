@@ -11,6 +11,7 @@ import { trafficSize } from '../logic/wsMessages';
 import { decryptChoices, decryptMenuLabel, decryptOff, hostPort, isTunnel, openFor, tunnelTag } from '../logic/hosts';
 import { mapLocalOff } from '../logic/mapLocal';
 import { deviceText } from '../logic/proxyDevices';
+import { breakpointRule, findBreakpoint, newRuleId, requestMatch, type RequestMatch } from '../logic/rules';
 import { useData, useDispatch, useStore } from '../store';
 import type { FlowDetail, FlowSummary, TrafficRow, TunnelRow } from '../types';
 import { ContextMenu, type MenuAt, type MenuItem } from './ContextMenu';
@@ -18,6 +19,7 @@ import { Modal } from './Modal';
 import { VirtualList } from './VirtualList';
 
 export const TRAFFIC_ROW_HEIGHT = 28;
+const NOT_API_HOST = "Rules apply only to the preset's API hosts";
 
 interface RowProps {
   flow: FlowSummary;
@@ -175,16 +177,36 @@ export interface MenuActions {
 
 /** The request and encrypted-connection menus, and Replay's confirmation, shared by List and Tree. */
 export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: MenuActions) {
-  const { appState } = useStore();
+  const { appState, rules } = useStore();
   const { viewing } = useData();
   const dispatch = useDispatch();
   const [menu, setMenu] = useState<{ row: TunnelRow; at: MenuAt } | null>(null);
   const [flowMenu, setFlowMenu] = useState<{ flow: FlowSummary; at: MenuAt } | null>(null);
   const [confirmReplay, setConfirmReplay] = useState<FlowSummary | null>(null);
+  const [rulesError, setRulesError] = useState<string | null>(null);
 
+  /** Breakpoint items read the rules from the store; a menu refreshes them as it opens. */
+  const loadRules = useCallback(() => {
+    if (viewing) return;
+    api
+      .rules()
+      .then((r) => {
+        setRulesError(null);
+        dispatch({ type: 'rules', rules: r });
+      })
+      .catch((e: unknown) => {
+        if (!(e instanceof ForbiddenError)) setRulesError(e instanceof ApiError ? e.message : 'Could not load the rules');
+      });
+  }, [viewing, dispatch]);
   const openMenu = useCallback((row: TunnelRow, at: MenuAt) => setMenu({ row, at }), []);
   const closeMenu = useCallback(() => setMenu(null), []);
-  const openFlowMenu = useCallback((flow: FlowSummary, at: MenuAt) => setFlowMenu({ flow, at }), []);
+  const openFlowMenu = useCallback(
+    (flow: FlowSummary, at: MenuAt) => {
+      setFlowMenu({ flow, at });
+      loadRules();
+    },
+    [loadRules],
+  );
   const closeFlowMenu = useCallback(() => setFlowMenu(null), []);
   const toast = (text: string) => dispatch({ type: 'toast', text });
 
@@ -214,12 +236,39 @@ export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: Menu
     }
   };
 
+  /** Adds a request-only pause rule at the top of the rules, or deletes the one already on `match`. */
+  const toggleBreakpoint = async (match: RequestMatch) => {
+    if (!rules) return;
+    const existing = findBreakpoint(rules.rules, match);
+    const rule = existing ?? breakpointRule(match, newRuleId());
+    const next = existing ? rules.rules.filter((r) => r.id !== existing.id) : [rule, ...rules.rules];
+    try {
+      dispatch({ type: 'rules', rules: await api.putRules(rules.revision, next) });
+      toast(existing ? `Removed the rule ${rule.name}` : `Added the rule ${rule.name} at the top of Rules: matching requests wait at the request`);
+    } catch (e) {
+      if (e instanceof ForbiddenError) return;
+      if (e instanceof ApiError && e.status === 409) loadRules();
+      toast(e instanceof ApiError ? e.message : 'Could not save the rules');
+    }
+  };
+
+  /** Breakpoint, or Remove breakpoint when an enabled pause rule is on exactly `match` (spec 028, slice D). */
+  const breakpointItem = (match: RequestMatch, label: string): MenuItem => {
+    const reason = newRuleOff(viewing) ?? (match.host ? null : NOT_API_HOST) ?? (rules ? null : (rulesError ?? 'Loading the rules…'));
+    return {
+      label: rules && findBreakpoint(rules.rules, match) ? 'Remove breakpoint' : label,
+      onSelect: () => void toggleBreakpoint(match),
+      ...(reason ? { disabledReason: reason } : {}),
+    };
+  };
+
   const flowMenuItems = (flow: FlowSummary): MenuItem[] => {
     const off = (reason: string | null) => (reason ? { disabledReason: reason } : {});
     return [
       { label: 'Map local…', onSelect: () => onMapLocal(flow), ...off(mapLocalOff(flow, viewing)) },
       { label: 'Copy as mock', onSelect: () => void copyMock(flow), ...off(copyMockOff(flow)) },
       { label: 'New rule from this request', onSelect: () => dispatch({ type: 'newRuleFrom', flow }), ...off(newRuleOff(viewing)), divided: true },
+      breakpointItem(requestMatch(flow, appState?.api_hosts ?? []), 'Breakpoint'),
       {
         label: 'Replay',
         onSelect: () => (SAFE_METHODS.has(flow.method.toUpperCase()) ? void replay(flow) : setConfirmReplay(flow)),
@@ -265,7 +314,7 @@ export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: Menu
       )}
     </>
   );
-  return { openFlowMenu, openTunnelMenu: openMenu, menus };
+  return { openFlowMenu, openTunnelMenu: openMenu, menus, loadRules, breakpointItem };
 }
 
 interface Props extends MenuActions {
