@@ -2,6 +2,7 @@ import { useRef, useState, type CSSProperties } from 'react';
 import { activeChips, type ChipKind, type HostCount, type QuickFilter } from '../logic/filters';
 import { storeShowEncrypted } from '../logic/hosts';
 import { LIST_MIN, LIST_MIN_DEFAULT, TRAFFIC_DETAIL, TRAFFIC_SIDEBAR, useBoxWidth, usePaneWidth } from '../logic/paneWidth';
+import { loadSidebarHidden, storeSidebarHidden } from '../logic/viewPrefs';
 import { browserStorage } from '../storage';
 import { useDispatch, useStore } from '../store';
 import type { FlowSummary, TrafficRow, TunnelRow } from '../types';
@@ -35,8 +36,14 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
   // The detail panel gives way before the sidebar when the window is too narrow for both. Only a
   // detail width the tester chose may take the list below its default minimum.
   const sidebar = usePaneWidth(TRAFFIC_SIDEBAR, size.box - LIST_MIN_DEFAULT, size.window);
-  const detail = usePaneWidth(TRAFFIC_DETAIL, size.box - LIST_MIN - sidebar.width, size.window, size.box - LIST_MIN_DEFAULT - sidebar.width);
-  const widths = { '--sidebar-w': `${sidebar.width}px`, '--detail-w': `${detail.width}px` } as CSSProperties;
+  const [sidebarHidden, setSidebarHidden] = useState(() => loadSidebarHidden(browserStorage()));
+  const hideSidebar = (hidden: boolean) => {
+    setSidebarHidden(hidden);
+    storeSidebarHidden(browserStorage(), hidden);
+  };
+  const sidebarWidth = sidebarHidden ? 0 : sidebar.width;
+  const detail = usePaneWidth(TRAFFIC_DETAIL, size.box - LIST_MIN - sidebarWidth, size.window, size.box - LIST_MIN_DEFAULT - sidebarWidth);
+  const widths = { '--sidebar-w': `${sidebarWidth}px`, '--detail-w': `${detail.width}px` } as CSSProperties;
   const patch = (p: Partial<typeof ui>) => dispatch({ type: 'ui', patch: p });
   const chips = activeChips({ quick: ui.quick, host: ui.host, client: ui.client, text: ui.search }, appState?.default_filter ?? '');
   const remove = (kind: ChipKind) => {
@@ -52,16 +59,31 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
 
   return (
     <>
-      <div className="main-body" ref={bodyRef} style={widths}>
-        <Sidebar
-          counts={counts}
-          hosts={hosts}
-          encryptedHosts={encryptedHosts}
-          clients={clients}
-          onDecrypt={(host, choice) => setDecrypting({ host, choice })}
-        />
+      <div className={`main-body${sidebarHidden ? ' no-sidebar' : ''}`} ref={bodyRef} style={widths}>
+        {!sidebarHidden && (
+          <div className="side-wrap" id="traffic-sidebar">
+            <Sidebar
+              counts={counts}
+              hosts={hosts}
+              encryptedHosts={encryptedHosts}
+              clients={clients}
+              onDecrypt={(host, choice) => setDecrypting({ host, choice })}
+            />
+          </div>
+        )}
         <div className="traffic">
           <div className="filterbar">
+            <button
+              type="button"
+              className="btn side-toggle"
+              aria-expanded={!sidebarHidden}
+              aria-controls={sidebarHidden ? undefined : 'traffic-sidebar'}
+              aria-label={sidebarHidden ? 'Show the sidebar' : 'Hide the sidebar'}
+              title={sidebarHidden ? 'Show the sidebar' : 'Hide the sidebar'}
+              onClick={() => hideSidebar(!sidebarHidden)}
+            >
+              {sidebarHidden ? '»' : '«'}
+            </button>
             <div className="search">
               <svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true">
                 <circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" strokeWidth="1.6" />
@@ -111,7 +133,7 @@ export function TrafficView({ rows, selected, selectedTunnel, counts, hosts, enc
         ) : (
           <DetailPanel flow={selected} onMapLocal={setMapping} />
         )}
-        <Splitter label="Resize the sidebar" edge="start" pane={sidebar} />
+        {!sidebarHidden && <Splitter label="Resize the sidebar" edge="start" pane={sidebar} />}
         <Splitter label="Resize the request details" edge="end" pane={detail} />
       </div>
       <LogStrip requestId={selected?.request_id ?? null} />

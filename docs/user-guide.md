@@ -898,6 +898,10 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   name to use it again, or *Rename* and *Delete* next to it. Saved filters belong to the
   preset and are kept by your browser, not in a file: another browser, a private window or
   clearing the browser's data starts with none.
+  **«**, at the left end of the bar above the list, hides the sidebar so the list and the
+  detail panel get its width; **»** brings it back at the width it had. The filters you chose
+  in it stay on while it is hidden, and their chips stay above the list. Your browser
+  remembers the choice.
 - **Search box.** Plain text matches the method, the URL and the status. From three
   characters, it also looks in header names and values and in the request and response
   bodies, ignoring case; those matches appear a moment later. Text that starts with `~` or `!`
