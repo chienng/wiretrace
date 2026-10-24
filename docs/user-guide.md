@@ -948,7 +948,8 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   payment). *Compare…* shows this request next to another one, by default the previous request
   with the same method and path: status and headers side by side, and the body as a list of
   changed JSON keys, or line by line when it is not JSON. *New rule* opens the Rules view with
-  a rule for this request's method, host and path. *Report* opens *Report bug* for this
+  a rule for this request's method, host and path; *Cancel*, next to *Save rule*, drops that
+  rule and brings you back to the request in Traffic. *Report* opens *Report bug* for this
   request.
 - **Logs.** A strip at the bottom of the Traffic view and the full *Logs* view show the
   *Device logs*, *App logs* and *Crashes* tabs with line counts, level chips, a text filter

@@ -36,7 +36,8 @@ const TYPE_FILTERS: { id: TypeFilter; label: string }[] = [
 ];
 
 /** The rule being edited: a saved one (by id) or a new one not saved yet. */
-type Editing = { kind: 'saved'; id: string } | { kind: 'new'; rule: Rule } | null;
+/** `from` is the Traffic request a new rule was made from, which Cancel goes back to. */
+type Editing = { kind: 'saved'; id: string } | { kind: 'new'; rule: Rule; from: string | null } | null;
 
 function RuleItem({ rule, selected, onSelect, onToggle, busy }: { rule: Rule; selected: boolean; onSelect: () => void; onToggle?: (on: boolean) => void; busy: boolean }) {
   return (
@@ -111,7 +112,7 @@ export function RulesView() {
 
   useEffect(() => {
     if (!ui.ruleSeed || !rules) return;
-    setEditing({ kind: 'new', rule: ruleFromFlow(ui.ruleSeed, rules.api_hosts, newRuleId()) });
+    setEditing({ kind: 'new', rule: ruleFromFlow(ui.ruleSeed, rules.api_hosts, newRuleId()), from: ui.ruleSeed.id });
     dispatch({ type: 'ui', patch: { ruleSeed: null } });
   }, [ui.ruleSeed, rules, dispatch]);
 
@@ -157,6 +158,12 @@ export function RulesView() {
       toast('Rule saved: it applies from the next request');
     }
     return problem;
+  };
+
+  const from = editing?.kind === 'new' ? editing.from : null;
+  const onCancel = () => {
+    setEditing(null);
+    if (from !== null) dispatch({ type: 'ui', patch: { view: 'traffic', selectedFlowId: from } });
   };
 
   const onToggle = async (rule: Rule, on: boolean) => {
@@ -234,7 +241,7 @@ export function RulesView() {
         <button type="button" className="btn small" onClick={() => download(`wiretrace-rules-${preset || 'preset'}.json`, exportJson(list))} disabled={!rules || list.length === 0}>
           Export…
         </button>
-        <button type="button" className="btn small primary" onClick={() => setEditing({ kind: 'new', rule: emptyRule(newRuleId()) })} disabled={!rules}>
+        <button type="button" className="btn small primary" onClick={() => setEditing({ kind: 'new', rule: emptyRule(newRuleId()), from: null })} disabled={!rules}>
           + New rule
         </button>
         <input
@@ -316,6 +323,8 @@ export function RulesView() {
             testTargetLabel={testTargetLabel}
             onSave={onSave}
             onDelete={() => void onDelete()}
+            onCancel={onCancel}
+            cancelHint={from !== null ? 'Discard this rule and go back to the request in Traffic' : 'Discard this rule'}
             onRearm={() => void onRearm()}
             onTest={onTest}
           />

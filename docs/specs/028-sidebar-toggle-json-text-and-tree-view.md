@@ -8,8 +8,8 @@
 - **Repo**: wiretrace
 - **Status**: approved (2026-10-24). Orchestrator choices: all three slices; JSON Text is the
   body re-indented with literals kept as sent (not the raw bytes); in Tree, hosts start open
-  and folders closed. Added the same day by the Orchestrator, from a QA screenshot: padding for
-  the Map local form.
+  and folders closed. Added the same day by the Orchestrator, from QA: padding for the Map local
+  form, and a way back from a new rule (Cancel, back to the request it came from).
 - **Tier**: M (one repo, UI only, ~14 files plus docs). Gates E, A, R, P. B, C n/a (no data,
   network or log change; the choices stay in the browser). D n/a (one repo).
 - **Branch**: `feature/sidebar-json-text-tree`, from `main` (`4bb020c`). One commit per slice;
@@ -111,6 +111,15 @@ QA testers come from Charles and asked for three things:
       and like *Report bug*. Today `.sheet.wide` has no padding and only its title is padded, so
       everything below the title touches the sheet's edge.
 
+### A way back from a new rule
+
+- [ ] A new rule's editor has **Cancel** beside *Save rule* (a saved rule keeps *Delete* and
+      gets no Cancel). Cancel drops the unsaved rule. When the rule came from a request
+      (*New rule* in the detail panel or *New rule from this request* in the right-click menu),
+      Cancel also goes back to Traffic with that request selected; after *+ New rule* it stays
+      in Rules. Its tooltip says which. Today the only way out is the title bar's *Traffic* tab,
+      which leaves the draft behind without a word.
+
 ### Docs
 
 - [ ] The user guide's *Wiretrace window* section describes the sidebar toggle, JSON Text, and
@@ -199,6 +208,8 @@ Tests (`tree.test.ts`):
   counts; a selected leaf has `aria-selected="true"`.
 - `ui/src/components/MapLocalDialog.test.tsx` (static render): the content and the footer are
   inside the padded `.ml-form` of the wide sheet.
+- `ui/src/components/RuleEditor.test.tsx` (static render): a new rule shows Cancel with its
+  tooltip and no Delete; a saved rule shows Delete and no Cancel.
 - Existing `paneWidth.test.ts` and `LogStrip.test.ts` keep passing unchanged.
 
 ## Files expected to change
@@ -217,7 +228,10 @@ Tests (`tree.test.ts`):
 5. Map local padding: `ui/src/components/MapLocalDialog.tsx` (content in a `.ml-form` wrapper,
    + new `MapLocalDialog.test.tsx`); `ui/src/styles.css` (`.ml-form` padding, and a wide sheet's
    `.lead` padded like its title).
-6. `docs/user-guide.md`; `ui/dist` rebuilt.
+6. Way back from a new rule: `ui/src/components/RuleEditor.tsx` (Cancel for a new rule, + new
+   `RuleEditor.test.tsx`); `ui/src/components/RulesView.tsx` (a new rule remembers the request
+   it came from; Cancel goes back to it).
+7. `docs/user-guide.md`; `ui/dist` rebuilt.
 
 ## Out of scope
 
@@ -248,3 +262,6 @@ Tests (`tree.test.ts`):
    List as before.
 7. Right-click a request → **Map local…**: the text under the title, the fields, the blue box,
    the warning and the footer are inset from the sheet's edges like the title.
+8. Select a request, click **New rule**, then **Cancel**: back in Traffic with that request
+   selected, and no new rule in Rules. In Rules, **+ New rule** then **Cancel**: still in Rules,
+   the editor empty.
