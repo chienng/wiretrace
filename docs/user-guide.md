@@ -1,8 +1,8 @@
 # Wiretrace — Installation and usage guide
 
-For QA engineers. Covers Wiretrace **0.10.0**, on Intel and Apple silicon Macs.
+For QA engineers. Covers Wiretrace **0.10.1**, on Intel and Apple silicon Macs.
 
-What 0.10.0 gives you: a one-command install (`./install`) that needs no admin rights, a setup
+What 0.10.1 gives you: a one-command install (`./install`) that needs no admin rights, a setup
 check (`./wiretrace doctor`), project presets, and `./wiretrace start --preset …`, which
 captures only your project's API traffic and saves each session in its own folder with a
 HAR file (passwords, tokens and cookies masked), mocks, injected faults, and the app's logs
@@ -18,7 +18,10 @@ it from the window); the hosts the app reaches without decryption, listed as *En
 breakpoints; and rules that rewrite requests and responses, save a response as a mock (*Map
 local*) or send requests to another server (*Map remote*); and a data folder,
 `~/Library/Application Support/Wiretrace`, for your presets, rules, mocks and sessions, so an
-update is unpack and `./install` (*Your data folder*, Part 1).
+update is unpack and `./install` (*Your data folder*, Part 1). New in 0.10.1: drag the borders
+between the sidebar, the list and the detail panel to resize them (the detail panel opens
+wider and can take most of the window), hide the log strip under Traffic, and a *Messages*
+tab for WebSocket rows (*Pane widths*, *Logs* and *Detail panel*, under *Wiretrace window*).
 
 **Upgrading from 0.9.1?** The Wi-Fi proxy port is now **8889**, not 8888: set each phone's
 Wi-Fi proxy to `<Mac IP>:8889`, or change the port back to 8888 in the window (sidebar,
@@ -44,11 +47,11 @@ you test. Run each command in **Terminal** (Applications → Utilities → Termi
 - Internet access to `github.com`, `pypi.org`, and `dl.google.com` during the install.
   If the company network blocks one of them, ask IT.
 - The release file and its checksum, from the Releases page, saved in Downloads: either
-  [wiretrace-0.10.0-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz.sha256)
+  [wiretrace-0.10.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.tar.gz)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.tar.gz.sha256)
   (the faster one), or
-  [wiretrace-0.10.0-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg)
-  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg.sha256).
+  [wiretrace-0.10.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.dmg)
+  and [its `.sha256`](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.dmg.sha256).
   Both contain the same files and work on Intel and Apple silicon Macs.
 
 ### Step 1 — Check the download
@@ -58,8 +61,8 @@ for the file you have:
 
 ```bash
 cd ~/Downloads
-shasum -a 256 -c wiretrace-0.10.0-macos.dmg.sha256
-shasum -a 256 -c wiretrace-0.10.0-macos.tar.gz.sha256
+shasum -a 256 -c wiretrace-0.10.1-macos.dmg.sha256
+shasum -a 256 -c wiretrace-0.10.1-macos.tar.gz.sha256
 ```
 
 It must print `…: OK`. If it prints `FAILED`, download the file again and do not continue.
@@ -74,11 +77,11 @@ access that folder, and cleaning up Downloads would delete it. If Downloads alre
 `wiretrace`. In Terminal, the same in one step:
 
 ```bash
-tar -xzf ~/Downloads/wiretrace-0.10.0-macos.tar.gz -C ~
+tar -xzf ~/Downloads/wiretrace-0.10.1-macos.tar.gz -C ~
 ```
 
 **From the `.dmg`:** double-click it, drag the `wiretrace` folder onto your home folder (in
-Finder: **Go → Home**), then eject **Wiretrace 0.10.0**. Wiretrace cannot run from the disk
+Finder: **Go → Home**), then eject **Wiretrace 0.10.1**. Wiretrace cannot run from the disk
 image itself, because the image is read-only.
 
 Either way you now have `~/wiretrace`.
@@ -866,7 +869,7 @@ the save is refused and the sheet loads the new file. The name of a preset canno
 **What each area does.**
 
 - **Title bar.** It starts with the Wiretrace mark and name, with the version under the name
-  (for example *v0.10.0*); the browser tab shows the same mark. *Traffic* and *Logs* switch
+  (for example *v0.10.1*); the browser tab shows the same mark. *Traffic* and *Logs* switch
   between the two views; *Logs* shows the number of
   crashes. It shows how long the session has been recording. *Pause* freezes the list while
   you read it and counts the new requests; meanwhile the title bar shows *List paused*

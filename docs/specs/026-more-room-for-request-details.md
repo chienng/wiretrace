@@ -10,7 +10,7 @@
 - **Tier**: M (one repo, UI only, ~7 files plus docs). Gates E, A, R, P. B, C n/a (no data,
   network or log change; the choices stay in the browser). D n/a (one repo).
 - **Branch**: `feature/more-room-for-details`, from `main` (spec 024 merged in `8e4e118`).
-- **Version**: rides with the next release (0.11.0).
+- **Version**: 0.10.1.
 - **Builds on**: spec 024 (resizable panes), implemented. Its defaults, handles, keys and
   storage stay; only the two limits below change.
 

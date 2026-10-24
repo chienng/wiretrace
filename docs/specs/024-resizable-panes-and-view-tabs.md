@@ -11,7 +11,7 @@
   network or log change; widths stay in the browser). D n/a (one repo).
 - **Branch**: `feature/resizable-panes`, from `main` once `feature/readme-screenshots-0.10` is
   merged. Independent of spec 023.
-- **Version**: rides with the next release (0.11.0).
+- **Version**: 0.10.1.
 
 ## Goal
 

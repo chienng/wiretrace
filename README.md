@@ -3,7 +3,7 @@
 A macOS tool that shows and changes the API traffic of iOS and Android apps, next to the
 app's logs. Built on [mitmproxy](https://mitmproxy.org). Installs without a Mac admin account.
 
-Current version: **0.10.0**.
+Current version: **0.10.1**.
 
 **Using an older version?** 0.8.0 and 0.7.2 have no `./install` and no Wiretrace app, so
 the steps below do not work for them. Follow the guide of your version instead:
@@ -53,7 +53,7 @@ for checks, options and reports; run them one block at a time. The
 [user guide](docs/user-guide.md) explains each step in more detail.
 
 **1. Download**
-[wiretrace-0.10.0-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz)
+[wiretrace-0.10.1-macos.tar.gz](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.tar.gz)
 and double-click it in Downloads. A `wiretrace` folder appears next to it.
 
 **2. Drag the `wiretrace` folder onto your home folder.** In Finder, choose **Go → Home** in
@@ -63,15 +63,15 @@ folder.) If Downloads already had a `wiretrace` folder, the new one is `wiretrac
 that one and rename it `wiretrace`.
 
 Optional, to check the download: also save
-[wiretrace-0.10.0-macos.tar.gz.sha256](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.tar.gz.sha256)
+[wiretrace-0.10.1-macos.tar.gz.sha256](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.tar.gz.sha256)
 in Downloads and run this. It must print `OK`; if it prints `FAILED`, download again.
 
 ```bash
-cd ~/Downloads && shasum -a 256 -c wiretrace-0.10.0-macos.tar.gz.sha256
+cd ~/Downloads && shasum -a 256 -c wiretrace-0.10.1-macos.tar.gz.sha256
 ```
 
 The same files also come as
-[wiretrace-0.10.0-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.0/wiretrace-0.10.0-macos.dmg):
+[wiretrace-0.10.1-macos.dmg](https://github.com/chienng/wiretrace/releases/download/v0.10.1/wiretrace-0.10.1-macos.dmg):
 double-click it and drag the `wiretrace` folder from its window onto your home folder (a
 slower copy), then eject it.
 
