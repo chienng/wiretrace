@@ -1602,7 +1602,7 @@ def test_an_unknown_ui_is_an_error(monkeypatch, capsys):
 def test_the_version_is_0_7_2():
     from cli import __version__
 
-    assert __version__ == "0.10.1"
+    assert __version__ == "0.10.2"
 
 
 def test_main_sets_a_private_umask(monkeypatch):
