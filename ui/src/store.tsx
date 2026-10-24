@@ -54,6 +54,8 @@ export interface UiState {
   treeOpen: ReadonlySet<string>;
   /** Hosts the tree has listed: a host is opened once, when first seen. */
   treeSeen: ReadonlySet<string>;
+  /** A replay sent and not listed yet, selected when it is unless the selection moved from `from` (spec 028, slice E). */
+  pendingReplay: { id: string; from: string | null } | null;
 }
 
 export interface Store {
@@ -101,7 +103,9 @@ export type Action =
   | { type: 'viewClosed' }
   | { type: 'switching'; to: string }
   | { type: 'toast'; text: string }
-  | { type: 'treeHostsSeen'; keys: string[] };
+  | { type: 'treeHostsSeen'; keys: string[] }
+  /** `from` is the selection when Replay was clicked. */
+  | { type: 'replaySent'; id: string; from: string | null };
 
 export const initialStore: Store = {
   phase: 'connecting',
@@ -145,12 +149,26 @@ export const initialStore: Store = {
     ruleSeed: null,
     treeOpen: new Set(),
     treeSeen: new Set(),
+    pendingReplay: null,
   },
 };
 
 let toastId = 0;
 
 export function reducer(store: Store, action: Action): Store {
+  return settleReplay(reduce(store, action));
+}
+
+/** Selects a pending replay once it is listed; any other selection in between cancels it. */
+function settleReplay(store: Store): Store {
+  const pending = store.ui.pendingReplay;
+  if (!pending) return store;
+  if (store.ui.selectedFlowId !== pending.from) return { ...store, ui: { ...store.ui, pendingReplay: null } };
+  if (!store.flows.some((f) => f.id === pending.id)) return store;
+  return { ...store, ui: { ...store.ui, selectedFlowId: pending.id, pendingReplay: null } };
+}
+
+function reduce(store: Store, action: Action): Store {
   switch (action.type) {
     case 'phase':
       return store.phase === action.phase ? store : { ...store, phase: action.phase };
@@ -276,6 +294,10 @@ export function reducer(store: Store, action: Action): Store {
         ...store,
         ui: { ...store.ui, treeSeen: new Set([...store.ui.treeSeen, ...fresh]), treeOpen: new Set([...store.ui.treeOpen, ...fresh]) },
       };
+    }
+    case 'replaySent': {
+      const frozen = store.ui.frozen ? new Set(store.ui.frozen).add(action.id) : null;
+      return { ...store, ui: { ...store.ui, frozen, pendingReplay: { id: action.id, from: action.from } } };
     }
   }
 }

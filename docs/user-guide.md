@@ -956,7 +956,9 @@ the save is refused and the sheet loads the new file. The name of a preset canno
   listing each change, applied or skipped and why; a mapped request's header says *Sent to*
   and the server it went to, while *Host* stays the one the app asked for.
   *Replay* sends the request to the backend again; it appears as a new row with the *REPLAY*
-  badge and a link back to the original. Any method other than GET, HEAD and OPTIONS asks you
+  badge, a blue stripe at its left edge and a link back to the original. As soon as it is
+  listed, the window selects it and scrolls to it (also while Pause is on), unless you have
+  selected another request in the meantime. Any method other than GET, HEAD and OPTIONS asks you
   to confirm first, because the backend does the action again (another order, another
   payment). *Compare…* shows this request next to another one, by default the previous request
   with the same method and path: status and headers side by side, and the body as a list of

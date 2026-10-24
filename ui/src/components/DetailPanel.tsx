@@ -312,7 +312,8 @@ export function DetailPanel({ flow, onMapLocal }: { flow: FlowSummary | null; on
     setConfirming(false);
     setReplaying(true);
     try {
-      await api.replay(flow.id);
+      const sent = await api.replay(flow.id);
+      dispatch({ type: 'replaySent', id: sent.id, from: flow.id });
       dispatch({ type: 'toast', text: 'Replay sent: it is listed as a new request marked REPLAY' });
     } catch (e) {
       dispatch({ type: 'toast', text: e instanceof ApiError ? e.message : 'Replay failed' });

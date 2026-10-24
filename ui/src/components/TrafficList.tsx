@@ -47,7 +47,7 @@ function PausedFor({ since }: { since: number | null }) {
 
 /** Classes a request row carries in List and Tree. */
 export function flowRowClass(flow: FlowSummary, selected: boolean): string {
-  return `frow${selected ? ' sel' : ''}${isError(flow) ? ' err' : ''}${flow.paused ? ' paused' : ''}`;
+  return `frow${selected ? ' sel' : ''}${isError(flow) ? ' err' : ''}${flow.paused ? ' paused' : ''}${flow.replay_of ? ' replay' : ''}`;
 }
 
 export function FlowStatus({ flow }: { flow: FlowSummary }) {
@@ -177,7 +177,7 @@ export interface MenuActions {
 
 /** The request and encrypted-connection menus, and Replay's confirmation, shared by List and Tree. */
 export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: MenuActions) {
-  const { appState, rules } = useStore();
+  const { appState, rules, ui } = useStore();
   const { viewing } = useData();
   const dispatch = useDispatch();
   const [menu, setMenu] = useState<{ row: TunnelRow; at: MenuAt } | null>(null);
@@ -228,8 +228,10 @@ export function useTrafficMenus({ onDecrypt, onHideEncrypted, onMapLocal }: Menu
     });
   const replay = async (flow: FlowSummary) => {
     setConfirmReplay(null);
+    const from = ui.selectedFlowId;
     try {
-      await api.replay(flow.id);
+      const sent = await api.replay(flow.id);
+      dispatch({ type: 'replaySent', id: sent.id, from });
       toast('Replay sent: it is listed as a new request marked REPLAY');
     } catch (e) {
       if (!(e instanceof ForbiddenError)) toast(e instanceof ApiError ? e.message : 'Replay failed');
