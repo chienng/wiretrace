@@ -252,6 +252,12 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
   .flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 96px 54px 56px minmax(120px, 1fr) 100px; }
   .flows-wrap.dev .h-dev, .flows-wrap.dev .c-dev { display: none; }
 }
+/* Below the default list minimum only a widened detail panel can take it (spec 026). The list's
+   1 px border is outside the container, so a 480 px list measures 479 px here. */
+@container (max-width: 478px) {
+  .fhead, .frow, .flows-wrap.dev .fhead, .flows-wrap.dev .frow { grid-template-columns: 54px 56px minmax(120px, 1fr) 100px; }
+  .fhead .h-time, .frow .c-time { display: none; }
+}
 .c-dev { font: 11.5px var(--mono); color: var(--muted); }
 .c-dev.mac { font-family: -apple-system, sans-serif; font-size: 12px; }
 
@@ -303,6 +309,8 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 
 /* ---------- log strip ---------- */
 .logs { border-top: 1px solid var(--line-strong); height: 210px; flex: none; display: flex; flex-direction: column; }
+.logs.collapsed { height: auto; }
+.logs.collapsed .logs-bar { border-bottom: 0; }
 .logs-bar { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #fafafa; border-bottom: 1px solid var(--line); }
 .logs-bar .tab { padding: 4px 8px; border-bottom: none; border-radius: 6px; border: 1px solid transparent; }
 .logs-bar .tab.on { background: #fff; border-color: var(--line-strong); color: var(--text); }
@@ -351,7 +359,13 @@ body.resizing, body.resizing * { cursor: col-resize !important; user-select: non
 .lvchip.on.E { background: var(--red-soft); color: var(--red); }
 .lvchip.on.F { background: #5c0011; color: #fff; }
 .lg-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) var(--detail-w, 430px); position: relative; }
-.lg-list { min-height: 0; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); }
+.lg-list { min-height: 0; min-width: 0; display: flex; flex-direction: column; border-right: 1px solid var(--line); container-type: inline-size; overflow: hidden; }
+.lg-list .lhead, .lg-list .lrow { grid-template-columns: 96px 24px 150px minmax(120px, 1fr) 22px; }
+/* A log list under 560 px (559 px inside its border) drops Time, which stays in the line detail. */
+@container (max-width: 558px) {
+  .lg-list .lhead, .lg-list .lrow { grid-template-columns: 24px 150px minmax(120px, 1fr) 22px; }
+  .lg-list .h-time, .lg-list .lrow .t { display: none; }
+}
 .lhead { font: 500 11.5px/1 -apple-system, sans-serif; color: var(--muted); padding-top: 7px; padding-bottom: 7px; background: #fafafa; border-bottom: 1px solid var(--line); }
 .lg-rows { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .lg-detail { padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; overflow: auto; min-height: 0; }
