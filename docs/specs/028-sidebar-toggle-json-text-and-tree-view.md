@@ -8,7 +8,8 @@
 - **Repo**: wiretrace
 - **Status**: approved (2026-10-24). Orchestrator choices: all three slices; JSON Text is the
   body re-indented with literals kept as sent (not the raw bytes); in Tree, hosts start open
-  and folders closed.
+  and folders closed. Added the same day by the Orchestrator, from a QA screenshot: padding for
+  the Map local form.
 - **Tier**: M (one repo, UI only, ~14 files plus docs). Gates E, A, R, P. B, C n/a (no data,
   network or log change; the choices stay in the browser). D n/a (one repo).
 - **Branch**: `feature/sidebar-json-text-tree`, from `main` (`4bb020c`). One commit per slice;
@@ -103,6 +104,13 @@ QA testers come from Charles and asked for three things:
 - [ ] Narrow widths: duration and size columns hide below the same container widths as List;
       name and badges stay.
 
+### Map local dialog padding
+
+- [ ] In *Map local*, the lead line, the fields, the *Answer with it now* box, the warning and the
+      footer start 26 px from the sheet's left edge and end 26 px from its right, like the title
+      and like *Report bug*. Today `.sheet.wide` has no padding and only its title is padded, so
+      everything below the title touches the sheet's edge.
+
 ### Docs
 
 - [ ] The user guide's *Wiretrace window* section describes the sidebar toggle, JSON Text, and
@@ -189,6 +197,8 @@ Tests (`tree.test.ts`):
 - `ui/src/logic/tree.test.ts`: as in *Design*.
 - `ui/src/components/TrafficTree.test.tsx` (static render): host, folder and leaf rows with the
   counts; a selected leaf has `aria-selected="true"`.
+- `ui/src/components/MapLocalDialog.test.tsx` (static render): the content and the footer are
+  inside the padded `.ml-form` of the wide sheet.
 - Existing `paneWidth.test.ts` and `LogStrip.test.ts` keep passing unchanged.
 
 ## Files expected to change
@@ -204,7 +214,10 @@ Tests (`tree.test.ts`):
    `ui/src/components/VirtualList.tsx` (optional `onKey`); `ui/src/components/TrafficView.tsx`
    (List | Tree control, renders one or the other); `ui/src/store.tsx` and `ui/src/types.ts`
    if needed (`ui.treeOpen`); `ui/src/styles.css` (tree rows, indentation, container steps).
-5. `docs/user-guide.md`; `ui/dist` rebuilt.
+5. Map local padding: `ui/src/components/MapLocalDialog.tsx` (content in a `.ml-form` wrapper,
+   + new `MapLocalDialog.test.tsx`); `ui/src/styles.css` (`.ml-form` padding, and a wide sheet's
+   `.lead` padded like its title).
+6. `docs/user-guide.md`; `ui/dist` rebuilt.
 
 ## Out of scope
 
@@ -233,3 +246,5 @@ Tests (`tree.test.ts`):
 5. While recording, watch a folder: new requests are appended, nothing above moves.
 6. Select a request in **List**, switch to **Tree**: it is open and in view. Switch back:
    List as before.
+7. Right-click a request → **Map local…**: the text under the title, the fields, the blue box,
+   the warning and the footer are inset from the sheet's edges like the title.
