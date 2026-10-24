@@ -31,6 +31,7 @@ describe('LogStrip', () => {
     expect(html).toContain('Device logs');
     expect(html).toContain('App logs');
     expect(html).not.toContain('id="log-strip-lines"');
+    expect(html).not.toContain('aria-controls=');
     expect(html).not.toContain('aria-label="Filter logs"');
   });
 });

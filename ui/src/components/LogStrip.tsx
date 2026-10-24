@@ -86,7 +86,7 @@ export function LogStrip({ requestId }: { requestId: string | null }) {
           type="button"
           className="btn small"
           aria-expanded={!hidden}
-          aria-controls="log-strip-lines"
+          aria-controls={hidden ? undefined : 'log-strip-lines'}
           title={hidden ? 'Show the log strip' : "Hide the log strip; the Logs view and the detail panel's Logs tab still show the lines"}
           onClick={() => hide(!hidden)}
         >

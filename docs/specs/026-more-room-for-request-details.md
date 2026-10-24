@@ -59,7 +59,9 @@ QA finds too narrow for JSON bodies and long headers. Vertically, the log strip 
       170 px).
 - [ ] **Show logs**, or a click on either tab while collapsed, opens the strip again, on that
       tab, with its level, filter and Auto-scroll as they were.
-- [ ] The button has `aria-expanded` and `aria-controls` pointing at the line list, and a
+- [ ] The button has `aria-expanded`, and `aria-controls` pointing at the line list while the
+      list is shown (the attribute is dropped while collapsed, because the list is not
+      rendered then; Gate A, 2026-10-24), and a
       tooltip: "Hide the log strip; the Logs view and the detail panel's Logs tab still show
       the lines" / "Show the log strip".
 - [ ] The choice is remembered by the browser (localStorage `wiretrace.pane.traffic.logs`,
