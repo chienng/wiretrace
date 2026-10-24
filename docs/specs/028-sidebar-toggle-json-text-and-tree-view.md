@@ -9,7 +9,9 @@
 - **Status**: approved (2026-10-24). Orchestrator choices: all three slices; JSON Text is the
   body re-indented with literals kept as sent (not the raw bytes); in Tree, hosts start open
   and folders closed. Added the same day by the Orchestrator, from QA: padding for the Map local
-  form, and a way back from a new rule (Cancel, back to the request it came from).
+  form, and a way back from a new rule (Cancel, back to the request it came from); slices D
+  (Breakpoint from the right-click menu, request only) and E (replay rows stand out; Replay
+  selects the replay), after C.
 - **Tier**: M (one repo, UI only, ~14 files plus docs). Gates E, A, R, P. B, C n/a (no data,
   network or log change; the choices stay in the browser). D n/a (one repo).
 - **Branch**: `feature/sidebar-json-text-tree`, from `main` (`4bb020c`). One commit per slice;
@@ -103,6 +105,65 @@ QA testers come from Charles and asked for three things:
       existing `VirtualList` at the list's 28 px row height.
 - [ ] Narrow widths: duration and size columns hide below the same container widths as List;
       name and badges stay.
+
+### Slice D — Breakpoint from the right-click menu
+
+Added by the Orchestrator after QA asked how to set a breakpoint, with Charles' right-click
+**Breakpoints** as the reference; approved 2026-10-24 with the request only (Charles pauses
+both). Today it takes four steps: *New rule from this request*, action *Pause at a
+breakpoint*, pick the phase, *Save rule*.
+
+- [ ] Right-click a request (List or Tree) → **Breakpoint**: adds, in one click, a rule at the
+      top of the rules that pauses that request's method, host and path (query ignored, as
+      *New rule from this request* does) at **the request** only (`pause_at: request`). A toast
+      says so and names the rule; the rule is then like any other in Rules, where the tester can
+      switch it to the response or both.
+- [ ] In Tree, right-click a host → **Breakpoint on this host** (any method, path `/*`) and a
+      folder → **Breakpoint on this folder** (any method, `/v1/users/*`).
+- [ ] When an enabled pause rule with exactly that method, host and path (no body text) already
+      exists, the item reads **Remove breakpoint** and deletes that rule.
+- [ ] Disabled, with the reason as a tooltip, like the other items: a host that is not one of
+      the preset's API hosts, a previous session, an encrypted connection (no item at all).
+- [ ] A rules file changed meanwhile is reloaded and the click is refused with the message the
+      Rules view gives today; nothing is overwritten.
+- Files: `ui/src/logic/rules.ts` (`breakpointRule`, `findBreakpoint`, + tests in
+  `rules.test.ts`); `ui/src/components/TrafficList.tsx` (`useTrafficMenus`: the item);
+  `ui/src/components/TrafficTree.tsx` (host and folder items); `docs/user-guide.md`.
+- Manual test: right-click a request → **Breakpoint**; make the request again from the app: it
+  waits, orange and *PAUSED*. Right-click it → **Remove breakpoint**; the next one goes through.
+- Out of scope: a ⏸ icon or stripe on held rows, a "changed by rules" filter, marking requests
+  a rule matches before it fires (offered and not chosen, 2026-10-24).
+
+### Slice E — Replays stand out, and Replay shows its result
+
+Added and approved by the Orchestrator, 2026-10-24: a replay carries only the *REPLAY* badge at
+the right end of its row, which a narrow badges column or other badges can hide.
+
+- [ ] A replay row (`replay_of` set) has a 3 px blue stripe (`--blue`) at its left edge, in List
+      and on Tree leaves; the *REPLAY* badge stays. On the selected (blue) row the stripe is white
+      at 60 % so it still shows; on a paused (orange) row it shows over the orange.
+- [ ] Other rows, encrypted connections and the original request are unchanged.
+- [ ] After **Replay** succeeds (detail panel or right-click menu), the window selects the new
+      replay as soon as it is listed: the detail panel shows it (*REPLAY*, *Replay of the
+      original request*) and the list scrolls to it (in Tree its host and folders open). QA
+      reported that nothing showed the replay was sent: the panel stayed on the original, the
+      row was added out of view, and the only sign was a 2.2 s toast at the bottom. The server
+      already answers with the replay's `id`. If the tester selects another request before the
+      replay is listed, the replay is not selected. While Pause is on, the replay is listed
+      anyway, as *Open in Traffic* does. The toast stays.
+- Files: `ui/src/components/TrafficList.tsx` (`replay` class on the row; the menu's Replay
+  selects the replay); `ui/src/components/TrafficTree.tsx` (same class on leaves);
+  `ui/src/components/DetailPanel.tsx` (Replay selects the replay); `ui/src/store.tsx`
+  (`replaySent`: select now if listed, else when the flow arrives; a selection in between
+  cancels it); `ui/src/styles.css`; + `ui/src/store.test.ts` (selected now; selected on arrival;
+  cancelled by another selection; added to the paused list), a new
+  `ui/src/components/TrafficList.test.tsx` (static render: a replay row has the class, another
+  row does not), and the same check in `TrafficTree.test.tsx`.
+- Manual test: replay a request (its detail panel, **Replay**): the replay is selected and in
+  view, with the stripe, in List and in Tree; scroll the list up and replay from the right-click
+  menu: the list scrolls down to it.
+- Out of scope: marking the original request, putting *REPLAY* first among the badges, a
+  *Replays* quick filter (offered and not chosen).
 
 ### Map local dialog padding
 
